@@ -1,0 +1,74 @@
+{
+  "accounts": [
+    {
+      "id": 1,
+      "email": "RuthMoorekx@outlook.com",
+      "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
+      "refresh_token_enc": "M.C552_SN1.0.U.-CuT7ytzcx8ZrK852RPU57HcDP!MPbDlg9v9AZwWVnfnB2vibgXrOgGPgf7wMvLJ6JdhwbLR!QfBBoKRBTwq4aUgy8qN!LMW1BBB2TlwzhcHTgt0GAxWzOaZaf9yXidxKSmZcNflvxw3ihX169cEYp2AQaIAteCwt0nM1OEfMA8bdY54mxYWQUGHcF4IsqiwHRAbpAZ!W1JSE6elf5T4EiJbjtHS02roiueXBaJAc!jkDeqYwmYY0xbFhKRByPBHBLHr3WpFcGuGOkK7qHru8SP1JNHK1D5UNA*FQ3zRt3GCcmach!*q46c3Yhdxp4JqPQoY!8zUEUO0TfFtx26gBR7qeP4edKs5rlSO4HruBbkT8h6cbIhM0C2B98i7LaE8tMg$$",
+      "status": "authorized",
+      "import_seq": 1,
+      "last_active_at": "2025-10-28T02:25:34Z",
+      "delta_link": null,
+      "created_at": "2025-10-28T12:22:10.709Z",
+      "updated_at": "2025-10-28T13:09:41.066Z"
+    }
+  ],
+  "codes": [
+    {
+      "id": 1,
+      "account_id": 1,
+      "code": "directly",
+      "source": null,
+      "subject": "Sign in to Perplexity",
+      "sender": "team@mail.perplexity.ai",
+      "received_at": "2025-10-28T02:25:34Z",
+      "raw_message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutQAAAA==",
+      "created_at": "2025-10-28T12:45:55.051Z"
+    },
+    {
+      "id": 2,
+      "account_id": 1,
+      "code": "503481",
+      "source": null,
+      "subject": "Sign in to Perplexity",
+      "sender": "team@mail.perplexity.ai",
+      "received_at": "2025-10-28T02:25:34Z",
+      "raw_message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutQAAAA==",
+      "created_at": "2025-10-28T12:56:03.757Z"
+    },
+    {
+      "id": 3,
+      "account_id": 1,
+      "code": "503481",
+      "source": null,
+      "subject": "Sign in to Perplexity",
+      "sender": "team@mail.perplexity.ai",
+      "received_at": "2025-10-28T02:25:34Z",
+      "raw_message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutQAAAA==",
+      "created_at": "2025-10-28T13:00:46.328Z"
+    },
+    {
+      "id": 4,
+      "account_id": 1,
+      "code": "503481",
+      "source": null,
+      "subject": "Sign in to Perplexity",
+      "sender": "team@mail.perplexity.ai",
+      "received_at": "2025-10-28T02:25:34Z",
+      "raw_message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutQAAAA==",
+      "created_at": "2025-10-28T13:09:41.066Z"
+    }
+  ],
+  "messages": [
+    {
+      "id": 1,
+      "account_id": 1,
+      "message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutQAAAA==",
+      "received_at": "2025-10-28T02:25:34Z",
+      "subject": "Sign in to Perplexity",
+      "sender": "team@mail.perplexity.ai",
+      "has_code": 1,
+      "created_at": "2025-10-28T12:45:55.051Z"
+    }
+  ]
+}
