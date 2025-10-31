@@ -39,4 +39,4 @@ coverage/
 
 # Temporary folders
 tmp/
-temp/
+temp/data/mailmanager.db
