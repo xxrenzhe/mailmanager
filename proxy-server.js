@@ -11,6 +11,10 @@ const EventEmitter = require('events');
 const app = express();
 const PORT = process.env.PROXY_PORT || 3001;
 
+// 性能和安全配置
+const MAX_CONNECTIONS = 1000; // 最大SSE连接数限制
+const MEMORY_THRESHOLD = 100 * 1024 * 1024; // 100MB内存阈值
+
 // 添加body parser中间件
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -21,6 +25,21 @@ app.use(express.static(__dirname));
 // 创建事件发射器用于SSE
 const eventEmitter = new EventEmitter();
 let connectedClients = new Set();
+
+// 内存监控和清理机制
+setInterval(() => {
+    const memoryUsage = process.memoryUsage();
+    if (memoryUsage.heapUsed > MEMORY_THRESHOLD) {
+        console.log(`[内存监控] 内存使用过高: ${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB，触发清理`);
+        // 强制垃圾回收（如果可用）
+        if (global.gc) {
+            global.gc();
+        }
+        // 清理可能的事件监听器泄漏
+        eventEmitter.removeAllListeners();
+        console.log(`[内存监控] 已清理事件监听器，当前连接数: ${connectedClients.size}`);
+    }
+}, 60000); // 每分钟检查一次
 
 // 配置CORS - 允许所有本地访问
 app.use(cors({
@@ -492,8 +511,17 @@ async function fetchNewEmails(accountId, accountInfo, sessionId) {
     }
 }
 
-// SSE事件流端点 - 实时更新
+// SSE事件流端点 - 实时更新（带连接数限制）
 app.get('/api/events/stream/:sessionId?', (req, res) => {
+    // 检查连接数限制
+    if (connectedClients.size >= MAX_CONNECTIONS) {
+        console.log(`[SSE] 连接数超限: ${connectedClients.size}/${MAX_CONNECTIONS}，拒绝新连接`);
+        return res.status(429).json({
+            error: 'Too many connections',
+            message: `服务器连接数已达上限 (${MAX_CONNECTIONS})，请稍后重试`
+        });
+    }
+
     // 设置SSE响应头
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -678,6 +706,144 @@ app.post('/api/accounts/validate', async (req, res) => {
             success: false,
             status: 'error',
             message: '验证过程出错'
+        });
+    }
+});
+
+// 批量账户验证API（提升导入性能）
+app.post('/api/accounts/batch-validate', async (req, res) => {
+    const { sessionId, accounts } = req.body;
+
+    if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid accounts data'
+        });
+    }
+
+    try {
+        console.log(`[批量验证] 开始批量验证 ${accounts.length} 个账户`);
+
+        const results = [];
+        const batchSize = 3; // 并发限制
+
+        // 分批处理，避免API限制
+        for (let i = 0; i < accounts.length; i += batchSize) {
+            const batch = accounts.slice(i, i + batchSize);
+
+            const batchPromises = batch.map(async (account) => {
+                try {
+                    const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            client_id: account.client_id,
+                            refresh_token: account.refresh_token,
+                            grant_type: 'refresh_token',
+                            scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All'
+                        })
+                    });
+
+                    if (!response.ok) {
+                        return {
+                            account_id: account.id,
+                            email: account.email,
+                            success: false,
+                            status: 'reauth_needed',
+                            message: 'Token验证失败'
+                        };
+                    }
+
+                    const tokenData = await response.json();
+
+                    // 获取最近3���邮件
+                    const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=3&$orderby=ReceivedDateTime desc', {
+                        headers: {
+                            'Authorization': `Bearer ${tokenData.access_token}`,
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    let emails = [];
+                    let verificationCodes = [];
+
+                    if (emailResponse.ok) {
+                        const emailData = await emailResponse.json();
+                        emails = emailData.value || [];
+
+                        // 提取验证码
+                        if (emails.length > 0) {
+                            const extractResults = extractVerificationCodesAdvanced(emails);
+                            verificationCodes = extractResults.map(r => ({
+                                code: r.code,
+                                sender: r.sender,
+                                received_at: r.received_at,
+                                score: r.score || 1.0
+                            }));
+
+                            // 发送验证码发现事件
+                            verificationCodes.forEach(result => {
+                                eventEmitter.emit(`verification_code_found_${sessionId || 'default'}`, {
+                                    type: 'verification_code_found',
+                                    sessionId: sessionId || 'default',
+                                    account_id: account.id,
+                                    code: result.code,
+                                    sender: result.sender,
+                                    received_at: result.received_at,
+                                    score: result.score,
+                                    timestamp: new Date().toISOString()
+                                });
+                            });
+                        }
+                    }
+
+                    return {
+                        account_id: account.id,
+                        email: account.email,
+                        success: true,
+                        status: 'authorized',
+                        message: `验证成功，找到 ${emails.length} 封邮件`,
+                        emails_count: emails.length,
+                        verification_codes: verificationCodes,
+                        access_token: tokenData.access_token,
+                        refresh_token: tokenData.refresh_token
+                    };
+
+                } catch (error) {
+                    console.error(`[批量验证] 账户 ${account.email} 验证失败:`, error);
+                    return {
+                        account_id: account.id,
+                        email: account.email,
+                        success: false,
+                        status: 'error',
+                        message: '验证过程出错'
+                    };
+                }
+            });
+
+            const batchResults = await Promise.allSettled(batchPromises);
+            results.push(...batchResults);
+
+            // 批次间短暂延迟，避免API限制
+            if (i + batchSize < accounts.length) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const totalCodes = results.reduce((sum, r) => sum + (r.verification_codes?.length || 0), 0);
+
+        res.json({
+            success: true,
+            message: `批量验证完成：${successCount}/${accounts.length} 成功，共找到 ${totalCodes} 个验证码`,
+            results: results
+        });
+
+    } catch (error) {
+        console.error('[批量验证] 批量验证失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '批量验证过程出错'
         });
     }
 });

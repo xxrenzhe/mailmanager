@@ -610,18 +610,7 @@
                         }
                     };
 
-                    this.eventSource.onerror = (error) => {
-                        console.error('[SSE] 连接错误:', error);
-                        this.sseConnected = false;
-                        this.showNotification('实时更新连接断开，尝试重连...', 'warning');
-
-                        // 自动重连
-                        setTimeout(() => {
-                            if (!this.sseConnected) {
-                                this.connectSSE();
-                            }
-                        }, 5000);
-                    };
+                    this.eventSource.onerror = () => this.reconnectSSE();
 
                 } catch (error) {
                     console.error('[SSE] 连接失败:', error);
@@ -793,6 +782,26 @@
                     const percentage = Math.round((data.processed / data.total) * 100);
                     console.log(`[异步导入] 进度: ${percentage}% (${data.processed}/${data.total})`);
                 }
+            }
+
+            // 简化的SSE重连机制
+            reconnectSSE() {
+                console.log('[SSE] 启动重连机制');
+                this.sseConnected = false;
+                this.showNotification('实时更新连接断开，尝试重连...', 'warning');
+
+                // 清理现有连接
+                if (this.eventSource) {
+                    this.eventSource.close();
+                    this.eventSource = null;
+                }
+
+                // 延迟重连
+                setTimeout(() => {
+                    if (!this.sseConnected) {
+                        this.connectSSE();
+                    }
+                }, 5000);
             }
 
             // 断开SSE连接
@@ -2329,146 +2338,83 @@
                 }
             }
 
-            // 高效异步导入验证系统
+            // 高效异步导入验证系统 - 使用批量API优化
             async startAsyncImportValidation() {
                 const pendingAccounts = this.accounts.filter(acc => acc.status === 'pending');
                 if (pendingAccounts.length === 0) return;
 
-                console.log(`[异步验证] 开始处理 ${pendingAccounts.length} 个待验证账户`);
+                console.log(`[异步验证] 开始批量处理 ${pendingAccounts.length} 个待验证账户`);
 
-                // 并发控制：最多3个同时验证
-                const CONCURRENT_LIMIT = 3;
-                const batches = [];
-                for (let i = 0; i < pendingAccounts.length; i += CONCURRENT_LIMIT) {
-                    batches.push(pendingAccounts.slice(i, i + CONCURRENT_LIMIT));
-                }
-
-                let processedCount = 0;
-
-                for (const batch of batches) {
-                    const promises = batch.map(account => this.validateAccountAsync(account));
-                    await Promise.allSettled(promises);
-                    processedCount += batch.length;
-
-                    // 发送进度更新
-                    this.sendImportProgress(processedCount, pendingAccounts.length, batch[0]?.email);
-
-                    // 批次间短暂延迟，避免API限制
-                    if (processedCount < pendingAccounts.length) {
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                    }
-                }
-
-                console.log(`[异步验证] 完成，共处理 ${processedCount} 个账户`);
-            }
-
-            async validateAccountAsync(account) {
-                const startTime = Date.now();
                 try {
-                    console.log(`[异步验证] 开始验证 ${account.email}`);
+                    // 准备批量验证数据
+                    const accountsToValidate = pendingAccounts.map(account => ({
+                        id: account.id,
+                        email: account.email,
+                        client_id: account.client_id,
+                        refresh_token: account.refresh_token
+                    }));
 
-                    // 使用简单统一的验证API（KISS原则）
-                    const response = await fetch('/api/accounts/validate', {
+                    // 调用批量验证API - 后端自动控制并发
+                    const response = await fetch('/api/accounts/batch-validate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            sessionId: this.sessionId,
-                            accountId: account.id,
-                            client_id: account.client_id,
-                            refresh_token: account.refresh_token
+                            session_id: this.sessionId,
+                            accounts: accountsToValidate
                         })
                     });
 
-                    if (response.ok) {
-                        const result = await response.json();
-
-                        if (result.success) {
-                            // 更新账户的token信息
-                            if (result.access_token) {
-                                account.access_token = result.access_token;
-                            }
-                            if (result.refresh_token) {
-                                account.refresh_token = result.refresh_token;
-                            }
-
-                            this.updateAccountStatus(account.id, 'authorized');
-
-                            // 添加验证码到账户
-                            if (result.verification_codes && result.verification_codes.length > 0) {
-                                result.verification_codes.forEach(code => {
-                                    this.addVerificationCode(account.id, code);
-                                });
-                            }
-
-                            console.log(`[异步验证] ${account.email} 成功 (${Date.now() - startTime}ms) - ${result.message}`);
-                        } else {
-                            this.updateAccountStatus(account.id, result.status || 'reauth_needed');
-                            console.log(`[异步验证] ${account.email} 失败: ${result.message} (${Date.now() - startTime}ms)`);
-                        }
-                    } else {
-                        this.updateAccountStatus(account.id, 'reauth_needed');
-                        console.warn(`[异步验证] ${account.email} API调用失败: ${response.status}`);
+                    if (!response.ok) {
+                        throw new Error(`批量验证失败: ${response.status}`);
                     }
 
-                } catch (error) {
-                    console.warn(`[异步验证] ${account.email} 异常:`, error.message);
-                    this.updateAccountStatus(account.id, 'reauth_needed');
-                }
-            }
+                    const result = await response.json();
+                    console.log(`[异步验证] 批量验证完成`, result);
 
-            async quickTokenCheck(clientId, refreshToken) {
-                if (!clientId || !refreshToken) return false;
+                    // 更新账户状态
+                    let successCount = 0;
+                    let failureCount = 0;
 
-                try {
-                    const response = await fetch('/api/microsoft/token', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            client_id: clientId,
-                            refresh_token: refreshToken,
-                            grant_type: 'refresh_token'
-                        })
-                    });
-                    return response.ok;
-                } catch (error) {
-                    return false;
-                }
-            }
-
-            async fetchRecentEmailsFast(account) {
-                try {
-                    const tokenResponse = await fetch('/api/microsoft/token', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            client_id: account.client_id,
-                            refresh_token: account.refresh_token,
-                            grant_type: 'refresh_token'
-                        })
-                    });
-
-                    if (!tokenResponse.ok) return [];
-
-                    const tokenData = await tokenResponse.json();
-
-                    // 获取最近5封邮件，平衡验证码发现率和API调用效率
-                    const emailResponse = await fetch(`/api/outlook/api/v2.0/me/messages?$top=5&$orderby=ReceivedDateTime desc`, {
-                        headers: {
-                            'Authorization': `Bearer ${tokenData.access_token}`,
-                            'Accept': 'application/json'
+                    result.results.forEach(accountResult => {
+                        const account = this.accounts.find(acc => acc.id === accountResult.account_id);
+                        if (account) {
+                            if (accountResult.success) {
+                                account.status = 'authorized';
+                                account.last_check = new Date().toISOString();
+                                if (accountResult.verification_codes && accountResult.verification_codes.length > 0) {
+                                    account.verification_codes = accountResult.verification_codes;
+                                }
+                                successCount++;
+                            } else {
+                                account.status = 'failed';
+                                account.error = accountResult.error;
+                                failureCount++;
+                            }
                         }
                     });
 
-                    if (!emailResponse.ok) return [];
+                    // 更新UI和存储
+                    this.updateStats();
+                    this.saveToStorage();
+                    this.renderAccounts();
 
-                    const emailData = await emailResponse.json();
-                    return emailData.value || [];
+                    // 发送完成进度
+                    this.sendImportProgress(pendingAccounts.length, pendingAccounts.length,
+                        `批量验证完成: ${successCount} 成功, ${failureCount} 失败`);
+
+                    console.log(`[异步验证] 批量处理完成: ${successCount} 成功, ${failureCount} 失败`);
 
                 } catch (error) {
-                    console.warn(`[快速邮件获取] ${account.email} 失败:`, error.message);
-                    return [];
+                    console.error(`[异步验证] 批量验证失败:`, error);
+                    this.sendImportProgress(0, pendingAccounts.length, `批量验证失败: ${error.message}`);
                 }
             }
+
+            // validateAccountAsync 方法已删除 - 现在使用批量验证API /api/accounts/batch-validate
+
+            // quickTokenCheck 方法已删除 - 现在使用 /api/accounts/validate 统一API
+
+            // fetchRecentEmailsFast 方法已删除 - 现在使用 /api/accounts/validate 统一API
 
             sendImportProgress(processed, total, currentEmail) {
                 if (this.eventSource && this.sseConnected) {
