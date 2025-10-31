@@ -38,11 +38,11 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.IMAGE_NAME }}
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          ghcr.io/xxrenzhe/mailmanager:prod-latest
-          ghcr.io/xxrenzhe/mailmanager:dev-latest
-          ghcr.io/xxrenzhe/mailmanager:prod-{{version}}
+          type=ref,event=branch,suffix=-prod
+          type=ref,event=branch,suffix=-dev
+          type=semver,pattern={{version}}
         flavor: |
           latest=false
 
