@@ -1,0 +1,2975 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MailManager - 简化管理界面</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .status-pending { color: #F59E0B; }
+        .status-authorized { color: #10B981; }
+        .status-error { color: #EF4444; }
+        .monitoring { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .code-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .text-code {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 1em;
+        }
+        .simple-pagination {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .page-btn {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            background: white;
+            color: #374151;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .page-btn:hover {
+            background: #f3f4f6;
+        }
+        .page-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .search-filter {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            width: 200px;
+        }
+        .code-cell {
+            min-width: 120px;
+            white-space: nowrap;
+        }
+        .stats-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #1f2937;
+        }
+        .stat-label {
+            color: #6b7280;
+            font-size: 1.1em;
+            font-weight: 500;
+        }
+        .refresh-loading {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-6 max-w-7xl">
+        <!-- 头部 -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">
+                        <i class="fas fa-envelope mr-3"></i>MailManager
+                    </h1>
+                    <p class="text-lg text-gray-600 mt-2">简单高效的邮箱验证码管理</p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="showImportModal()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition">
+                        <i class="fas fa-file-import mr-1"></i>导入邮箱
+                    </button>
+                    <button onclick="refreshData()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition" title="重新加载数据并连接实时更新">
+                        <i class="fas fa-redo mr-1"></i>重新加载
+                    </button>
+                    <button onclick="confirmClearAllData()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition">
+                        <i class="fas fa-trash-alt mr-1"></i>清空数据
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="stats-row" style="position: relative;">
+            <div class="stat-item">
+                <div class="stat-number" id="totalAccounts">0</div>
+                <div class="stat-label">总账户数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number text-green-600" id="authorizedCount">0</div>
+                <div class="stat-label">已授权</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number text-yellow-600" id="pendingCount">0</div>
+                <div class="stat-label">待授权</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number text-purple-600" id="monitoringCount">0</div>
+                <div class="stat-label">监控中</div>
+            </div>
+            <!-- 系统功能和安全说明 - 在统计行右侧空白处 -->
+            <div class="system-info" style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); max-width: 600px;">
+                <div style="display: flex; gap: 30px;">
+                    <!-- 核心功能 -->
+                    <div>
+                        <div style="display: flex; align-items: center; font-size: 16px; color: #374151; margin-bottom: 6px;">
+                            <i class="fas fa-star" style="color: #f59e0b; margin-right: 8px; font-size: 14px;"></i>
+                            <span style="font-weight: 600;">核心功能:</span>
+                        </div>
+                        <div style="font-size: 14px; color: #6b7280; line-height: 1.5; margin-left: 22px;">
+                            <div>• 一键复制邮箱，自动监控更新验证码</div>
+                            <div>• 一键复制验证码，快速完成验证</div>
+                            <div>• 智能时间追踪，掌握邮箱活跃状态</div>
+                        </div>
+                    </div>
+
+                    <!-- 数据安全 -->
+                    <div>
+                        <div style="display: flex; align-items: center; font-size: 16px; color: #374151; margin-bottom: 6px;">
+                            <i class="fas fa-shield-alt" style="color: #10b981; margin-right: 8px; font-size: 14px;"></i>
+                            <span style="font-weight: 600;">数据安全:</span>
+                        </div>
+                        <div style="font-size: 14px; color: #6b7280; line-height: 1.5; margin-left: 22px;">
+                            <div>• 本地存储，数据仅保存在浏览器</div>
+                            <div>• 加密保护，敏感信息安全存储</div>
+                            <div>• 隐私安全，绝不上传任何服务器</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 搜索和过滤 -->
+        <div class="bg-white rounded-lg shadow-sm p-4 mb-6">
+            <div class="flex gap-4 items-center flex-wrap">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700">搜索:</label>
+                    <input type="text" id="searchInput" placeholder="邮箱地址"
+                           class="search-filter" onkeyup="filterAccounts()">
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700">状态:</label>
+                    <select id="statusFilter" class="search-filter" onchange="filterAccounts()">
+                        <option value="">全部</option>
+                        <option value="pending">待授权</option>
+                        <option value="authorized">已授权</option>
+                        <option value="reauth_needed">需重新授权</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700">每页显示:</label>
+                    <select id="pageSize" class="search-filter" onchange="changePageSize()">
+                        <option value="20">20</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- 账户列表 -->
+        <div class="bg-white rounded-lg shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-20" onclick="sortBySequence()">
+                                <span class="flex items-center gap-1">
+                                    序号
+                                    <i id="seqSortIcon" class="fas fa-sort text-gray-400"></i>
+                                </span>
+                            </th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24" onclick="sortByStatus()">
+                                <span class="flex items-center gap-1">
+                                    状态
+                                    <i id="statusSortIcon" class="fas fa-sort text-gray-400"></i>
+                                </span>
+                            </th>
+                            <th class="px-4 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-80" onclick="sortByEmail()">
+                                <span class="flex items-center gap-1">
+                                    邮箱地址
+                                    <i id="emailSortIcon" class="fas fa-sort text-gray-400"></i>
+                                </span>
+                            </th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-16">选中</th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-36">最新验证码</th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-36" onclick="sortByCodeTime()">
+                                <span class="flex items-center gap-1">
+                                    验证码时间
+                                    <i id="codeTimeSortIcon" class="fas fa-sort text-gray-400"></i>
+                                </span>
+                            </th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28" onclick="sortBySender()">
+                                <span class="flex items-center gap-1">
+                                    发件人
+                                    <i id="senderSortIcon" class="fas fa-sort text-gray-400"></i>
+                                </span>
+                            </th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-32">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountsTableBody" class="bg-white divide-y divide-gray-200">
+                        <!-- 账户数据将在这里加载 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 分页控制 -->
+            <div class="px-6 py-4 border-t bg-gray-50">
+                <div class="flex justify-between items-center">
+                    <div class="text-sm text-gray-700">
+                        显示 <span id="showingFrom">0</span> - <span id="showingTo">0</span>
+                        共 <span id="totalRecords">0</span> 条记录
+                    </div>
+                    <div class="simple-pagination" id="pagination">
+                        <!-- 分页按钮将在这里生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入邮箱弹窗 -->
+    <div id="importModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-900">
+                    <i class="fas fa-file-import mr-2"></i>导入邮箱
+                </h2>
+                <button onclick="hideImportModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    邮箱信息格式
+                </label>
+                <div class="bg-gray-50 p-3 rounded border text-sm text-gray-600 mb-4">
+                    格式：邮箱地址----密码----Client ID----Refresh Token<br>
+                    （每行一个邮箱信息，使用四个----分隔，支持智能UUID识别）
+                </div>
+
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    请输入邮箱信息（一行一个）
+                </label>
+                <textarea
+                    id="importTextarea"
+                    rows="10"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="example@outlook.com----password123----client_id_value----refresh_token_value&#10;user2@outlook.com----password456----client_id_2----refresh_token_2"
+                ></textarea>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button onclick="hideImportModal()"
+                        class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded-md">
+                    取消
+                </button>
+                <button onclick="importEmails()"
+                        class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                    <i class="fas fa-file-import mr-1"></i>导入邮箱
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入进度弹窗 -->
+    <div id="importProgressModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6 w-96">
+            <!-- 导入中状态 -->
+            <div id="importingStatus">
+                <h3 class="text-lg font-bold text-gray-900 mb-4">
+                    <i class="fas fa-spinner fa-spin mr-2"></i>正在导入邮箱
+                </h3>
+                <div class="mb-4">
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2" id="progressText">准备导入...</p>
+                </div>
+                <div class="text-sm text-gray-500">
+                    <span id="progressCount">0/0</span> 个邮箱
+                </div>
+            </div>
+
+            <!-- 完成状态 -->
+            <div id="importCompleteStatus" class="hidden">
+                <div class="text-center mb-4">
+                    <div class="inline-block bg-green-100 rounded-full p-3">
+                        <i class="fas fa-check text-green-500 text-2xl"></i>
+                    </div>
+                </div>
+                <h3 class="text-lg font-bold text-gray-900 mb-2 text-center">导入完成</h3>
+                <div class="mb-4 text-center">
+                    <p class="text-gray-700" id="importResultText"></p>
+                </div>
+            </div>
+
+            <!-- 关闭按钮 -->
+            <div id="importCloseButton" class="hidden">
+                <button onclick="closeImportProgressModal()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
+                    确定
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 清空数据确认弹窗 -->
+    <div id="clearDataModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="text-center">
+                <div class="mb-4">
+                    <div class="inline-block bg-red-100 rounded-full p-3">
+                        <i class="fas fa-exclamation-triangle text-red-500 text-2xl"></i>
+                    </div>
+                </div>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">确认清空所有数据</h3>
+                <div class="text-sm text-gray-600 mb-6">
+                    此操作将永久删除所有邮箱账户、验证码和消息记录，<br>
+                    包括邮箱配置、验证码历史、导入记录等所有数据。<br><br>
+                    <strong class="text-red-600">此操作不可恢复！</strong><br>
+                    请确认您真的要继续吗？
+                </div>
+
+                <div class="mb-4">
+                    <label class="flex items-center justify-center text-sm text-gray-700">
+                        <input type="checkbox" id="confirmCheckbox" class="mr-2">
+                        我确认要清空所有数据，并了解此操作不可恢复
+                    </label>
+                </div>
+
+                <div class="flex gap-3 justify-center">
+                    <button onclick="hideClearDataModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">
+                        取消
+                    </button>
+                    <button
+                        id="confirmClearButton"
+                        onclick="clearAllData()"
+                        disabled
+                        class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                        <i class="fas fa-trash-alt mr-1"></i>确认清空
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 监听确认复选框变化
+        document.getElementById('confirmCheckbox').addEventListener('change', function() {
+            const confirmButton = document.getElementById('confirmClearButton');
+            confirmButton.disabled = !this.checked;
+        });
+
+        // 邮箱序列编号管理器（移植自原系统）
+        class EmailSequenceManager {
+            constructor() {
+                this.sequenceCache = new Map(); // 缓存邮箱->编号映射
+                this.maxSequenceCache = 0; // 缓存当前最大编号
+                this.initialized = false;
+            }
+
+            // 初始化序列管理器
+            async initialize(accounts = []) {
+                if (this.initialized) return;
+
+                console.log('[EmailSequence] 初始化邮箱序列管理器...');
+
+                // 预加载现有邮箱的编号映射
+                this.loadExistingSequences(accounts);
+
+                this.initialized = true;
+                console.log(`[EmailSequence] 初始化完成，当前最大编号: ${this.maxSequenceCache}`);
+            }
+
+            // 加载现有序列
+            loadExistingSequences(accounts) {
+                this.sequenceCache.clear();
+                let maxSequence = 0;
+
+                accounts.forEach(account => {
+                    if (account.sequence && account.sequence > 0) {
+                        const normalizedEmail = account.email.toLowerCase();
+                        this.sequenceCache.set(normalizedEmail, account.sequence);
+                        maxSequence = Math.max(maxSequence, account.sequence);
+                    }
+                });
+
+                this.maxSequenceCache = maxSequence;
+                console.log(`[EmailSequence] 加载了 ${this.sequenceCache.size} 个邮箱编号映射`);
+            }
+
+            // 为邮箱分配序列号
+            async assignSequence(email) {
+                await this.initialize();
+
+                const normalizedEmail = email.toLowerCase().trim();
+
+                // 检查缓存中是否已有编号
+                if (this.sequenceCache.has(normalizedEmail)) {
+                    const existingSequence = this.sequenceCache.get(normalizedEmail);
+                    console.log(`[EmailSequence] 邮箱 ${email} 使用现有编号: ${existingSequence}`);
+                    return existingSequence;
+                }
+
+                // 分配新编号
+                const newSequence = this.maxSequenceCache + 1;
+
+                // 更新缓存
+                this.sequenceCache.set(normalizedEmail, newSequence);
+                this.maxSequenceCache = newSequence;
+
+                console.log(`[EmailSequence] 邮箱 ${email} 分配新编号: ${newSequence}`);
+                return newSequence;
+            }
+
+            // 批量分配序列号
+            async batchAssignSequences(emails) {
+                await this.initialize();
+
+                const result = new Map();
+                const newAssignments = [];
+
+                // 第一遍：检查已有编号
+                for (const email of emails) {
+                    const normalizedEmail = email.toLowerCase().trim();
+
+                    if (this.sequenceCache.has(normalizedEmail)) {
+                        const existingSequence = this.sequenceCache.get(normalizedEmail);
+                        result.set(email, existingSequence);
+                    } else {
+                        // 需要分配新编号
+                        newAssignments.push(email);
+                    }
+                }
+
+                // 第二遍：批量分配新编号
+                if (newAssignments.length > 0) {
+                    const startSequence = this.maxSequenceCache + 1;
+
+                    for (let i = 0; i < newAssignments.length; i++) {
+                        const email = newAssignments[i];
+                        const newSequence = startSequence + i;
+                        const normalizedEmail = email.toLowerCase().trim();
+
+                        // 直接更新缓存
+                        this.sequenceCache.set(normalizedEmail, newSequence);
+                        result.set(email, newSequence);
+                    }
+
+                    // 更新最大编号缓存
+                    this.maxSequenceCache = startSequence + newAssignments.length - 1;
+
+                    console.log(`[EmailSequence] 批量分配 ${newAssignments.length} 个新编号: ${startSequence}-${this.maxSequenceCache}`);
+                }
+
+                return result;
+            }
+
+            // 获取邮箱的编号
+            getEmailSequence(email) {
+                const normalizedEmail = email.toLowerCase().trim();
+                return this.sequenceCache.get(normalizedEmail) || null;
+            }
+
+            // 重建编号序列
+            rebuildSequence(accounts) {
+                console.log('[EmailSequence] 开始重建编号序列...');
+
+                this.sequenceCache.clear();
+                let currentSequence = 0;
+
+                // 按创建时间排序所有账户
+                const sortedAccounts = accounts.sort((a, b) =>
+                    new Date(a.created_at) - new Date(b.created_at)
+                );
+
+                const seenEmails = new Set();
+
+                for (const account of sortedAccounts) {
+                    const normalizedEmail = account.email.toLowerCase().trim();
+
+                    if (!seenEmails.has(normalizedEmail)) {
+                        currentSequence++;
+                        this.sequenceCache.set(normalizedEmail, currentSequence);
+                        account.sequence = currentSequence; // 直接更新账户对象的序列号
+                        seenEmails.add(normalizedEmail);
+                    }
+                }
+
+                this.maxSequenceCache = currentSequence;
+                console.log(`[EmailSequence] 重建完成，处理了 ${seenEmails.size} 个邮箱，当前最大编号: ${currentSequence}`);
+
+                return currentSequence;
+            }
+
+            // 获取编号统计信息
+            getSequenceStats() {
+                return {
+                    total_accounts: this.sequenceCache.size,
+                    max_sequence: this.maxSequenceCache,
+                    next_sequence: this.maxSequenceCache + 1
+                };
+            }
+        }
+
+        // 简化的邮件管理器 - 遵循KISS原则
+        class SimpleMailManager {
+            constructor() {
+                this.accounts = [];
+                this.filteredAccounts = [];
+                this.sortField = 'sequence';
+                this.sortDirection = 'asc';
+                this.currentPage = 1;
+                this.pageSize = 50;
+
+                // 邮件序列管理器
+                this.sequenceManager = new EmailSequenceManager();
+
+                // SSE实时更新系统
+                this.eventSource = null;
+                this.sseConnected = false;
+
+                this.init();
+            }
+
+            async init() {
+                await this.loadAccounts();
+                await this.sequenceManager.initialize(this.accounts);
+
+                // 启动SSE实时更新
+                this.connectSSE();
+
+                this.render();
+                this.updateStats();
+            }
+
+            // 连接SSE实时更新系统
+            connectSSE() {
+                if (this.eventSource) {
+                    this.eventSource.close();
+                }
+
+                try {
+                    console.log('[SSE] 正在连接实时更新服务...');
+                    this.eventSource = new EventSource('http://localhost:3001/api/events/stream');
+
+                    this.eventSource.onopen = () => {
+                        console.log('[SSE] 实时更新连接成功');
+                        this.sseConnected = true;
+                        this.showNotification('已连接到实时更新服务', 'success');
+                    };
+
+                    this.eventSource.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            this.handleSSEEvent(data);
+                        } catch (error) {
+                            console.error('[SSE] 解析事件数据失败:', error);
+                        }
+                    };
+
+                    this.eventSource.onerror = (error) => {
+                        console.error('[SSE] 连接错误:', error);
+                        this.sseConnected = false;
+                        this.showNotification('实时更新连接断开，尝试重连...', 'warning');
+
+                        // 自动重连
+                        setTimeout(() => {
+                            if (!this.sseConnected) {
+                                this.connectSSE();
+                            }
+                        }, 5000);
+                    };
+
+                } catch (error) {
+                    console.error('[SSE] 连接失败:', error);
+                    this.showNotification('无法连接实时更新服务', 'error');
+                }
+            }
+
+            // 处理SSE事件
+            handleSSEEvent(data) {
+                console.log('[SSE] 收到事件:', data);
+
+                switch (data.type) {
+                    case 'connection':
+                        console.log(`[SSE] 连接确认: ${data.message}`);
+                        break;
+
+                    case 'heartbeat':
+                        // 心跳事件，无需处理
+                        break;
+
+                    case 'monitoring_started':
+                        this.handleMonitoringStarted(data);
+                        break;
+
+                    case 'monitoring_progress':
+                        this.handleMonitoringProgress(data);
+                        break;
+
+                    case 'monitoring_ended':
+                        this.handleMonitoringEnded(data);
+                        break;
+
+                    case 'monitoring_error':
+                        this.handleMonitoringError(data);
+                        break;
+
+                    case 'verification_code_found':
+                        this.handleVerificationCodeFound(data);
+                        break;
+
+                    case 'account_status_changed':
+                        this.handleAccountStatusChanged(data);
+                        break;
+
+                    case 'bulk_import_progress':
+                        this.handleBulkImportProgress(data);
+                        break;
+
+                    default:
+                        console.log(`[SSE] 未知事件类型: ${data.type}`);
+                }
+            }
+
+            // 处理监控开始事件
+            handleMonitoringStarted(data) {
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    account.is_monitoring = true;
+                    this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
+                    this.showNotification(data.message, 'info');
+                }
+            }
+
+            // 处理监控进度事件
+            handleMonitoringProgress(data) {
+                console.log('[SSE] 监控进度:', data);
+                this.showNotification(data.message, 'info');
+            }
+
+            // 处理监控结束事件
+            handleMonitoringEnded(data) {
+                console.log('[SSE] 监控结束:', data);
+
+                // 更新账户监控状态
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    account.is_monitoring = false;
+                    this.saveAccounts();
+                    this.updateStats();
+                    this.render();
+                }
+
+                this.showNotification(data.message, 'success');
+            }
+
+            // 处理监控错误事件
+            handleMonitoringError(data) {
+                console.error('[SSE] 监控错误:', data);
+
+                // 更新账户监控状态
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    account.is_monitoring = false;
+                    this.saveAccounts();
+                    this.updateStats();
+                    this.render();
+                }
+
+                this.showError(data.message);
+            }
+
+            // 处理发现验证码事件
+            handleVerificationCodeFound(data) {
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    account.codes.unshift({
+                        code: data.code,
+                        sender: data.sender,
+                        received_at: data.received_at,
+                        score: data.score || 1.0
+                    });
+
+                    // 保持最多10个验证码
+                    if (account.codes.length > 10) {
+                        account.codes = account.codes.slice(0, 10);
+                    }
+
+                    account.updated_at = new Date().toISOString();
+                    this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
+                    this.showNotification(`收到新验证码: ${data.code} (${data.sender})`, 'success');
+                }
+            }
+
+            // 处理账户状态变化事件
+            handleAccountStatusChanged(data) {
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    account.status = data.new_status;
+                    account.updated_at = new Date().toISOString();
+                    this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
+                    const statusMessages = {
+                        'authorized': '账户授权成功',
+                        'reauth_needed': '账户需要重新授权',
+                        'error': '账户授权失败'
+                    };
+
+                    const message = statusMessages[data.new_status] || `账户状态更新为: ${data.new_status}`;
+                    this.showNotification(`${account.email}: ${message}`, data.new_status === 'authorized' ? 'success' : 'warning');
+                }
+            }
+
+            // 处理批量导入进度事件
+            handleBulkImportProgress(data) {
+                if (data.message) {
+                    console.log(`[Import] ${data.message}`);
+                }
+            }
+
+            // 断开SSE连接
+            disconnectSSE() {
+                if (this.eventSource) {
+                    this.eventSource.close();
+                    this.eventSource = null;
+                    this.sseConnected = false;
+                    console.log('[SSE] 实时更新连接已断开');
+                }
+            }
+
+            // 显示通知消息
+            showNotification(message, type = 'info') {
+                // 创建通知元素
+                const notification = document.createElement('div');
+                notification.className = `notification notification-${type} fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50 transform transition-all duration-300 translate-x-full`;
+
+                // 根据类型设置样式
+                const typeStyles = {
+                    'success': 'bg-green-500 text-white',
+                    'error': 'bg-red-500 text-white',
+                    'warning': 'bg-yellow-500 text-white',
+                    'info': 'bg-blue-500 text-white'
+                };
+
+                notification.className += ' ' + (typeStyles[type] || typeStyles.info);
+
+                // 设置通知内容
+                notification.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-${this.getNotificationIcon(type)}"></i>
+                        <span>${message}</span>
+                        <button onclick="this.parentElement.parentElement.remove()" class="ml-4 hover:opacity-75">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `;
+
+                // 添加到页面
+                document.body.appendChild(notification);
+
+                // 动画显示
+                setTimeout(() => {
+                    notification.classList.remove('translate-x-full');
+                    notification.classList.add('translate-x-0');
+                }, 100);
+
+                // 自动移除
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.classList.remove('translate-x-0');
+                        notification.classList.add('translate-x-full');
+                        setTimeout(() => {
+                            if (notification.parentElement) {
+                                notification.remove();
+                            }
+                        }, 300);
+                    }
+                }, 5000);
+            }
+
+            // 获取通知图标
+            getNotificationIcon(type) {
+                const icons = {
+                    'success': 'check-circle',
+                    'error': 'exclamation-circle',
+                    'warning': 'exclamation-triangle',
+                    'info': 'info-circle'
+                };
+                return icons[type] || icons.info;
+            }
+
+            // 便捷方法
+            showSuccess(message) {
+                this.showNotification(message, 'success');
+            }
+
+            showError(message) {
+                this.showNotification(message, 'error');
+            }
+
+            // 存储操作 - 使用简单的LocalStorage
+            saveAccounts() {
+                localStorage.setItem('mailmanager_accounts', JSON.stringify(this.accounts));
+            }
+
+            async loadAccounts() {
+                const stored = localStorage.getItem('mailmanager_accounts');
+                this.accounts = stored ? JSON.parse(stored) : [];
+                this.filteredAccounts = [...this.accounts];
+
+                // 确保所有账户都有序列号（如果没有则分配）
+                for (const account of this.accounts) {
+                    if (!account.sequence) {
+                        account.sequence = await this.sequenceManager.assignSequence(account.email);
+                    }
+                }
+            }
+
+            // 账户操作
+            async addAccount(email, name, clientId, refreshToken) {
+                // 调试：记录传入的参数
+                console.log(`[AddAccount Debug] 传入参数:`, {
+                    email,
+                    name,
+                    hasClientId: !!clientId,
+                    clientIdLength: clientId ? clientId.length : 0,
+                    hasRefreshToken: !!refreshToken,
+                    refreshTokenLength: refreshToken ? refreshToken.length : 0
+                });
+
+                // 分配序列号
+                const sequence = await this.sequenceManager.assignSequence(email);
+
+                const account = {
+                    id: Date.now().toString(),
+                    email: email,
+                    name: name || email,
+                    client_id: clientId,
+                    refresh_token: refreshToken,
+                    status: 'pending',
+                    codes: [],
+                    sequence: sequence,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    last_active_at: new Date().toISOString(),
+                    access_token: null,
+                    token_expires_at: null,
+                    is_monitoring: false,
+                    authorization_status: 'pending' // 新增授权状态字段
+                };
+
+                // 调试：记录创建的账户对象
+                console.log(`[AddAccount Debug] 创建的账户:`, {
+                    id: account.id,
+                    email: account.email,
+                    hasClientId: !!account.client_id,
+                    clientIdLength: account.client_id ? account.client_id.length : 0,
+                    hasRefreshToken: !!account.refresh_token,
+                    refreshTokenLength: account.refresh_token ? account.refresh_token.length : 0,
+                    accountKeys: Object.keys(account)
+                });
+
+                this.accounts.push(account);
+                this.filteredAccounts = [...this.accounts];
+                this.saveAccounts();
+                return account;
+            }
+
+            // 更新账户状态（完整的状态管理）
+            updateAccountStatus(accountId, status, extraData = {}) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) return false;
+
+                const oldStatus = account.status;
+                account.status = status;
+                account.updated_at = new Date().toISOString();
+
+                // 状态转换时的特殊处理
+                switch (status) {
+                    case 'authorized':
+                        account.last_active_at = new Date().toISOString();
+                        account.authorization_status = 'active';
+                        break;
+                    case 'reauth_needed':
+                        account.authorization_status = 'expired';
+                        break;
+                    case 'reauth_failed':
+                        account.authorization_status = 'failed';
+                        break;
+                    case 'error':
+                        account.authorization_status = 'error';
+                        break;
+                    case 'pending':
+                        account.authorization_status = 'pending';
+                        break;
+                }
+
+                // 合并额外数据
+                Object.assign(account, extraData);
+
+                this.saveAccounts();
+                console.log(`[Status] 账户 ${account.email} 状态更新: ${oldStatus} → ${status}`);
+                return true;
+            }
+
+            // 检查账户状态
+            checkAccountStatus(account) {
+                if (!account) return 'unknown';
+
+                // 检查token过期
+                if (account.access_token && account.token_expires_at) {
+                    const expiresAt = new Date(account.token_expires_at);
+                    const now = new Date();
+                    if (now >= expiresAt) {
+                        return 'reauth_needed';
+                    }
+                }
+
+                // 检查是否有必要的认证信息
+                if (!account.client_id || !account.refresh_token) {
+                    return 'reauth_needed';
+                }
+
+                return account.status;
+            }
+
+            // 批量检查账户状态
+            async batchCheckAccountStatus(accountIds = null) {
+                const accountsToCheck = accountIds
+                    ? this.accounts.filter(acc => accountIds.includes(acc.id))
+                    : this.accounts;
+
+                const statusUpdates = [];
+
+                for (const account of accountsToCheck) {
+                    const newStatus = this.checkAccountStatus(account);
+                    if (newStatus !== account.status) {
+                        statusUpdates.push({
+                            accountId: account.id,
+                            email: account.email,
+                            oldStatus: account.status,
+                            newStatus: newStatus
+                        });
+
+                        this.updateAccountStatus(account.id, newStatus);
+                    }
+                }
+
+                if (statusUpdates.length > 0) {
+                    console.log(`[StatusCheck] 批量检查完成，更新了 ${statusUpdates.length} 个账户状态`);
+                    this.render();
+                    this.updateStats();
+                }
+
+                return statusUpdates;
+            }
+
+            // 获取需要重新授权的账户
+            getReauthNeededAccounts() {
+                return this.accounts.filter(account => {
+                    const status = this.checkAccountStatus(account);
+                    return status === 'reauth_needed' || status === 'reauth_failed';
+                });
+            }
+
+            // 验证账户授权状态
+            async validateAccountAuthorization(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) return false;
+
+                try {
+                    // 使用refresh token验证
+                    const authResult = await this.validateAccountAuth(accountId);
+
+                    if (authResult && authResult.success) {
+                        this.updateAccountStatus(accountId, 'authorized', {
+                            last_active_at: new Date().toISOString()
+                        });
+                        return true;
+                    } else {
+                        this.updateAccountStatus(accountId, 'reauth_needed');
+                        return false;
+                    }
+                } catch (error) {
+                    console.error(`[Auth] 验证账户 ${account.email} 授权失败:`, error);
+                    this.updateAccountStatus(accountId, 'error');
+                    return false;
+                }
+            }
+
+            // 重置账户状态
+            resetAccountStatus(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) return false;
+
+                // 清除认证相关字段
+                account.access_token = null;
+                account.token_expires_at = null;
+                account.is_monitoring = false;
+
+                // 重置状态
+                this.updateAccountStatus(accountId, 'pending');
+
+                return true;
+            }
+
+            deleteAccount(id) {
+                this.accounts = this.accounts.filter(acc => acc.id !== id);
+                this.filteredAccounts = [...this.accounts];
+                this.saveAccounts();
+            }
+
+            updateAccountStatus(id, status) {
+                const account = this.accounts.find(acc => acc.id === id);
+                if (account) {
+                    account.status = status;
+                    account.updated_at = new Date().toISOString();
+                    this.saveAccounts();
+                }
+            }
+
+            addCode(accountId, code, sender, received_at = null) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (account) {
+                    account.codes.unshift({
+                        code: code,
+                        sender: sender,
+                        received_at: received_at || new Date().toISOString()
+                    });
+
+                    // 只保留最新10个验证码
+                    if (account.codes.length > 10) {
+                        account.codes = account.codes.slice(0, 10);
+                    }
+
+                    account.updated_at = new Date().toISOString();
+                    this.saveAccounts();
+                }
+            }
+
+            // 直接验证账户授权（使用refresh token，无需OAuth弹窗）
+            async validateAccountAuth(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+
+                // 详细调试信息
+                console.log(`[Auth Debug] 验证账户授权:`, {
+                    accountId,
+                    accountExists: !!account,
+                    hasClientId: account ? !!account.client_id : false,
+                    hasRefreshToken: account ? !!account.refresh_token : false,
+                    clientIdLength: account && account.client_id ? account.client_id.length : 0,
+                    refreshTokenLength: account && account.refresh_token ? account.refresh_token.length : 0,
+                    accountKeys: account ? Object.keys(account) : []
+                });
+
+                if (!account || !account.client_id || !account.refresh_token) {
+                    const missingInfo = [];
+                    if (!account) missingInfo.push('账户对象');
+                    if (account && !account.client_id) missingInfo.push('client_id');
+                    if (account && !account.refresh_token) missingInfo.push('refresh_token');
+
+                    console.error(`[Auth Error] 账户缺少必要的授权信息:`, {
+                        accountId,
+                        missing: missingInfo,
+                        account: account ? {
+                            id: account.id,
+                            email: account.email,
+                            hasClientId: !!account.client_id,
+                            hasRefreshToken: !!account.refresh_token,
+                            clientIdLength: account.client_id ? account.client_id.length : 0,
+                            refreshTokenLength: account.refresh_token ? account.refresh_token.length : 0,
+                            accountKeys: Object.keys(account)
+                        } : null
+                    });
+
+                    // 更详细的错误信息
+                    const errorMessage = `账户 ${account?.email || accountId} 缺少必要的授权信息: ${missingInfo.join(', ')}`;
+                    alert(errorMessage);
+                    return;
+                }
+
+                try {
+                    console.log('正在验证账户授权:', account.email);
+
+                    // 使用代理服务器调用Microsoft token刷新端点
+                    const PROXY_URL = 'http://localhost:3001/api/microsoft/token';
+                    const response = await fetch(PROXY_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            client_id: account.client_id,
+                            refresh_token: account.refresh_token,
+                            grant_type: 'refresh_token',
+                            scope: 'https://outlook.office.com/Mail.Read'
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        const accessToken = data.access_token;
+                        const expiresIn = data.expires_in || 3600;
+
+                        // 更新账户状态和token
+                        account.access_token = accessToken;
+                        account.token_expires_at = new Date(Date.now() + expiresIn * 1000).toISOString();
+                        this.updateAccountStatus(accountId, 'authorized');
+
+                        console.log('账户授权验证成功！', account.email);
+
+                        // 自动开始邮件同步
+                        setTimeout(() => {
+                            this.syncAccountEmails(accountId);
+                        }, 1000);
+
+                        return { success: true, access_token: accessToken };
+
+                    } else {
+                        const errorData = await response.text();
+                        console.error('Token验证失败:', response.status, errorData);
+                        this.updateAccountStatus(accountId, 'reauth_needed');
+
+                        return { success: false, error: `HTTP ${response.status}` };
+                    }
+
+                } catch (error) {
+                    console.error('验证账户授权失败:', error);
+                    this.updateAccountStatus(accountId, 'reauth_needed');
+
+                    // 不显示alert，让调用方处理错误
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        // 网络错误，不抛出异常
+                        console.warn('网络错误，跳过授权验证');
+                        return { success: false, error: 'Network error', networkError: true };
+                    }
+
+                    return { success: false, error: error.message };
+                }
+            }
+
+            // 同步账户邮件
+            async syncAccountEmails(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account || !account.access_token) {
+                    console.error('账户缺少访问令牌');
+                    return;
+                }
+
+                try {
+                    console.log('正在同步邮件:', account.email);
+
+                    // 使用代理服务器调用Outlook API
+                    const PROXY_URL = 'http://localhost:3001/api/outlook/api/v2.0/me/messages?$orderby=ReceivedDateTime desc&$top=5';
+                    const response = await fetch(PROXY_URL, {
+                        headers: {
+                            'Authorization': `Bearer ${account.access_token}`,
+                            'Content-Type': 'application/json',
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Outlook API调用失败: ${response.status} ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    const messages = data.value || [];
+
+                    // 保存邮件到账户的emails数组中（浏览器缓存）
+                    if (!account.emails) {
+                        account.emails = [];
+                    }
+
+                    // 处理新邮件，避免重复
+                    const existingEmailIds = new Set(account.emails.map(email => email.id));
+                    let newEmailCount = 0;
+
+                    messages.forEach(message => {
+                        if (!existingEmailIds.has(message.id)) {
+                            account.emails.push({
+                                id: message.id,
+                                subject: message.subject || '无标题',
+                                from: message.from?.emailAddress?.name || message.from?.emailAddress?.address || 'Unknown',
+                                receivedDateTime: message.receivedDateTime,
+                                bodyPreview: message.bodyPreview || message.body?.content?.substring(0, 200) || '',
+                                bodyContent: message.body?.content || ''
+                            });
+                            newEmailCount++;
+                        }
+                    });
+
+                    // 保持最新的邮件在前面（最多保存50封）
+                    account.emails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+                    if (account.emails.length > 50) {
+                        account.emails = account.emails.slice(0, 50);
+                    }
+
+                    // 提取验证码（调用服务端API）
+                    const verificationCodes = await this.extractVerificationCodes(messages, accountId);
+
+                    // 添加验证码到账户
+                    verificationCodes.forEach(codeData => {
+                        this.addCode(accountId, codeData.code, codeData.sender, codeData.received_at);
+                    });
+
+                    account.last_sync = new Date().toISOString();
+                    account.email_count = account.emails.length;
+                    this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
+                    console.log(`同步完成: ${account.email}, 新邮件: ${newEmailCount}, 总邮件: ${account.emails.length}, 验证码: ${verificationCodes.length} 个`);
+
+                } catch (error) {
+                    console.error('同步邮件失败:', error);
+                    // 静默处理错误，不显示alert弹窗
+                    throw error;
+                }
+            }
+
+            // 高级验证码提取器（调用服务端API）
+            async extractVerificationCodes(messages, accountId) {
+                try {
+                    console.log(`[Extract] 调用服务端API处理 ${messages.length} 封邮件`);
+
+                    const response = await fetch('http://localhost:3001/api/extract-verification-codes', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            messages: messages,
+                            accountId: accountId
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(`[Extract] 服务端提取完成，找��� ${data.results?.length || 0} 个验证码`);
+                        return data.results || [];
+                    } else {
+                        console.error('[Extract] 服务端API调用失败:', response.status);
+                        // 回退到本地提取算法
+                        return this.extractVerificationCodesLocal(messages);
+                    }
+                } catch (error) {
+                    console.error('[Extract] 服务端API调用失败:', error);
+                    // 回退到本地提取算法
+                    return this.extractVerificationCodesLocal(messages);
+                }
+            }
+
+            // 本地验证码提取器（作为服务端API的回退方案）
+            extractVerificationCodesLocal(messages) {
+                const verificationCodes = [];
+
+                for (const message of messages) {
+                    const messageData = this.parseMessage(message);
+                    if (!messageData) continue;
+
+                    const candidates = this.findVerificationCandidates(messageData);
+
+                    for (const candidate of candidates) {
+                        const validation = this.isValidVerificationCode(
+                            candidate.code,
+                            messageData.fullContent,
+                            candidate.context
+                        );
+
+                        if (validation.valid) {
+                            verificationCodes.push({
+                                ...candidate,
+                                ...messageData,
+                                validation,
+                                score: this.calculateScore(candidate, messageData)
+                            });
+                        }
+                    }
+                }
+
+                // 去重并按分数和时间排序
+                const uniqueCodes = this.deduplicateVerificationCodes(verificationCodes);
+                return uniqueCodes.sort((a, b) => {
+                    if (b.score !== a.score) {
+                        return b.score - a.score;
+                    }
+                    return new Date(b.received_at) - new Date(a.received_at);
+                });
+            }
+
+            // 解析邮件消息
+            parseMessage(message) {
+                try {
+                    const subject = message.Subject || message.subject || '无标题';
+                    const from = message.From || message.from;
+                    const receivedDateTime = message.ReceivedDateTime || message.receivedDateTime;
+                    const messageId = message.Id || message.id;
+
+                    let bodyContent = message.Body?.Content || message.body?.content || message.body?.preview || '';
+
+                    // 清理HTML内容，只保留可见文本
+                    if (bodyContent && bodyContent.includes('<')) {
+                        bodyContent = this.cleanHtmlContent(bodyContent);
+                    }
+
+                    const sender = from?.EmailAddress?.Name || from?.emailAddress?.name || from?.name || 'Unknown';
+                    const senderEmail = from?.EmailAddress?.Address || from?.emailAddress?.address || from || 'Unknown';
+
+                    // 智能发送者识别和域名映射
+                    const senderInfo = this.intelligentSenderRecognition(sender, senderEmail, subject);
+
+                    return {
+                        subject,
+                        sender: senderInfo.displayName,
+                        senderEmail,
+                        senderDomain: senderInfo.domain,
+                        senderType: senderInfo.type,
+                        senderCategory: senderInfo.category,
+                        received_at: receivedDateTime || new Date().toISOString(),
+                        messageId,
+                        fullContent: `${subject}\n${bodyContent}`,
+                        bodyContent
+                    };
+                } catch (error) {
+                    console.error('[Parse] 解析邮件失败:', error);
+                    return null;
+                }
+            }
+
+            // 智能发送者识别和域名映射
+            intelligentSenderRecognition(senderName, senderEmail, subject) {
+                const domain = this.extractDomain(senderEmail);
+                const displayName = this.cleanSenderName(senderName, senderEmail);
+
+                // 发件人类型识别
+                const type = this.identifySenderType(domain, senderName, subject);
+
+                // 发件人分类
+                const category = this.categorizeSender(domain, type, subject);
+
+                return {
+                    displayName,
+                    domain,
+                    type,
+                    category
+                };
+            }
+
+            // 提取域名
+            extractDomain(email) {
+                if (!email || email === 'Unknown') return 'unknown';
+
+                const atIndex = email.lastIndexOf('@');
+                if (atIndex === -1) return email.toLowerCase();
+
+                const domain = email.substring(atIndex + 1).toLowerCase();
+
+                // 移除常见的子域名前缀获取主域名
+                const commonSubdomains = ['mail.', 'email.', 'smtp.', 'outlook.', 'notification.', 'noreply.', 'no-reply.'];
+                for (const subdomain of commonSubdomains) {
+                    if (domain.startsWith(subdomain)) {
+                        return domain.substring(subdomain.length);
+                    }
+                }
+
+                return domain;
+            }
+
+            // 清理发件人名称
+            cleanSenderName(senderName, senderEmail) {
+                // 如果发件人名称是邮箱地址，提取@前的部分
+                if (senderName && senderName.includes('@')) {
+                    const atIndex = senderName.lastIndexOf('@');
+                    senderName = senderName.substring(0, atIndex);
+                }
+
+                // 移除常见的引号和特殊字符
+                if (senderName) {
+                    senderName = senderName.replace(/^["']+|["']+$/g, '').trim();
+                }
+
+                // 如果没有发件人名称或名称过于简短，使用邮箱名称
+                if (!senderName || senderName.length < 2 || senderName === 'Unknown') {
+                    const domain = this.extractDomain(senderEmail);
+                    return domain.charAt(0).toUpperCase() + domain.slice(1);
+                }
+
+                return senderName;
+            }
+
+            // 识别发件人类型
+            identifySenderType(domain, senderName, subject) {
+                const domainLower = domain.toLowerCase();
+                const senderLower = (senderName || '').toLowerCase();
+                const subjectLower = (subject || '').toLowerCase();
+
+                // 知名服务提供商
+                if (domainLower.includes('microsoft') || domainLower.includes('outlook') || domainLower.includes('office365')) {
+                    return 'microsoft';
+                }
+
+                if (domainLower.includes('google') || domainLower.includes('gmail')) {
+                    return 'google';
+                }
+
+                if (domainLower.includes('apple') || domainLower.includes('icloud')) {
+                    return 'apple';
+                }
+
+                // 社交媒体平台
+                if (domainLower.includes('facebook') || domainLower.includes('instagram') ||
+                    domainLower.includes('twitter') || domainLower.includes('linkedin') ||
+                    domainLower.includes('tiktok') || domainLower.includes('snapchat')) {
+                    return 'social';
+                }
+
+                // 电商平台
+                if (domainLower.includes('amazon') || domainLower.includes('ebay') ||
+                    domainLower.includes('taobao') || domainLower.includes('tmall') ||
+                    domainLower.includes('jd.com') || domainLower.includes('shopify')) {
+                    return 'ecommerce';
+                }
+
+                // 金融银行
+                if (domainLower.includes('bank') || domainLower.includes('paypal') ||
+                    domainLower.includes('alipay') || domainLower.includes('wechat') ||
+                    domainLower.includes('visa') || domainLower.includes('mastercard')) {
+                    return 'financial';
+                }
+
+                // 游戏平台
+                if (domainLower.includes('game') || domainLower.includes('playstation') ||
+                    domainLower.includes('xbox') || domainLower.includes('steam') ||
+                    domainLower.includes('epic') || domainLower.includes('nintendo')) {
+                    return 'gaming';
+                }
+
+                // 验证服务
+                if (senderLower.includes('verification') || senderLower.includes('security') ||
+                    senderLower.includes('authenticate') || senderLower.includes('verify') ||
+                    domainLower.includes('verify') || domainLower.includes('auth')) {
+                    return 'verification';
+                }
+
+                // 通知服务
+                if (senderLower.includes('notification') || senderLower.includes('noreply') ||
+                    senderLower.includes('no-reply') || senderLower.includes('alert') ||
+                    domainLower.includes('notification') || domainLower.includes('noreply')) {
+                    return 'notification';
+                }
+
+                return 'general';
+            }
+
+            // 发件人分类
+            categorizeSender(domain, type, subject) {
+                const subjectLower = (subject || '').toLowerCase();
+
+                // 基于类型的分类
+                switch (type) {
+                    case 'verification':
+                        return '安全验证';
+
+                    case 'microsoft':
+                    case 'google':
+                    case 'apple':
+                        return '科技服务';
+
+                    case 'social':
+                        return '社交媒体';
+
+                    case 'ecommerce':
+                        return '电商平台';
+
+                    case 'financial':
+                        return '金融服务';
+
+                    case 'gaming':
+                        return '游戏平台';
+
+                    case 'notification':
+                        return '系统通知';
+
+                    default:
+                        // 基于主题内容的分类
+                        if (subjectLower.includes('verification') || subjectLower.includes('验证') ||
+                            subjectLower.includes('code') || subjectLower.includes('验证码')) {
+                            return '验证通知';
+                        }
+
+                        if (subjectLower.includes('welcome') || subjectLower.includes('欢迎') ||
+                            subjectLower.includes('register') || subjectLower.includes('注册')) {
+                            return '注册通知';
+                        }
+
+                        if (subjectLower.includes('order') || subjectLower.includes('订单') ||
+                            subjectLower.includes('delivery') || subjectLower.includes('配送')) {
+                            return '订单通知';
+                        }
+
+                        if (subjectLower.includes('security') || subjectLower.includes('安全') ||
+                            subjectLower.includes('alert') || subjectLower.includes('警告')) {
+                            return '安全提醒';
+                        }
+
+                        return '一般通知';
+                }
+            }
+
+            // 查找验证码候选
+            findVerificationCandidates(messageData) {
+                const candidates = [];
+                const { subject, fullContent } = messageData;
+
+                // 高级验证码模式（移植自原系统）
+                const verificationPatterns = {
+                    high: [
+                        // 验证码关键词紧邻模式
+                        /(?:verification code|验证码|vertification code)[\s:：\n\-]*(\d{4,8})/gi,
+                        /(?:code|码)[\s:：\n\-]*(\d{4,8})/gi,
+                        /(?:pin|密码)[\s:：\n\-]*(\d{4,8})/gi,
+                        /(?:your code is|您的验证码是)[\s:：\n]*(\d{4,8})/gi,
+                        /(?:enter|input|请输入)[\s:：\n]*(\d{4,8})/gi,
+                        // 邮件标题中的验证码模式
+                        /^\[(\d{4,8})\]/gmi,
+                        /^verification[:\s]*(\d{4,8})/gmi
+                    ],
+                    medium: [
+                        // 包含验证相关词汇
+                        /(?:verify|confirm|confirm|activate|激活|确认)[\s\S]{0,50}?(\d{4,8})/gi,
+                        /(?:secure|安全|access|登录)[\s\S]{0,30}?(\d{4,8})/gi,
+                        /(?:otp|one time|一次性)[\s\S]{0,30}?(\d{4,8})/gi,
+                        /(?:temporary|临时)[\s\S]{0,30}?(\d{4,8})/gi
+                    ],
+                    low: [
+                        /\b(\d{4,8})\b/g
+                    ]
+                };
+
+                // 按优先级检查模式
+                for (const [priority, patterns] of Object.entries(verificationPatterns)) {
+                    for (const pattern of patterns) {
+                        let match;
+                        const regex = new RegExp(pattern);
+
+                        while ((match = regex.exec(fullContent)) !== null) {
+                            const code = match[1] || match[0];
+
+                            if (code && /^\d{4,8}$/.test(code)) {
+                                const position = match.index;
+                                const context = this.analyzeContext(fullContent, code, position);
+
+                                candidates.push({
+                                    code,
+                                    priority,
+                                    position,
+                                    context,
+                                    pattern: pattern.toString(),
+                                    surroundingText: fullContent.substring(
+                                        Math.max(0, position - 50),
+                                        Math.min(fullContent.length, position + code.length + 50)
+                                    )
+                                });
+                            }
+                        }
+                    }
+                }
+
+                return candidates;
+            }
+
+            // 分析上下文
+            analyzeContext(content, code, position) {
+                const beforeText = content.substring(Math.max(0, position - 100), position);
+                const afterText = content.substring(position + code.length, Math.min(content.length, position + code.length + 100));
+
+                return {
+                    before: beforeText.trim(),
+                    after: afterText.trim(),
+                    full: beforeText + code + afterText
+                };
+            }
+
+            // 验证验证码有效性（增强版）
+            isValidVerificationCode(code, content, context = null) {
+                // 基本长度检查
+                if (!code || code.length < 4 || code.length > 8) {
+                    return { valid: false, reason: 'Invalid length' };
+                }
+
+                // 无效验证码模式（移植自原系统）
+                const invalidPatterns = [
+                    /^(\d)\1{3,8}$/, // 重复数字
+                    /^(?:1234|12345|123456|1234567|12345678)$/, // 连续数字
+                    /^20(1[5-9]|2[0-9]|3[0-5])$/, // 年份
+                    /^\d{5}$/, // 美国邮编
+                    /^(800|888|900|555)\d{4}$/, // 常见服务号码
+                    /^\d{3}[-.\s]?\d{3}[-.\s]?\d{4}$/, // 电话号码
+                    /^(?:ref|Ref|REF)\d+$/, // 常见ID前缀
+                    /^(?:order|Order|ORDER)\d+$/,
+                    /^(?:invoice|Invoice|INVOICE)\d+$/
+                ];
+
+                for (const pattern of invalidPatterns) {
+                    if (pattern.test(code)) {
+                        return { valid: false, reason: 'Matches invalid pattern' };
+                    }
+                }
+
+                // 上下文验证
+                if (context) {
+                    const fullContext = `${context.before} ${code} ${context.after}`.toLowerCase();
+
+                    // 高可信度关键词
+                    const highTrustKeywords = ['verification code', '验证码', 'your code is', '您的验证码是', 'enter this code'];
+                    const mediumTrustKeywords = ['verify', 'confirm', 'activate', 'security', 'access', 'login', 'otp'];
+
+                    let hasHighTrust = highTrustKeywords.some(keyword => fullContext.includes(keyword.toLowerCase()));
+                    let hasMediumTrust = mediumTrustKeywords.some(keyword => fullContext.includes(keyword.toLowerCase()));
+
+                    if (!hasHighTrust && !hasMediumTrust && !content.toLowerCase().includes(code.toLowerCase())) {
+                        return { valid: false, reason: 'No verification context found' };
+                    }
+                }
+
+                return { valid: true, reason: 'Valid verification code' };
+            }
+
+            // 计算验证码分数
+            calculateScore(candidate, messageData) {
+                let score = 1.0;
+
+                // 优先级权重
+                const priorityWeights = { high: 3.0, medium: 2.0, low: 1.0 };
+                score += priorityWeights[candidate.priority] || 1.0;
+
+                // 位置权重（标题中分数更高）
+                if (messageData.subject.includes(candidate.code)) {
+                    score += 2.0;
+                }
+
+                // 上下文权重
+                if (candidate.context) {
+                    const fullContext = candidate.context.before + candidate.code + candidate.context.after;
+
+                    // 关键词权重
+                    const keywords = {
+                        'verification code': 3.0,
+                        '验证码': 3.0,
+                        'your code is': 2.5,
+                        '您的验证码是': 2.5,
+                        'verify': 2.0,
+                        'confirm': 2.0,
+                        'security': 1.5,
+                        'access': 1.5,
+                        'login': 1.5
+                    };
+
+                    for (const [keyword, weight] of Object.entries(keywords)) {
+                        if (fullContext.toLowerCase().includes(keyword.toLowerCase())) {
+                            score += weight;
+                        }
+                    }
+                }
+
+                return Math.round(score * 10) / 10; // 保留一位小数
+            }
+
+            // 搜索和过滤
+            searchAccounts(query) {
+                if (!query) {
+                    this.filteredAccounts = [...this.accounts];
+                } else {
+                    const lowerQuery = query.toLowerCase();
+                    this.filteredAccounts = this.accounts.filter(acc =>
+                        acc.email.toLowerCase().includes(lowerQuery) ||
+                        acc.name.toLowerCase().includes(lowerQuery)
+                    );
+                }
+                this.render();
+            }
+
+            filterByStatus(status) {
+                if (!status) {
+                    this.filteredAccounts = [...this.accounts];
+                } else {
+                    this.filteredAccounts = this.accounts.filter(acc => acc.status === status);
+                }
+                this.render();
+            }
+
+            // 排序
+            sortTable(field) {
+                if (this.sortField === field) {
+                    this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortField = field;
+                    this.sortDirection = 'asc';
+                }
+
+                this.applyFilters();
+            }
+
+            sortAccounts(accounts) {
+                return accounts.sort((a, b) => {
+                    let aValue, bValue;
+
+                    switch (this.sortField) {
+                        case 'sequence':
+                            aValue = this.accounts.findIndex(acc => acc.id === a.id) + 1;
+                            bValue = this.accounts.findIndex(acc => acc.id === b.id) + 1;
+                            break;
+                        case 'status':
+                            aValue = a.status;
+                            bValue = b.status;
+                            break;
+                        case 'email':
+                            aValue = a.email.toLowerCase();
+                            bValue = b.email.toLowerCase();
+                            break;
+                        case 'code':
+                            aValue = a.codes[0]?.code || '';
+                            bValue = b.codes[0]?.code || '';
+                            break;
+                        case 'received_time':
+                            aValue = a.codes[0]?.received_at || '';
+                            bValue = b.codes[0]?.received_at || '';
+                            break;
+                        case 'sender':
+                            aValue = a.codes[0]?.sender || '';
+                            bValue = b.codes[0]?.sender || '';
+                            break;
+                        default:
+                            return 0;
+                    }
+
+                    if (!aValue && !bValue) return 0;
+                    if (!aValue) return 1;
+                    if (!bValue) return -1;
+
+                    let comparison = 0;
+                    if (aValue > bValue) comparison = 1;
+                    if (aValue < bValue) comparison = -1;
+
+                    return this.sortDirection === 'desc' ? -comparison : comparison;
+                });
+            }
+
+            // UI操作
+            render() {
+                const tbody = document.getElementById('accountsTableBody');
+                const totalRecords = this.filteredAccounts.length;
+
+                console.log(`[Render Debug] 总记录数: ${totalRecords}, filteredAccounts长度: ${this.filteredAccounts.length}`);
+
+                if (totalRecords === 0) {
+                    console.log('[Render Debug] 显示空状态提示');
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="text-center py-8 text-gray-500">
+                                <div class="text-6xl mb-4">📭</div>
+                                <h3 class="text-lg font-medium text-gray-900 mb-2">暂无邮箱账户</h3>
+                                <p>点击上方"添加邮箱"按钮开始使用</p>
+                            </td>
+                        </tr>
+                    `;
+                    this.updatePaginationInfo(0, 0, 0);
+                    return;
+                }
+
+                // 计算分页
+                const totalPages = Math.ceil(totalRecords / this.pageSize);
+                const from = (this.currentPage - 1) * this.pageSize + 1;
+                const to = Math.min(this.currentPage * this.pageSize, totalRecords);
+                const paginatedAccounts = this.sortAccounts([...this.filteredAccounts])
+                    .slice(from - 1, to);
+
+                tbody.innerHTML = paginatedAccounts.map((account) => {
+                    const latestCode = account.codes[0];
+                    const statusIcon = this.getStatusIcon(account.status);
+                    const statusClass = this.getStatusClass(account.status);
+                    const statusText = this.getStatusText(account.status);
+
+                    return `
+                        <tr class="hover:bg-gray-50 transition-colors">
+                            <td class="px-3 py-3 whitespace-nowrap text-center w-20">
+                                <span class="text-base font-medium text-gray-900 bg-gray-100 px-2 py-1 rounded">
+                                    ${account.sequence || account.import_seq || '-'}
+                                </span>
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap w-24">
+                                <span class="${statusClass}">
+                                    <i class="${statusIcon} mr-1"></i>
+                                    <span class="text-base">${statusText}</span>
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 whitespace-nowrap w-80">
+                                <div class="flex items-center">
+                                    <i class="fas fa-envelope text-gray-400 mr-3 text-base"></i>
+                                    <span class="text-base font-medium text-gray-900 cursor-pointer hover:text-blue-600 transition truncate"
+                                          onclick="copyEmailToClipboard('${account.id}')"
+                                          title="${account.email}">
+                                        ${account.email}
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap text-center w-16">
+                                <input type="checkbox"
+                                       class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                                       data-account-id="${account.id}"
+                                       onchange="handleAccountSelection(this)">
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap w-24 code-cell">
+                                <div class="flex flex-col">
+                                    ${this.getVerificationCodeDisplay(account)}
+                                </div>
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-36">
+                                ${this.getActiveTimeDisplay(account)}
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-28">
+                                ${this.getEmailSenderDisplay(account)}
+                            </td>
+                            <td class="px-3 py-3 whitespace-nowrap w-32">
+                                <div class="flex gap-1">
+                                    <button onclick="copyEmailToClipboard('${account.id}')"
+                                            class="px-2 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition text-base">
+                                        复制
+                                    </button>
+                                    <button onclick="copyLatestCode('${account.id}')"
+                                            class="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition text-base">
+                                        验证码
+                                    </button>
+                                    <button onclick="deleteAccountConfirm('${account.id}')"
+                                            class="px-2 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded transition text-base">
+                                        删除
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // 更新分页信息
+                this.updatePaginationInfo(from, to, totalRecords);
+                this.renderPagination(totalPages);
+            }
+
+            updateStats() {
+                const total = this.accounts.length;
+                const authorized = this.accounts.filter(acc => acc.status === 'authorized').length;
+                const pending = this.accounts.filter(acc => acc.status === 'pending').length;
+                const monitoring = this.accounts.filter(acc => acc.is_monitoring).length;
+
+                document.getElementById('totalAccounts').textContent = total;
+                document.getElementById('authorizedCount').textContent = authorized;
+                document.getElementById('pendingCount').textContent = pending;
+                document.getElementById('monitoringCount').textContent = monitoring;
+            }
+
+            // 工具方法
+            getStatusClass(status) {
+                const classes = {
+                    'authorized': 'text-green-600',
+                    'pending': 'text-yellow-600',
+                    'reauth_needed': 'text-red-600'
+                };
+                return classes[status] || 'text-gray-600';
+            }
+
+            getStatusIcon(status) {
+                const icons = {
+                    'authorized': 'fas fa-check-circle',
+                    'pending': 'fas fa-clock',
+                    'reauth_needed': 'fas fa-exclamation-triangle'
+                };
+                return icons[status] || 'fas fa-question-circle';
+            }
+
+            getStatusText(status) {
+                const texts = {
+                    'authorized': '已授权',
+                    'pending': '待授权',
+                    'reauth_needed': '需重新授权'
+                };
+                return texts[status] || '未知';
+            }
+
+            formatTime(timeString) {
+                if (!timeString) return '---';
+
+                const date = new Date(timeString);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 1) return '刚刚';
+                if (diffMins < 60) return `${diffMins}��钟前`;
+                if (diffHours < 24) return `${diffHours}小时前`;
+                if (diffDays < 7) return `${diffDays}天前`;
+
+                return date.toLocaleDateString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+
+            formatFullTime(timestamp) {
+                if (!timestamp) return '-';
+                const date = new Date(timestamp);
+                return date.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            }
+
+            // 获取验证码收件时间显示 - 只有存在验证码时才显示时间（参考accounts_simple.ejs）
+            getActiveTimeDisplay(account) {
+                // 如果没有验证码，显示"无"
+                if (!account.codes || account.codes.length === 0) {
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                const latestCode = account.codes[0];
+
+                // 检查是否是纯数字验证码（只有纯数字验证码才显示时间）
+                const isNumericCode = /^\d+$/.test(latestCode.code);
+                if (!isNumericCode) {
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                // 检查账户是否是刚导入的（5分钟内创建且未经过监控）
+                const now = new Date();
+                const createdAt = new Date(account.created_at);
+                const timeSinceCreation = now - createdAt;
+                const isRecentlyImported = timeSinceCreation < 5 * 60 * 1000; // 5分钟内
+
+                if (isRecentlyImported) {
+                    // 刚导入的账户不显示时间
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                // 显示验证码收件时间
+                return this.formatFullTime(latestCode.received_at);
+            }
+
+            // 发件人显示逻辑 - 精简显示（参考accounts_simple.ejs）
+            getEmailSenderDisplay(account) {
+                if (!account.codes || account.codes.length === 0) {
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                const latestCode = account.codes[0];
+                if (!latestCode || !latestCode.sender) {
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                // 检查账户是否是刚导入的（5分钟内创建且未经过监控）
+                const now = new Date();
+                const createdAt = new Date(account.created_at);
+                const timeSinceCreation = now - createdAt;
+                const isRecentlyImported = timeSinceCreation < 5 * 60 * 1000; // 5分钟内
+
+                if (isRecentlyImported) {
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                const sender = latestCode.sender;
+                let displayName = sender;
+
+                // 提炼发件人域名或关键信息
+                if (sender.includes('@')) {
+                    // 邮箱地址，提取域名
+                    const domain = sender.split('@')[1];
+                    displayName = domain.split('.')[0]; // 取域名第一部分
+                } else if (sender.includes('.')) {
+                    // 可能是包含域名的格式
+                    const parts = sender.split('.');
+                    displayName = parts[parts.length - 2] || parts[0];
+                }
+
+                // 如果名字太长，截取
+                if (displayName.length > 12) {
+                    displayName = displayName.substring(0, 10) + '..';
+                }
+
+                // 常见发件人的友好名称映射
+                const senderMap = {
+                    'github': 'GitHub',
+                    'microsoft': 'Microsoft',
+                    'outlook': 'Outlook',
+                    'amazon': 'Amazon',
+                    'google': 'Google',
+                    'apple': 'Apple',
+                    'facebook': 'Facebook',
+                    'twitter': 'Twitter',
+                    'linkedin': 'LinkedIn',
+                    'perplexity': 'Perplexity',
+                    'noreply': 'System',
+                    'no-reply': 'System'
+                };
+
+                const lowerName = displayName.toLowerCase();
+                for (const [key, value] of Object.entries(senderMap)) {
+                    if (lowerName.includes(key)) {
+                        displayName = value;
+                        break;
+                    }
+                }
+
+                return `<span class="text-gray-700 text-base font-medium" title="${sender}">${displayName}</span>`;
+            }
+
+            // 验证码显示逻辑 - 只显示纯数字验证码（参考accounts_simple.ejs）
+            getVerificationCodeDisplay(account) {
+                if (!account.codes || account.codes.length === 0) {
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                const latestCode = account.codes[0];
+
+                // 验证码显示逻辑：只要是从最近5封邮件中提取的验证码就显示
+                // 这包括导入时自动获取的验证码和手动同步获取的验证码
+                // 不基于时间判断，基于数据来源判断（从最新邮件提取）
+
+                // 如果账户有邮件数据，说明已经进行过邮件同步
+                const hasEmailData = account.emails && account.emails.length > 0;
+
+                // 如果账户有last_sync时间戳，说明进行过邮件同步
+                const hasBeenSynced = !!account.last_sync;
+
+                // 如果账户进行了邮件同步或有邮件数据，则显示验证码
+                if (!hasBeenSynced && !hasEmailData) {
+                    // 没有进行过邮件同步的账户不显示验证码（避免显示旧的历史验证码）
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+
+                // 检查是否为纯数字验证码
+                const isNumericCode = /^\d+$/.test(latestCode.code);
+
+                if (isNumericCode) {
+                    // 是纯数字验证码
+                    return `
+                        <div class="flex items-center gap-2">
+                            <span class="text-code cursor-pointer" onclick="copyLatestCode('${account.id}')" title="点击复制验证码">
+                                ${latestCode.code}
+                                <i class="fas fa-copy ml-1 text-xs"></i>
+                            </span>
+                        </div>
+                    `;
+                } else {
+                    // 不是纯数字验证码，显示为"无"
+                    return '<span class="text-gray-400 text-base">无</span>';
+                }
+            }
+
+            // 数据导出功能已下线 - 原功能代码已注释
+            // exportData() {
+            //     if (this.accounts.length === 0) {
+            //         alert('暂无数据可导出');
+            //         return;
+            //     }
+            //
+            //     const exportData = {
+            //         accounts: this.accounts,
+            //         export_time: new Date().toISOString(),
+            //         version: '2.0',
+            //         statistics: {
+            //             total_accounts: this.accounts.length,
+            //             authorized_accounts: this.accounts.filter(acc => acc.status === 'authorized').length,
+            //             total_codes: this.accounts.reduce((sum, acc) => sum + acc.codes.length, 0)
+            //         }
+            //     };
+            //
+            //     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            //     const url = URL.createObjectURL(blob);
+            //     const a = document.createElement('a');
+            //     a.href = url;
+            //     a.download = `mailmanager_backup_${new Date().toISOString().split('T')[0]}.json`;
+            //     document.body.appendChild(a);
+            //     a.click();
+            //     document.body.removeChild(a);
+            //     URL.revokeObjectURL(url);
+            //
+            //     alert('数据导出成功');
+            // }
+
+            // 数据导入功能已下线 - 原功能代码已注释
+            // importData(data) {
+            //     if (data.accounts && Array.isArray(data.accounts)) {
+            //         this.accounts = data.accounts;
+            //         this.filteredAccounts = [...this.accounts];
+            //         this.saveAccounts();
+            //         this.render();
+            //         this.updateStats();
+            //         return true;
+            //     }
+            //     return false;
+            // }
+
+            // 复制邮箱地址并自动启动监控
+            async copyEmailToClipboard(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) return;
+
+                try {
+                    await navigator.clipboard.writeText(account.email);
+                    this.showSuccess('邮箱已复制: ' + account.email);
+
+                    // 对所有账户都启动1分钟监控和授权检查
+                    try {
+                        console.log(`[监控] 开始为账户 ${account.email} 启动监控和授权检查`);
+
+                        // 如果账户未授权，先尝试授权
+                        if (account.status !== 'authorized') {
+                            console.log(`[授权] 账户 ${account.email} 未授权，尝试重新授权`);
+                            try {
+                                const authResult = await this.validateAccountAuth(accountId);
+                                console.log(`[授权] 账户 ${account.email} 授权检查完成`, authResult);
+
+                                if (authResult && authResult.success) {
+                                    this.showSuccess(`账户 ${account.email} 授权成功，开始监控新邮件`);
+                                } else {
+                                    // 检查是否是授权过期错误
+                                    if (authResult && authResult.is_auth_error) {
+                                        this.showWarning(`账户 ${account.email} 授权已过期，需要重新授权。但监控将继续尝试...`);
+                                    } else {
+                                        this.showWarning(`账户 ${account.email} 授权失败，但监控将继续尝试...`);
+                                    }
+                                }
+                            } catch (authError) {
+                                console.warn(`[授权] 账户 ${account.email} 授权失败:`, authError);
+
+                                // 检查错误类型，如果是授权过期则给出明确提示
+                                const errorResponse = authError.is_auth_error ?
+                                    `账户 ${account.email} 授权已过期，需要重新获取授权信息` :
+                                    `账户 ${account.email} 授权失败，但监控将继续尝试`;
+
+                                this.showWarning(errorResponse);
+                            }
+                        }
+
+                        // 启动监控（无论授权状态如何）
+                        const response = await fetch('http://localhost:3001/api/monitor/copy-trigger', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                account_id: accountId,
+                                email: account.email,
+                                client_id: account.client_id,
+                                refresh_token: account.refresh_token,
+                                current_status: account.status,
+                                access_token: account.access_token
+                            })
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            this.showSuccess('已启动1分钟监控，将自动检查新邮件并更新验证码');
+                            console.log('[监控] 已为账户', account.email, '启动监控');
+
+                            // 更新账户监控状态
+                            account.is_monitoring = true;
+                            account.last_active_at = new Date().toISOString();
+                            this.saveAccounts();
+                            this.updateStats();
+                            this.render();
+                        } else {
+                            console.warn('[监控] 启动监控失败:', response.statusText);
+                            this.showError('监控启动失败，但邮箱已复制');
+                        }
+                    } catch (monitorError) {
+                        console.warn('[监控] 启动监控失败:', monitorError);
+                        this.showError('监控启动失败，但邮箱已复制');
+                        // 监控失败不影响复制功能
+                    }
+                } catch (clipboardError) {
+                    console.error('复制失败:', clipboardError);
+                    this.showError('复制失败，请手动复制邮箱地址');
+                }
+            }
+
+            // 复制最新验证码
+            async copyLatestCode(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account || !account.codes || account.codes.length === 0) {
+                    this.showError('暂无验证码可复制');
+                    return;
+                }
+
+                const latestCode = account.codes[0];
+
+                try {
+                    await navigator.clipboard.writeText(latestCode.code);
+                    this.showSuccess('验证码已复制: ' + latestCode.code);
+                } catch (error) {
+                    console.error('复制验证码失败:', error);
+                    this.showError('复制失败');
+                }
+            }
+
+            // 分页相关方法
+            updatePaginationInfo(from, to, total) {
+                document.getElementById('showingFrom').textContent = from || 0;
+                document.getElementById('showingTo').textContent = to || 0;
+                document.getElementById('totalRecords').textContent = total || 0;
+            }
+
+            renderPagination(totalPages) {
+                const paginationDiv = document.getElementById('pagination');
+                if (totalPages <= 1) {
+                    paginationDiv.innerHTML = '';
+                    return;
+                }
+
+                let paginationHTML = '';
+
+                // 上一页按钮
+                const prevDisabled = this.currentPage === 1 ? 'disabled' : '';
+                paginationHTML += `<button class="page-btn" onclick="changePage(-1)" ${prevDisabled}>上一页</button>`;
+
+                // 页码按钮
+                const startPage = Math.max(1, this.currentPage - 2);
+                const endPage = Math.min(totalPages, this.currentPage + 2);
+
+                if (startPage > 1) {
+                    paginationHTML += `<button class="page-btn" onclick="goToPage(1)">1</button>`;
+                    if (startPage > 2) {
+                        paginationHTML += `<span class="px-2">...</span>`;
+                    }
+                }
+
+                for (let i = startPage; i <= endPage; i++) {
+                    const activeClass = i === this.currentPage ? 'active' : '';
+                    paginationHTML += `<button class="page-btn ${activeClass}" onclick="goToPage(${i})">${i}</button>`;
+                }
+
+                if (endPage < totalPages) {
+                    if (endPage < totalPages - 1) {
+                        paginationHTML += `<span class="px-2">...</span>`;
+                    }
+                    paginationHTML += `<button class="page-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+                }
+
+                // 下一页按钮
+                const nextDisabled = this.currentPage === totalPages ? 'disabled' : '';
+                paginationHTML += `<button class="page-btn" onclick="changePage(1)" ${nextDisabled}>下一页</button>`;
+
+                paginationDiv.innerHTML = paginationHTML;
+            }
+
+            changePageSize(newPageSize) {
+                this.pageSize = parseInt(newPageSize);
+                this.currentPage = 1; // 重置到第一页
+                this.render();
+            }
+
+            changePage(delta) {
+                const totalRecords = this.filteredAccounts.length;
+                const totalPages = Math.ceil(totalRecords / this.pageSize);
+                const newPage = this.currentPage + delta;
+
+                if (newPage >= 1 && newPage <= totalPages) {
+                    this.currentPage = newPage;
+                    this.render();
+                }
+            }
+
+            goToPage(page) {
+                const totalRecords = this.filteredAccounts.length;
+                const totalPages = Math.ceil(totalRecords / this.pageSize);
+
+                if (page >= 1 && page <= totalPages) {
+                    this.currentPage = page;
+                    this.render();
+                }
+            }
+        }
+
+        // 全局实例
+        let manager;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            manager = new SimpleMailManager();
+        });
+
+        // 批量导入相关函数
+        function showImportModal() {
+            document.getElementById('importModal').classList.remove('hidden');
+            document.getElementById('importTextarea').focus();
+        }
+
+        function hideImportModal() {
+            document.getElementById('importModal').classList.add('hidden');
+            document.getElementById('importTextarea').value = '';
+        }
+
+        function showProgressModal() {
+            // 重置状态为导入中
+            document.getElementById('importingStatus').classList.remove('hidden');
+            document.getElementById('importCompleteStatus').classList.add('hidden');
+            document.getElementById('importCloseButton').classList.add('hidden');
+            document.getElementById('importProgressModal').classList.remove('hidden');
+        }
+
+        function hideProgressModal() {
+            document.getElementById('importProgressModal').classList.add('hidden');
+        }
+
+        function closeImportProgressModal() {
+            hideProgressModal();
+            // 刷新界面显示导入的账户
+            manager.filteredAccounts = [...manager.accounts];
+            manager.render();
+            manager.updateStats();
+        }
+
+        function showImportComplete(successCount, errorCount) {
+            // 显示完成状态
+            document.getElementById('importingStatus').classList.add('hidden');
+            document.getElementById('importCompleteStatus').classList.remove('hidden');
+            document.getElementById('importCloseButton').classList.remove('hidden');
+
+            // 设置结果文本
+            const resultText = `成功: ${successCount} 个\n失败: ${errorCount} 个`;
+            document.getElementById('importResultText').textContent = resultText;
+        }
+
+        function showDetailedImportComplete(importedCount, totalCount, authorizedCount, reauthCount, errorCount) {
+            // 显示完成状态
+            document.getElementById('importingStatus').classList.add('hidden');
+            document.getElementById('importCompleteStatus').classList.remove('hidden');
+            document.getElementById('importCloseButton').classList.remove('hidden');
+
+            // 构建详细结果文本
+            let resultText = `导入完成: ${importedCount} 个\n\n`;
+            resultText += `✅ 完全就绪: ${authorizedCount} 个\n`;
+            if (reauthCount > 0) {
+                resultText += `⚠️ 需重新授权: ${reauthCount} 个\n`;
+            }
+            if (errorCount > 0) {
+                resultText += `❌ 处理失败: ${errorCount} 个\n`;
+            }
+
+            // 添加验证码统计
+            const totalCodes = manager.accounts.reduce((sum, acc) => sum + (acc.codes?.length || 0), 0);
+            if (totalCodes > 0) {
+                resultText += `\n📧 发现验证码: ${totalCodes} 个`;
+            }
+
+            document.getElementById('importResultText').textContent = resultText;
+            document.getElementById('importResultText').style.whiteSpace = 'pre-line';
+        }
+
+        function updateProgress(current, total, message) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressCount = document.getElementById('progressCount');
+
+            const percentage = Math.round((current / total) * 100);
+            progressBar.style.width = percentage + '%';
+            progressText.textContent = message;
+            progressCount.textContent = `${current}/${total}`;
+        }
+
+        // 智能解析单行导入数据（与原系统相同的逻辑）
+        function parseImportLine(line) {
+            console.log(`[Parse Debug] 解析行:`, line);
+
+            // 预处理：移除行首行尾空白
+            line = line.trim();
+            if (!line) {
+                console.warn(`[Parse] 空行，跳过`);
+                return null;
+            }
+
+            // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
+            let parts = line.split('----');
+            console.log(`[Parse Debug] 第一次分割结果:`, parts, `字段数: ${parts.length}`);
+
+            if (parts.length !== 4) {
+                // 如果不是4个字段，尝试智能重构
+                const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+                const uuidMatch = line.match(uuidRegex);
+                console.log(`[Parse Debug] UUID匹配结果:`, uuidMatch);
+
+                if (uuidMatch) {
+                    const uuidIndex = line.indexOf(uuidMatch[0]);
+                    const beforeUuid = line.substring(0, uuidIndex).trim();
+                    const afterUuid = line.substring(uuidIndex + uuidMatch[0].length).trim();
+
+                    const beforeParts = beforeUuid.split(/-+/);
+                    if (beforeParts.length >= 2) {
+                        parts = [
+                            beforeParts[0],
+                            beforeParts[1],
+                            uuidMatch[0],
+                            afterUuid.replace(/^-+/, '')
+                        ];
+                        console.log(`[Parse Debug] 智能重构结果:`, parts);
+                    }
+                }
+            }
+
+            if (parts.length < 4) {
+                console.warn(`[Parse] 无效数据格式，期望4个字段，实际${parts.length}个:`, line);
+                console.warn(`[Parse] 字段详情:`, parts.map((p, i) => `字段${i+1}: "${p}"`));
+                return null;
+            }
+
+            const [email, password, client_id, refresh_token_enc] = parts;
+
+            // 验证每个字段
+            if (!email || !email.includes('@')) {
+                console.warn(`[Parse] 无效的邮箱地址: "${email}"`);
+                return null;
+            }
+
+            if (!client_id || client_id.length < 10) {
+                console.warn(`[Parse] 无效的client_id: "${client_id}"`);
+                return null;
+            }
+
+            if (!refresh_token_enc || refresh_token_enc.length < 10) {
+                console.warn(`[Parse] 无效的refresh_token: "${refresh_token_enc?.substring(0, 20)}..."`);
+                return null;
+            }
+
+            const result = {
+                email: email.trim(),
+                password: password ? password.trim() : '',
+                client_id: client_id.trim(),
+                refresh_token: refresh_token_enc.trim()
+            };
+
+            console.log(`[Parse Debug] 最终解析结果:`, {
+                email: result.email,
+                hasClientId: !!result.client_id,
+                clientIdLength: result.client_id.length,
+                hasRefreshToken: !!result.refresh_token,
+                refreshTokenLength: result.refresh_token.length
+            });
+
+            return result;
+        }
+
+        // 解析导入数据
+        function parseImportData(importData) {
+            const emails = [];
+            const lines = importData.split('\n').filter(line => line.trim());
+
+            for (const line of lines) {
+                try {
+                    const emailData = parseImportLine(line.trim());
+                    if (emailData) {
+                        emails.push(emailData);
+                    }
+                } catch (error) {
+                    console.warn(`[Parse] 跳过无效行: ${line}`, error.message);
+                }
+            }
+
+            return emails;
+        }
+
+        // 完整的账户处理流程（导入后自动执行）
+        async function processAccountEmails(accountId) {
+            const account = manager.accounts.find(acc => acc.id === accountId);
+            if (!account) return;
+
+            try {
+                console.log(`[Process] 开始处理账户: ${account.email}`);
+
+                // 1. 确保有有效的access_token，如果没有则尝试刷新
+                if (!account.access_token) {
+                    console.log(`[Process] 账户缺少access_token，尝试刷新token...`);
+                    try {
+                        await manager.validateAccountAuth(accountId);
+                        console.log(`[Process] Token刷新成功`);
+                    } catch (tokenError) {
+                        console.warn(`[Process] Token刷新失败，但仍尝试同步邮件:`, tokenError);
+                    }
+                }
+
+                // 2. 同步邮件（即使没有有效token也尝试）
+                await manager.syncAccountEmails(accountId);
+
+                // 3. 根据是否有有效token更新状态
+                if (account.access_token) {
+                    manager.updateAccountStatus(accountId, 'authorized');
+                    console.log(`[Process] 账户处理完成: ${account.email} (状态: authorized)`);
+                } else {
+                    manager.updateAccountStatus(accountId, 'reauth_needed');
+                    console.log(`[Process] 账户处理完成: ${account.email} (状态: reauth_needed)`);
+                }
+
+            } catch (error) {
+                console.error(`[Process] 账户处理失败: ${account.email}`, error);
+                manager.updateAccountStatus(accountId, 'error');
+            }
+        }
+
+        // 批量导入邮箱
+        async function importEmails() {
+            const textarea = document.getElementById('importTextarea');
+            const content = textarea.value.trim();
+
+            if (!content) {
+                // 显示提示状态
+                document.getElementById('importingStatus').classList.add('hidden');
+                document.getElementById('importCompleteStatus').classList.remove('hidden');
+                document.getElementById('importCloseButton').classList.remove('hidden');
+
+                // 设置提示结果文本
+                document.getElementById('importResultText').textContent = '请输入邮箱信息';
+
+                // 更改图标为信息状态
+                const statusIcon = document.querySelector('#importCompleteStatus .fa-check');
+                if (statusIcon) {
+                    statusIcon.classList.remove('fa-check', 'text-green-500');
+                    statusIcon.classList.add('fa-info-circle', 'text-blue-500');
+                }
+
+                showProgressModal();
+                return;
+            }
+
+            // 隐藏导入弹窗，显示进度弹窗
+            hideImportModal();
+            showProgressModal();
+
+            try {
+                // 使用与原系统相同的解析逻辑
+                const emailData = parseImportData(content);
+
+                if (emailData.length === 0) {
+                    // 显示无数据状态
+                    document.getElementById('importingStatus').classList.add('hidden');
+                    document.getElementById('importCompleteStatus').classList.remove('hidden');
+                    document.getElementById('importCloseButton').classList.remove('hidden');
+
+                    // 设置无数据结果文本
+                    document.getElementById('importResultText').textContent = '没有找到有效的邮箱信息';
+
+                    // 更改图标为警告状态
+                    const statusIcon = document.querySelector('#importCompleteStatus .fa-check');
+                    if (statusIcon) {
+                        statusIcon.classList.remove('fa-check', 'text-green-500');
+                        statusIcon.classList.add('fa-exclamation-triangle', 'text-yellow-500');
+                    }
+                    return;
+                }
+
+                console.log(`[导入] 解析成功，共 ${emailData.length} 个邮箱`);
+                updateProgress(0, emailData.length, '正在批量导入邮箱...');
+
+                let successCount = 0;
+                let errorCount = 0;
+
+                for (let i = 0; i < emailData.length; i++) {
+                    const data = emailData[i];
+
+                    try {
+                        // 检查重复
+                        if (manager.accounts.some(acc => acc.email === data.email)) {
+                            console.log(`邮箱 ${data.email} 已存在，跳过`);
+                            updateProgress(i + 1, emailData.length, `邮箱 ${data.email} 已存在，跳过`);
+                            continue;
+                        }
+
+                        // 调试输出解析结果
+                        console.log(`[Debug] 解析到的数据:`, {
+                            email: data.email,
+                            hasClientId: !!data.client_id,
+                            clientIdLength: data.client_id ? data.client_id.length : 0,
+                            hasRefreshToken: !!data.refresh_token,
+                            refreshTokenLength: data.refresh_token ? data.refresh_token.length : 0
+                        });
+
+                        // 添加账户 - 使用await确保账户创建完成
+                        const account = await manager.addAccount(data.email, data.email, data.client_id, data.refresh_token);
+
+                        // 调试输出创建的账户
+                        console.log(`[Debug] 创建的账户:`, {
+                            id: account.id,
+                            email: account.email,
+                            hasClientId: !!account.client_id,
+                            hasRefreshToken: !!account.refresh_token,
+                            clientIdLength: account.client_id ? account.client_id.length : 0,
+                            refreshTokenLength: account.refresh_token ? account.refresh_token.length : 0,
+                            accountKeys: Object.keys(account)
+                        });
+
+                        // 验证账户对象是否正确保存了授权信息
+                        const savedAccount = manager.accounts.find(acc => acc.id === account.id);
+                        console.log(`[Debug] 从manager中获取的账户:`, {
+                            id: savedAccount?.id,
+                            email: savedAccount?.email,
+                            hasClientId: !!savedAccount?.client_id,
+                            hasRefreshToken: !!savedAccount?.refresh_token,
+                            clientIdLength: savedAccount?.client_id ? savedAccount.client_id.length : 0,
+                            refreshTokenLength: savedAccount?.refresh_token ? savedAccount.refresh_token.length : 0
+                        });
+
+                        // 尝试验证授权并处理邮件 - 即使授权失败也尝试邮件处理
+                        let authSuccess = false;
+                        try {
+                            await manager.validateAccountAuth(account.id);
+                            console.log(`[导入] 账户 ${data.email} 授权验证成功，开始处理邮件...`);
+                            authSuccess = true;
+                        } catch (authError) {
+                            console.warn(`[导入] 账户 ${data.email} 授权验证失败:`, authError);
+                            // 即使授权失败，也尝试进行邮件处理，可能是token过期问题
+                            console.log(`[导入] 尝试直接使用refresh_token获取邮件...`);
+                        }
+
+                        // 无论授权验证是否成功，都尝试处理邮件
+                        try {
+                            await processAccountEmails(account.id);
+
+                            if (authSuccess) {
+                                successCount++;
+                                updateProgress(i + 1, emailData.length, `✅ 完全就绪: ${data.email}`);
+                            } else {
+                                successCount++;
+                                updateProgress(i + 1, emailData.length, `⚠️ 邮件已同步，需重新授权: ${data.email}`);
+                            }
+                        } catch (processError) {
+                            console.error(`[导入] 账户 ${data.email} 邮件处理失败:`, processError);
+                            successCount++;
+                            updateProgress(i + 1, emailData.length, `⚠️ 需重新授权: ${data.email}`);
+                        }
+
+                        // 短暂延迟避免API限制
+                        await new Promise(resolve => setTimeout(resolve, 500));
+
+                    } catch (error) {
+                        console.error(`导入 ${data.email} 失败:`, error);
+                        errorCount++;
+                        updateProgress(i + 1, emailData.length, `导入失败: ${data.email}`);
+                    }
+                }
+
+                // 计算处理结果统计
+                const totalAccounts = manager.accounts;
+                const authorizedCount = totalAccounts.filter(acc => acc.status === 'authorized').length;
+                const reauthCount = totalAccounts.filter(acc => acc.status === 'reauth_needed').length;
+                errorCount = totalAccounts.filter(acc => acc.status === 'error').length;
+
+                // 显示详细完成状态
+                setTimeout(() => {
+                    showDetailedImportComplete(successCount, totalAccounts.length, authorizedCount, reauthCount, errorCount);
+                }, 500);
+
+            } catch (error) {
+                console.error('批量导入失败:', error);
+                // 显示错误状态
+                document.getElementById('importingStatus').classList.add('hidden');
+                document.getElementById('importCompleteStatus').classList.remove('hidden');
+                document.getElementById('importCloseButton').classList.remove('hidden');
+
+                // 设置错误结果文本
+                const resultText = `导入失败: ${error.message}`;
+                document.getElementById('importResultText').textContent = resultText;
+
+                // 更改图标为错误状态
+                const statusIcon = document.querySelector('#importCompleteStatus .fa-check');
+                if (statusIcon) {
+                    statusIcon.classList.remove('fa-check', 'text-green-500');
+                    statusIcon.classList.add('fa-exclamation-triangle', 'text-red-500');
+                }
+            }
+        }
+
+        function deleteAccountConfirm(id) {
+            const account = manager.accounts.find(acc => acc.id === id);
+            if (!account) return;
+
+            if (confirm(`确定要删除邮箱 "${account.name}" 吗？\n\n此操作不可撤销。`)) {
+                manager.deleteAccount(id);
+                manager.filteredAccounts = [...manager.accounts];
+                manager.render();
+                manager.updateStats();
+            }
+        }
+
+        function syncAccount(id) {
+            const account = manager.accounts.find(acc => acc.id === id);
+            if (!account) return;
+
+            if (account.status !== 'authorized') {
+                // 如果未授权，尝试直接验证授权
+                manager.validateAccountAuth(id);
+                return;
+            }
+
+            // 真实同步过程
+            manager.syncAccountEmails(id);
+        }
+
+        function filterAccounts() {
+            const searchQuery = document.getElementById('searchInput').value.trim();
+            const statusFilter = document.getElementById('statusFilter').value;
+
+            manager.filteredAccounts = manager.accounts.filter(account => {
+                const matchesSearch = !searchQuery ||
+                    account.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    account.name.toLowerCase().includes(searchQuery.toLowerCase());
+
+                const matchesStatus = !statusFilter || account.status === statusFilter;
+
+                return matchesSearch && matchesStatus;
+            });
+
+            manager.render();
+        }
+
+        // 刷新状态管理
+        let isRefreshing = false;
+
+        async function refreshData() {
+            // 防止重复刷新
+            if (isRefreshing) {
+                manager.showNotification('正在刷新中，请稍候...', 'warning');
+                return;
+            }
+
+            isRefreshing = true;
+            const refreshButton = document.querySelector('button[onclick="refreshData()"]');
+            const originalContent = refreshButton.innerHTML;
+
+            try {
+                // 更新按钮状态
+                refreshButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>刷新中...';
+                refreshButton.disabled = true;
+                refreshButton.classList.add('opacity-75', 'cursor-not-allowed');
+
+                // 显示刷新开始通知
+                manager.showNotification('正在重新加载数据...', 'info');
+                console.log('[Refresh] 开始重新加载数据...');
+
+                // 1. 重新从LocalStorage加载账户数据
+                console.log('[Refresh] 重新加载账户数据...');
+                await manager.loadAccounts();
+
+                // 2. 重新初始化序列号管理器
+                console.log('[Refresh] 重新初始化序列号管理器...');
+                await manager.sequenceManager.initialize(manager.accounts);
+
+                // 3. 断开并重新连接SSE
+                console.log('[Refresh] 重新连接SSE实时更新...');
+                if (manager.eventSource) {
+                    manager.eventSource.close();
+                    manager.eventSource = null;
+                    manager.sseConnected = false;
+                }
+                manager.connectSSE();
+
+                // 4. 重新渲染界面和更新统计
+                console.log('[Refresh] 重新渲染界面...');
+                manager.render();
+                manager.updateStats();
+
+                // 5. 显示刷新完成通知
+                const accountCount = manager.accounts.length;
+                const message = accountCount > 0
+                    ? `数据重新加载完成！共 ${accountCount} 个账户`
+                    : '数据重新加载完成！暂无账户数据';
+
+                manager.showNotification(message, 'success');
+                console.log('[Refresh] 数据重新加载完成');
+
+            } catch (error) {
+                console.error('[Refresh] 数据重新加载失败:', error);
+                manager.showError('数据重新加载失败: ' + error.message);
+
+                // 即使出错也尝试重新渲染界面
+                try {
+                    manager.render();
+                    manager.updateStats();
+                } catch (renderError) {
+                    console.error('[Refresh] 界面重新渲染也失败:', renderError);
+                    manager.showError('数据加载和界面渲染都失败，请刷新页面');
+                }
+            } finally {
+                // 恢复按钮状态
+                isRefreshing = false;
+                refreshButton.innerHTML = originalContent;
+                refreshButton.disabled = false;
+                refreshButton.classList.remove('opacity-75', 'cursor-not-allowed');
+            }
+        }
+
+        function confirmClearAllData() {
+            if (manager.accounts.length === 0) {
+                manager.showError('当前没有数据需要清空');
+                return;
+            }
+
+            // 显示清空数据确认弹窗
+            document.getElementById('clearDataModal').classList.remove('hidden');
+
+            // 重置确认复选框状态
+            document.getElementById('confirmCheckbox').checked = false;
+            document.getElementById('confirmClearButton').disabled = true;
+        }
+
+        function hideClearDataModal() {
+            document.getElementById('clearDataModal').classList.add('hidden');
+        }
+
+        function clearAllData() {
+            // 清空所有数据
+            manager.accounts = [];
+            manager.filteredAccounts = [];
+
+            // 清空本地存储
+            localStorage.removeItem('mailmanager_accounts');
+
+            // 刷新界面
+            manager.render();
+            manager.updateStats();
+
+            // 关闭弹窗并显示成功消息
+            hideClearDataModal();
+            manager.showSuccess('所有数据已成功清空！');
+        }
+
+        function toggleAccountSelection(accountId, isChecked) {
+            const account = manager.accounts.find(acc => acc.id === accountId);
+            if (account) {
+                account.selected = isChecked;
+                manager.saveAccounts();
+            }
+        }
+
+        // 排序函数
+        function sortBySequence() {
+            manager.sortField = 'sequence';
+            manager.sortDirection = manager.sortDirection === 'asc' ? 'desc' : 'asc';
+            manager.render();
+        }
+
+        function sortByStatus() {
+            manager.sortField = 'status';
+            manager.sortDirection = manager.sortDirection === 'asc' ? 'desc' : 'asc';
+            manager.render();
+        }
+
+        function sortByEmail() {
+            manager.sortField = 'email';
+            manager.sortDirection = manager.sortDirection === 'asc' ? 'desc' : 'asc';
+            manager.render();
+        }
+
+        function sortByCodeTime() {
+            manager.sortField = 'received_time';
+            manager.sortDirection = manager.sortDirection === 'asc' ? 'desc' : 'asc';
+            manager.render();
+        }
+
+        function sortBySender() {
+            manager.sortField = 'sender';
+            manager.sortDirection = manager.sortDirection === 'asc' ? 'desc' : 'asc';
+            manager.render();
+        }
+
+        function changePageSize() {
+            const pageSize = document.getElementById('pageSize').value;
+            manager.changePageSize(pageSize);
+        }
+
+        function copyEmailToClipboard(accountId) {
+            manager.copyEmailToClipboard(accountId);
+        }
+
+        function copyLatestCode(accountId) {
+            manager.copyLatestCode(accountId);
+        }
+
+        function handleAccountSelection(checkbox) {
+            const accountId = parseInt(checkbox.dataset.accountId);
+            if (checkbox.checked) {
+                manager.selectedAccounts.add(accountId);
+            } else {
+                manager.selectedAccounts.delete(accountId);
+            }
+            console.log('已选中的账户:', Array.from(manager.selectedAccounts));
+        }
+
+        function changePage(delta) {
+            manager.changePage(delta);
+        }
+
+        function goToPage(page) {
+            manager.goToPage(page);
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('addModal');
+            if (event.target === modal) {
+                modal.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>

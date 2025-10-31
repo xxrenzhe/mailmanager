@@ -1,0 +1,562 @@
+# 基本原则
+1. 使用中文进行沟通和文档输出
+2. 遵循KISS原则，在确保实现业务需求的情况下，简化代码实现，提高可维护性
+
+# 系统架构、功能描述和技术方案
+
+## 系统概述
+
+MailManager 是一个现代化的邮件账户管理系统，主要功能是批量管理 Microsoft Outlook 邮箱账户，自动提取验证码，并提供实时监控功能。系统采用混合架构设计，结合了前端浏览器缓存和后端业务逻辑的优势。
+
+## 核心功能
+
+### 1. 邮箱账户管理
+- **批量导入**: 支持文本格式批量导入邮箱账户信息（email, client_id, refresh_token）
+- **状态管理**: 实时跟踪账户授权状态（pending/authorized/reauth_needed）
+- **序列号管理**: 为每个账户分配唯一的序列号，支持排序和管理
+- **本地存储**: 所有账户数据安全存储在浏览器 LocalStorage 中
+
+### 2. Microsoft Outlook 集成
+- **REST API**: 使用 Microsoft Outlook REST API 进行邮件操作
+- **Token 管理**: 自动刷新 access_token，支持 refresh_token 机制
+- **邮件检索**: 获取最近5封邮件，支持智能验证码提取
+- **CORS 代理**: 内置代理服务器解决跨域访问问题
+
+### 3. 智能验证码提取
+- **多层级识别**: 高/中/低可信度的验证码模式匹配
+- **上下文分析**: 基于邮件标题、发件人、内容的智能分析
+- **实时提取**: 自动从新邮件中提取验证码并实时显示
+- **历史记录**: 保存最近10个验证码，包含来源和评分信息
+
+### 4. 实时监控系统
+- **SSE 通信**: Server-Sent Events 实现实时数据推送
+- **1分钟监控**: 复制邮箱地址后自动启动60秒监控
+- **自动停止**: 监控任务每15秒检查一次，60秒后自动停止
+- **状态同步**: 实时同步"监控中"指标和账户状态
+
+### 5. 用户界面
+- **响应式设计**: 基于 Tailwind CSS 的现代化界面
+- **实时统计**: 显示总数、已授权、待处理、监控中的账户数量
+- **搜索过滤**: 支持按邮箱地址、状态进行快速筛选
+- **批量操作**: 清空数据、刷新状态等批量管理功能
+
+## 系统架构
+
+### 整体架构设计
+```
+┌─────────────────┐    HTTP/SSE     ┌──────────────────┐    API     ┌─────────────────┐
+│                 │    ─────────→    │                  │   ─────→   │                 │
+│  Browser Client │                 │  Proxy Server    │             │  Microsoft      │
+│  (Frontend)     │    ←────────     │   (Node.js)      │   ←──────   │  Outlook API    │
+│                 │      WebSocket   │                  │             │                 │
+└─────────────────┘                 └──────────────���───┘             └─────────────────┘
+         │                                   │
+         │                                   │
+    LocalStorage                         Event Emitter
+    (账户缓存)                            (实时事件)
+```
+
+### 前端架构 (Browser Client)
+
+**核心技术栈:**
+- HTML5 + CSS3 + Vanilla JavaScript
+- Tailwind CSS (UI框架)
+- Font Awesome (图标库)
+- SSE (Server-Sent Events)
+
+**核心模块:**
+1. **MailManager 类**: 主应用控制器
+   - 账户数据管理 (CRUD)
+   - UI 渲染和事件处理
+   - SSE 连接管理
+   - 统计信息更新
+
+2. **EmailSequenceManager 类**: 序列号管理器
+   - 邮箱到序列号的映射管理
+   - 本地缓存机制
+   - 自动序列号分配
+
+3. **数据持久化**:
+   - LocalStorage 存储账户数据
+   - 自动序列化/反序列化
+   - 数据版本兼容性
+
+### 后端架构 (Proxy Server)
+
+**核心技术栈:**
+- Node.js + Express.js
+- CORS 代理中间件
+- Event Emitter (SSE)
+- Node-fetch (HTTP客户端)
+
+**核心组件:**
+1. **CORS 代理服务器**: 解决跨域问题
+   - Microsoft Token 端点代理
+   - Outlook API 代理
+   - 请求转发和响应处理
+
+2. **实时监控系统**:
+   - `activeMonitors` Map 管理监控任务
+   - 定时器调度 (15秒间隔)
+   - 自动停止机制 (60秒超时)
+   - SSE 事件广播
+
+3. **邮件服务集成**:
+   - Microsoft OAuth 2.0 流程
+   - Access Token 自动刷新
+   - 邮件获取和验证码提取
+
+### 数据流架构
+
+**账户导入流程:**
+```
+用户输入 → 前端解析 → 序列号分配 → LocalStorage存储 → 后端授权检查 → 邮件获取 → 验证码提取
+```
+
+**实时监控流程:**
+```
+复制邮箱 → API触发 → 监控任务创建 → 定时邮件检查 → 验证码发现 → SSE推送 → 前端更新
+```
+
+**数据存储策略:**
+- **前端**: LocalStorage (账户信息、验证码、序列号)
+- **后端**: 内存临时存储 (监控任务、SSE连接)
+- **外部**: Microsoft Outlook API (邮件数据源)
+
+## 技术方案详解
+
+### 1. Microsoft Outlook 集成方案
+
+**认证机制:**
+- 使用 OAuth 2.0 Refresh Token 流程
+- Client ID + Refresh Token → Access Token
+- Access Token 1小时有效期，自动刷新
+
+**API 端点:**
+- Token: `https://login.microsoftonline.com/common/oauth2/v2.0/token`
+- 邮件: `https://outlook.office.com/api/v2.0/me/messages`
+- 权限范围: `IMAP.AccessAsUser.All`, `Mail.ReadWrite`, `SMTP.Send`
+
+### 2. 智能验证码提取算法
+
+**分层识别策略:**
+```javascript
+// 高可信度模式 (权重: 3.0)
+/(?:verification code|验证码)[\s:：\n\-]*(\d{4,8})/gi
+/your code is|您的验证码是[\s:：\n]*(\d{4,8})/gi
+
+// 中等可信度模式 (权重: 2.0)
+/(?:verify|confirm|activate)[\s\S]{0,50}?(\d{4,8})/gi
+
+// 低可信度模式 (权重: 1.0)
+/\b(\d{4,8})\b/g
+```
+
+**评分系统:**
+- 邮件标题权重: ×3.0
+- 首段内容权重: ×3.0
+- 关键词匹配权重: ×2.0
+- 格式独立权重: ×1.5
+
+### 3. 实时通信方案
+
+**SSE 事件类型:**
+```javascript
+{
+  type: 'monitoring_started',
+  account_id: 'xxx',
+  email: 'user@example.com',
+  message: '开始监控...'
+}
+{
+  type: 'verification_code_found',
+  account_id: 'xxx',
+  code: '123456',
+  sender: 'service@site.com',
+  received_at: '2025-01-01T12:00:00Z'
+}
+{
+  type: 'monitoring_ended',
+  account_id: 'xxx',
+  action: 'auto_stop',
+  message: '监控已结束'
+}
+```
+
+### 4. 性能优化策略
+
+**前端优化:**
+- 分页显示 (每页50条记录)
+- 虚拟滚动 (大数据量时)
+- 防抖搜索 (300ms延迟)
+- 数据缓存 (减少重复请求)
+
+**后端优化:**
+- 连接池管理 (复用HTTP连接)
+- 事件去重 (避免重复推送)
+- 内存缓存 (监控任务状态)
+- 速率限制 (防止API滥用)
+
+### 5. 安全机制
+
+**前端安全:**
+- 敏感数据加密存储 (refresh_token)
+- XSS 防护 (内容转义)
+- CSRF 保护 (同源检查)
+
+**后端安全:**
+- CORS 策略配置
+- 请求大小限制 (50MB)
+- 速率限制 (15分钟200请求)
+- Token 过期验证
+
+**数据安全:**
+- 不在服务端存储敏感信息
+- 客户端数据自主管理
+- 最小权限原则 (仅请求必要API权限)
+
+## 部署架构
+
+### 开发环境
+```
+浏览器 → http://localhost:3001 → proxy-server.js → Microsoft API
+```
+
+### 生产环境
+```
+用户浏览器 → https://www.mailmanager.dev → Docker容器 → 负载均衡 → Microsoft API
+```
+
+**Docker 容器化:**
+- 多阶段构建优化镜像大小
+- 健康检查机制
+- 环境变量配置
+- 日志聚合
+
+**CI/CD 流程:**
+- GitHub Actions 自动构建
+- 多环境镜像标签管理
+- 自动化测试集成
+- 滚动更新部署
+
+## 扩展性设计
+
+### 水平扩展
+- 无状态服务设计
+- 负载均衡支持
+- 数据库分离
+- 缓存层抽象
+
+### 功能扩展
+- 插件化验证码提取器
+- 多邮件服务提供商支持
+- 自定义监控规则
+- API 版本兼容性
+
+### 监控和运维
+- 应用性能监控 (APM)
+- 错误日志聚合
+- 用户行为分析
+- 自动化告警
+
+## 故障排除和最佳实践
+
+### 常见问题和解决方案
+
+#### 1. SSE连接错误 (ERR_CONNECTION_REFUSED)
+**症状**: 浏览器控制台显示 `GET http://localhost:3001/api/events/stream net::ERR_CONNECTION_REFUSED`
+
+**原因**: 代理服务器 `proxy-server.js` 未运行
+
+**解决方案**:
+```bash
+# 启动代理服务器
+node proxy-server.js
+
+# 检查服务器状态
+curl http://localhost:3001/api/health
+```
+
+#### 2. Microsoft OAuth授权失败 (AADSTS70000)
+**症状**: 账户状态显示为"需重新授权"，错误信息包含 `AADSTS70000: The request was denied because one or more scopes requested are unauthorized or expired`
+
+**原因**: Refresh Token 已过期（通常90天有效期）
+
+**解决方案**:
+- 重新获取有效的 Microsoft refresh_token
+- 确认 Azure 应用注册的 client_id 正确
+- 确认应用有正确的API权限（Mail.Read, IMAP.AccessAsUser.All等）
+
+**自动恢复机制**: 系统会在监控时自动尝试重新授权，无需手动干预
+
+#### 3. 邮件同步失败
+**症状**: 账户状态为"已授权"但无法获取邮件
+
+**可能原因**:
+- Access Token 过期（系统会自动刷新）
+- API权限不足
+- 网络连接问题
+
+**解决方案**: 检查服务器日志中的详细错误信息
+
+#### 4. 验证码提取失败
+**症状**: 有新邮件但未提取到验证码
+
+**解决方案**:
+- 检查邮件内容是否符合验证码模式
+- 查看服务器日志中的提取过程
+- 验证码格式应为4-8位数字
+
+### 开发环境配置
+
+#### 本地开发设置
+```bash
+# 1. 安装依赖
+npm install
+
+# 2. 启动代理服务器
+node proxy-server.js
+
+# 3. 访问应用
+open http://localhost:3001
+```
+
+#### 端口配置
+- **代理服务器**: 3001 (默认)
+- **SSE端点**: `http://localhost:3001/api/events/stream`
+- **健康检查**: `http://localhost:3001/api/health`
+
+### 性能优化建议
+
+#### 前端优化
+- 使用分页显示大量账户（每页50条）
+- 启用浏览器缓存减少重复请求
+- 使用防抖搜索（300ms延迟）
+
+#### 后端优化
+- 监控任务每15秒执行一次，避免频繁API调用
+- Token刷新有60秒冷却期，防止频率限制
+- 使用事件驱动架构减少轮询
+
+### 安全最佳实践
+
+#### 数据安全
+- 敏感信息（refresh_token）存储在浏览器LocalStorage
+- 服务端不存储用户敏感数据
+- 使用HTTPS进行生产环境部署
+
+#### API安全
+- 实施速率限制（15分钟200请求）
+- 验证所有API输入
+- 使用CORS策略限制跨域访问
+
+### 调试技巧
+
+#### 启用详细日志
+```javascript
+// 在浏览器控制台启用调试
+localStorage.setItem('debug', 'true');
+
+// 查看SSE连接状态
+// 控制台会显示所有SSE事件
+```
+
+#### 监控API调用
+```bash
+# 监控服务器日志
+tail -f /var/log/mailmanager.log
+
+# 测试API端点
+curl -X POST http://localhost:3001/api/microsoft/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"test","refresh_token":"test","grant_type":"refresh_token"}'
+```
+
+### 版本更新和维护
+
+#### 代码更新流程
+1. 更新前端代码 (`simple-mail-manager.html`)
+2. 更新后端服务 (`proxy-server.js`)
+3. 重启服务器应用更改
+4. 测试所有核心功能
+
+#### 数据备份
+- 用户数据存储在浏览器LocalStorage中
+- 定期导出重要的账户配置
+- 使用版本控制管理代码变更
+
+
+# 系统信息
+
+## 1. 域名和服务
+- **生产环境**: https://www.mailmanager.dev
+- **开发环境**: http://localhost:3001
+- **API代理**: http://localhost:3001/api
+
+## 2. 代码分支策略
+- **main分支**: 生产环境代码，自动触发Docker镜像构建
+- **develop分支**: 开发环境代码，用于测试和集成
+- **feature/***分支**: 功能开发分支
+
+## 3. 部署流程（GitHub Actions）
+
+### 3.1 Docker镜像构建
+部署流程分为两个步骤：
+
+**第一步：GitHub Actions自动构建Docker镜像**
+- 监控代码推送到main分支
+- 自动构建production环境Docker镜像
+- 镜像推送到Container Registry
+
+**第二步：手动部署到生产环境**
+- 在Cloudbear管理界面配置镜像拉取
+- 部署新版本到生产环境
+- 验证部署结果
+
+### 3.2 镜像标签策略
+- **main分支**: `ghcr.io/xxrenzhe/mailmanager:prod-latest`
+- **版本标签**: `ghcr.io/xxrenzhe/mailmanager:prod-[tag]` (如v1.0.0)
+- **开发分支**: `ghcr.io/xxrenzhe/mailmanager:dev-latest`
+
+## 4. 技术栈和依赖
+
+### 前端技术
+- **核心**: HTML5 + CSS3 + Vanilla JavaScript
+- **UI框架**: Tailwind CSS
+- **图标**: Font Awesome 6.4.0
+- **实时通信**: Server-Sent Events (SSE)
+
+### 后端技术
+- **运行时**: Node.js
+- **框架**: Express.js
+- **代理**: CORS代理中间件
+- **事件**: Node.js EventEmitter
+
+### 外部服务
+- **邮件服务**: Microsoft Outlook REST API
+- **认证**: Microsoft OAuth 2.0
+- **API权限**:
+  - `https://outlook.office.com/Mail.Read`
+  - `https://outlook.office.com/IMAP.AccessAsUser.All`
+  - `https://outlook.office.com/POP.AccessAsUser.All`
+  - `https://outlook.office.com/SMTP.Send`
+
+## 5. 环境配置
+
+### 开发环境变量
+```bash
+PROXY_PORT=3001
+NODE_ENV=development
+```
+
+### 生产环境变量
+```bash
+PROXY_PORT=3001
+NODE_ENV=production
+PORT=3000
+```
+
+## 6. 数据存储
+
+### 客户端数据
+- **位置**: 浏览���LocalStorage
+- **内容**: 账户信息、验证码、序列号
+- **格式**: JSON序列化
+- **安全性**: 客户端完全控制，服务端不存储敏感数据
+
+### 服务端数据
+- **类型**: 内存临时存储
+- **内容**: 监控任务状态、SSE连接
+- **生命周期**: 服务重启时清空
+
+## 7. API端点
+
+### 核心端点
+- `GET /` - 主页
+- `POST /api/microsoft/token` - Microsoft Token刷新
+- `GET /api/outlook/*` - Outlook API代理
+- `POST /api/monitor/copy-trigger` - 触发邮件监控
+- `GET /api/events/stream` - SSE实时事件流
+- `GET /api/health` - 健康检查
+- `POST /api/accounts/get` - 账户信息查询
+
+### SSE事件类型
+- `connection` - 连接确认
+- `heartbeat` - 心跳保活
+- `monitoring_started` - 监控开始
+- `monitoring_progress` - 监控进度
+- `monitoring_ended` - 监控结束
+- `monitoring_error` - 监控错误
+- `verification_code_found` - 发现验证码
+- `account_status_changed` - 账户状态变更
+
+## 8. 监控和日志
+
+### 服务器监控
+- **端口检查**: `curl http://localhost:3001/api/health`
+- **日志输出**: 控制台实时日志
+- **错误追踪**: 详细错误信息和堆栈
+
+### 前端调试
+- **SSE连接**: 浏览器开发者工具Network标签
+- **控制台日志**: 详细的操作和错误日志
+- **本地存储**: 开发者工具Application标签查看LocalStorage
+
+## 9. 安全配置
+
+### CORS配置
+```javascript
+{
+  origin: true, // 允许所有来源（开发环境）
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}
+```
+
+### 速率限制
+- **普通API**: 15分钟200请求
+- **批量导入**: 15分钟1000请求
+- **请求体大小**: 最大50MB
+
+## 10. 部署架构
+
+### 容器化部署
+```dockerfile
+# 多阶段构建
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+FROM node:18-alpine AS runtime
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY . .
+EXPOSE 3001
+CMD ["node", "proxy-server.js"]
+```
+
+### 反向代理配置
+```nginx
+server {
+    listen 80;
+    server_name mailmanager.dev;
+
+    location / {
+        proxy_pass http://localhost:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/events/stream {
+        proxy_pass http://localhost:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache off;
+        proxy_set_header Connection '';
+        proxy_http_version 1.1;
+        chunked_transfer_encoding off;
+    }
+}
+```
