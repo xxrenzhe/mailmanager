@@ -461,8 +461,13 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
 
     // 设置1分钟停止定时器
     const stopTimeout = setTimeout(() => {
+        // KISS 修复：先清理定时器，再删除监控任务
         clearInterval(monitoringInterval);
-        activeMonitors.delete(monitorId);
+
+        // 检查监控任务是否存在再删除
+        if (activeMonitors.has(monitorId)) {
+            activeMonitors.delete(monitorId);
+        }
 
         // 从会话监控映射中移除
         if (sessionMonitors.has(userSessionId)) {
@@ -548,7 +553,8 @@ app.post('/api/events/trigger', (req, res) => {
 async function performMonitoringCheck(monitorId, email) {
     const monitoringTask = activeMonitors.get(monitorId);
     if (!monitoringTask || !monitoringTask.accountInfo) {
-        console.error(`[监控检查] 找不到监控任务: ${monitorId}`);
+        // KISS 优化：静默处理已清理的监控任务，避免错误日志干扰
+        console.log(`[监控检查] 监控任务已结束: ${monitorId}`);
         return;
     }
 
