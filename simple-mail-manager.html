@@ -587,7 +587,7 @@
 
                 try {
                     console.log('[SSE] 正在连接实时更新服务...');
-                    this.eventSource = new EventSource('http://localhost:3001/api/events/stream');
+                    this.eventSource = new EventSource('/api/events/stream');
 
                     this.eventSource.onopen = () => {
                         console.log('[SSE] 实时更新连接成功');
@@ -1138,7 +1138,7 @@
                     console.log('正在验证账户授权:', account.email);
 
                     // 使用代理服务器调用Microsoft token刷新端点
-                    const PROXY_URL = 'http://localhost:3001/api/microsoft/token';
+                    const PROXY_URL = '/api/microsoft/token';
                     const response = await fetch(PROXY_URL, {
                         method: 'POST',
                         headers: {
@@ -1206,7 +1206,7 @@
                     console.log('正在同步邮件:', account.email);
 
                     // 使用代理服务器调用Outlook API
-                    const PROXY_URL = 'http://localhost:3001/api/outlook/api/v2.0/me/messages?$orderby=ReceivedDateTime desc&$top=5';
+                    const PROXY_URL = '/api/outlook/api/v2.0/me/messages?$orderby=ReceivedDateTime desc&$top=5';
                     const response = await fetch(PROXY_URL, {
                         headers: {
                             'Authorization': `Bearer ${account.access_token}`,
@@ -1278,7 +1278,7 @@
                 try {
                     console.log(`[Extract] 调用服务端API处理 ${messages.length} 封邮件`);
 
-                    const response = await fetch('http://localhost:3001/api/extract-verification-codes', {
+                    const response = await fetch('/api/extract-verification-codes', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -2205,7 +2205,7 @@
                         }
 
                         // 启动监控（无论授权状态如何）
-                        const response = await fetch('http://localhost:3001/api/monitor/copy-trigger', {
+                        const response = await fetch('/api/monitor/copy-trigger', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
