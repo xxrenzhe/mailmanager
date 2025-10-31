@@ -13,8 +13,8 @@ RUN npm ci --only=production && npm cache clean --force
 # Nginx 反向代理阶段
 FROM nginx:alpine AS nginx
 
-# 安装必要的工具
-RUN apk add --no-cache supervisor
+# 安装必要的工具和Node.js
+RUN apk add --no-cache supervisor nodejs npm curl
 
 # 创建非 root 用户
 RUN addgroup -g 1001 -S nodejs && \
