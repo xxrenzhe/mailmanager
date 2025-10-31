@@ -2492,14 +2492,16 @@
                         try {
                             console.log(`[Token刷新] 直接刷新账户 ${account.email} 的Token`);
 
-                            // 调用后端直接刷新Token（类似curl方式）
+                            // 调用后端直接刷新Token（完全模拟curl方式）
+                            const formData = new URLSearchParams();
+                            formData.append('client_id', account.client_id);
+                            formData.append('refresh_token', account.refresh_token);
+                            formData.append('grant_type', 'refresh_token');
+
                             const response = await fetch('/api/accounts/refresh-token-direct', {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    client_id: account.client_id,
-                                    refresh_token: account.refresh_token
-                                })
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: formData
                             });
 
                             if (response.ok) {

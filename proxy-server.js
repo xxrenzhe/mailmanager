@@ -16,8 +16,8 @@ const MAX_CONNECTIONS = 1000; // 最大SSE连接数限制
 const MEMORY_THRESHOLD = 100 * 1024 * 1024; // 100MB内存阈值
 
 // 添加body parser中间件
-app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // 支持form-data解析
 
 // 提供静态文件服务
 app.use(express.static(__dirname));
@@ -1533,9 +1533,9 @@ app.post('/api/auth/callback', async (req, res) => {
     }
 });
 
-// 直接Token刷新API - 类似curl方式
+// 直接Token刷新API - 完全模拟curl方式
 app.post('/api/accounts/refresh-token-direct', async (req, res) => {
-    const { client_id, refresh_token } = req.body;
+    const { client_id, refresh_token, grant_type } = req.body;
 
     if (!client_id || !refresh_token) {
         return res.status(400).json({
@@ -1549,15 +1549,15 @@ app.post('/api/accounts/refresh-token-direct', async (req, res) => {
         console.log(`[直接Token刷新] refresh_token长度: ${refresh_token ? refresh_token.length : 'null'}`);
         console.log(`[直接Token刷新] refresh_token前缀: ${refresh_token ? refresh_token.substring(0, 20) : 'null'}...`);
 
-        // 完全模拟成功的curl命令 - 不包含scope参数
+        // 完全模拟成功的curl命令 - 直接转发form数据
         const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 client_id: client_id,
                 refresh_token: refresh_token,
-                grant_type: 'refresh_token'
-                // 注意：不包含scope参数，完全模拟成功的curl命令
+                grant_type: grant_type || 'refresh_token'
+                // 注意：完全模拟curl命令格式
             })
         });
 
