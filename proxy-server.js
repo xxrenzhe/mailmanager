@@ -394,6 +394,169 @@ app.get('/api/outlook/*', (req, res) => {
 const activeMonitors = new Map(); // 存储活跃的监控任务 (monitorId -> task)
 const sessionMonitors = new Map(); // 存储会话监控映射 (sessionId -> Set<monitorId>)
 
+// 手动取件端点 - 用户主动触发邮件收取
+app.post('/api/manual-fetch-emails', async (req, res) => {
+    const { sessionId, account_id, email, client_id, refresh_token, current_status, access_token } = req.body;
+    const userSessionId = sessionId || 'default';
+
+    console.log(`[手动取件] 用户主动触发: ${email}, 账户ID: ${account_id} (会话: ${userSessionId})`);
+
+    try {
+        // 检查token有效性，如需要则刷新
+        let tokenToUse = access_token;
+        if (!tokenToUse || current_status !== 'authorized') {
+            console.log(`[手动取件] 账户 ${email} 需要刷新token...`);
+            const authResult = await attemptTokenRefresh({
+                client_id,
+                refresh_token,
+                access_token,
+                current_status
+            });
+
+            if (authResult.success) {
+                tokenToUse = authResult.access_token;
+                console.log(`[手动取件] 账户 ${email} token刷新成功`);
+
+                // 发送token更新事件
+                const tokenUpdateEvent = {
+                    sessionId: userSessionId,
+                    type: 'account_status_changed',
+                    account_id: account_id,
+                    email: email,
+                    status: 'authorized',
+                    access_token: authResult.access_token,
+                    refresh_token: authResult.refresh_token,
+                    message: `账户 ${email} 授权已更新`,
+                    timestamp: new Date().toISOString()
+                };
+                eventEmitter.emit(`monitoring_event_${userSessionId}`, tokenUpdateEvent);
+            } else {
+                console.log(`[手动取件] 账户 ${email} token刷新失败: ${authResult.error}`);
+                return res.json({
+                    success: false,
+                    message: '账户授权失效，请重新导入',
+                    error: authResult.error
+                });
+            }
+        }
+
+        // 获取最近5封邮件
+        const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=5&$orderby=ReceivedDateTime desc', {
+            headers: {
+                'Authorization': `Bearer ${tokenToUse}`,
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!emailResponse.ok) {
+            throw new Error(`邮件API调用失败: ${emailResponse.status} ${emailResponse.statusText}`);
+        }
+
+        const emailData = await emailResponse.json();
+        const messages = emailData.value || [];
+
+        if (messages.length > 0) {
+            console.log(`[手动取件] 账户 ${email} 获取到 ${messages.length} 封邮件`);
+
+            // 提取验证码
+            const results = extractVerificationCodesAdvanced(messages);
+
+            if (results.length > 0) {
+                console.log(`[手动取件] 从邮件中提取到 ${results.length} 个验证码`);
+
+                // 发送验证码发现事件
+                results.forEach(result => {
+                    eventEmitter.emit(`verification_code_found_${userSessionId}`, {
+                        type: 'verification_code_found',
+                        sessionId: userSessionId,
+                        account_id: account_id,
+                        code: result.code,
+                        sender: result.sender,
+                        received_at: result.received_at,
+                        score: result.score || 1.0,
+                        priority: result.priority || 'medium',
+                        subject: result.subject,
+                        timestamp: new Date().toISOString()
+                    });
+                });
+
+                // 发送取件成功事件
+                const successEvent = {
+                    sessionId: userSessionId,
+                    type: 'manual_fetch_complete',
+                    account_id: account_id,
+                    email: email,
+                    message: `手动取件完成：发现 ${results.length} 个验证码`,
+                    emails_found: messages.length,
+                    codes_found: results.length,
+                    timestamp: new Date().toISOString()
+                };
+                eventEmitter.emit(`monitoring_event_${userSessionId}`, successEvent);
+
+                return res.json({
+                    success: true,
+                    message: `手动取件成功，发现 ${results.length} 个验证码`,
+                    emails_found: messages.length,
+                    codes_found: results.length,
+                    codes: results
+                });
+            } else {
+                console.log(`[手动取件] 账户 ${email} 未发现验证码`);
+
+                // 发送无验证码事件
+                const noCodesEvent = {
+                    sessionId: userSessionId,
+                    type: 'manual_fetch_complete',
+                    account_id: account_id,
+                    email: email,
+                    message: `手动取件完成：未发现验证码`,
+                    emails_found: messages.length,
+                    codes_found: 0,
+                    timestamp: new Date().toISOString()
+                };
+                eventEmitter.emit(`monitoring_event_${userSessionId}`, noCodesEvent);
+
+                return res.json({
+                    success: true,
+                    message: '手动取件完成，未发现验证码',
+                    emails_found: messages.length,
+                    codes_found: 0
+                });
+            }
+        } else {
+            console.log(`[手动取件] 账户 ${email} 没有新邮件`);
+
+            return res.json({
+                success: true,
+                message: '手动取件完成，没有新邮件',
+                emails_found: 0,
+                codes_found: 0
+            });
+        }
+
+    } catch (error) {
+        console.error(`[手动取件] 处理失败: ${email}`, error);
+
+        // 发送错误事件
+        const errorEvent = {
+            sessionId: userSessionId,
+            type: 'manual_fetch_error',
+            account_id: account_id,
+            email: email,
+            message: `手动取件失败: ${error.message}`,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        };
+        eventEmitter.emit(`monitoring_event_${userSessionId}`, errorEvent);
+
+        res.status(500).json({
+            success: false,
+            message: '手动取件失败',
+            error: error.message
+        });
+    }
+});
+
 // 监控触发端点 - 复制邮箱时自动启动监控
 app.post('/api/monitor/copy-trigger', (req, res) => {
     const { sessionId, account_id, email, client_id, refresh_token, current_status, access_token } = req.body;
@@ -437,12 +600,16 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
         email: email,
         accountInfo: accountInfo, // 存储完整的账户信息
         startTime: new Date(),
+        monitor_start_time: new Date().toISOString(), // 记录监控开始时间，用于新邮件过滤
         checkCount: 0,
         timeoutId: null
     };
 
     // 存储监控任务到活跃监控映射
     activeMonitors.set(monitorId, monitoringTask);
+
+    // 将监控开始时间添加到accountInfo中，用于邮件过滤
+    accountInfo.monitor_start_time = monitoringTask.monitor_start_time;
 
     // 添加到会话监控映射
     if (!sessionMonitors.has(userSessionId)) {
@@ -453,11 +620,14 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
     console.log(`[监控] 启动监控任务: ${monitorId}, 会话: ${userSessionId}`);
     performMonitoringCheck(monitorId, email);
 
-    // 设置定时器 - 每15秒检查一次
+    // 设置定时器 - 每5秒检查一次，提高响应速度
     const monitoringInterval = setInterval(() => {
         performMonitoringCheck(monitorId, email);
         monitoringTask.checkCount++;
-    }, 15000);
+    }, 5000);
+
+    // 保存定时器ID到监控任务中
+    monitoringTask.intervalId = monitoringInterval;
 
     // 设置1分钟停止定时器
     const stopTimeout = setTimeout(() => {
@@ -549,6 +719,52 @@ app.post('/api/events/trigger', (req, res) => {
     });
 });
 
+// 停止监控的辅助函数
+function stopMonitoringTask(monitorId, reason = '验证码已找到') {
+    const monitoringTask = activeMonitors.get(monitorId);
+    if (!monitoringTask) {
+        return false;
+    }
+
+    const { sessionId, accountId, email } = monitoringTask;
+
+    console.log(`[监控] 停止监控任务: ${monitorId}, 原因: ${reason}`);
+
+    // 清理定时器
+    if (monitoringTask.intervalId) {
+        clearInterval(monitoringTask.intervalId);
+    }
+    if (monitoringTask.timeoutId) {
+        clearTimeout(monitoringTask.timeoutId);
+    }
+
+    // 删除监控任务
+    activeMonitors.delete(monitorId);
+
+    // 从会话监控映射中移除
+    if (sessionMonitors.has(sessionId)) {
+        sessionMonitors.get(sessionId).delete(monitorId);
+        if (sessionMonitors.get(sessionId).size === 0) {
+            sessionMonitors.delete(sessionId);
+        }
+    }
+
+    // 发送监控结束事件
+    const stopEvent = {
+        sessionId: sessionId,
+        type: 'monitoring_ended',
+        account_id: accountId,
+        email: email,
+        action: 'auto_stop',
+        reason: reason,
+        message: `监控已停止: ${reason}`,
+        timestamp: new Date().toISOString()
+    };
+    eventEmitter.emit(`monitoring_event_${sessionId}`, stopEvent);
+
+    return true;
+}
+
 // 执行监控检查的函数
 async function performMonitoringCheck(monitorId, email) {
     const monitoringTask = activeMonitors.get(monitorId);
@@ -624,11 +840,22 @@ async function performMonitoringCheck(monitorId, email) {
         };
         eventEmitter.emit(`monitoring_event_${sessionId}`, progressEventData);
 
-        // KISS 优化：避免重复获取邮件
-        // 如果刚刚重新授权成功，邮件已经被获取过了
-        if (accountInfo.access_token && !accountInfo._just_reauthorized) {
-            await fetchNewEmails(accountId, accountInfo, sessionId);
-        } else if (!accountInfo.access_token) {
+        // KISS 优化：监控时只获取新邮件，避免重复历史邮件
+        if (accountInfo.access_token) {
+            // 如果刚刚重新授权成功，邮件已经被获取过了，使用新邮件模式
+            const fetchOptions = accountInfo._just_reauthorized ?
+                { onlyNew: true, sinceTime: accountInfo.monitor_start_time || new Date(Date.now() - 15000).toISOString() } :
+                { onlyNew: true };
+
+            const emailResult = await fetchNewEmails(accountId, accountInfo, sessionId, fetchOptions);
+
+            // 检查是否发现了验证码，如果是则停止监控
+            if (emailResult && emailResult.should_stop_monitoring && emailResult.verification_codes_found > 0) {
+                console.log(`[监控] 发现验证码，立即停止监控: ${email} (发现 ${emailResult.verification_codes_found} 个验证码)`);
+                stopMonitoringTask(monitorId, `发现 ${emailResult.verification_codes_found} 个验证码`);
+                return; // 提前退出监控检查
+            }
+        } else {
             const noTokenEvent = {
                 sessionId: sessionId,
                 type: 'monitoring_progress',
@@ -703,10 +930,25 @@ async function attemptTokenRefresh(accountInfo) {
     }
 }
 
-// 获取新邮件
-async function fetchNewEmails(accountId, accountInfo, sessionId) {
+// 获取新邮件（支持只获取新邮件的模式）
+async function fetchNewEmails(accountId, accountInfo, sessionId, options = {}) {
+    const { onlyNew = false, sinceTime = null } = options;
+
     try {
-        const response = await fetch(`https://outlook.office.com/api/v2.0/me/messages?$orderby=ReceivedDateTime desc&$top=5`, {
+        // 构建查询参数
+        let query = `$orderby=ReceivedDateTime desc&$top=5`;
+
+        // 如果只获取新邮件，添加时间过滤条件
+        if (onlyNew && sinceTime) {
+            const sinceISO = new Date(sinceTime).toISOString();
+            query += `&$filter=ReceivedDateTime ge ${sinceISO}`;
+        } else if (onlyNew && accountInfo.last_check) {
+            // 使用上次检查时间作为基准
+            const lastCheckISO = new Date(accountInfo.last_check).toISOString();
+            query += `&$filter=ReceivedDateTime ge ${lastCheckISO}`;
+        }
+
+        const response = await fetch(`https://outlook.office.com/api/v2.0/me/messages?${query}`, {
             headers: {
                 'Authorization': `Bearer ${accountInfo.access_token}`,
                 'Content-Type': 'application/json',
@@ -754,10 +996,26 @@ async function fetchNewEmails(accountId, accountInfo, sessionId) {
                     timestamp: new Date().toISOString()
                 };
                 eventEmitter.emit(`monitoring_event_${sessionId}`, codesFoundEvent);
+
+                // 返回验证码发现状态，用于监控停止判断
+                return {
+                    success: true,
+                    verification_codes_found: results.length,
+                    emails_found: messages.length,
+                    should_stop_monitoring: results.length > 0 // 发现验证码时建议停止监控
+                };
             }
         } else {
             console.log(`[邮件] 账户 ${accountInfo.email} 没有新邮件`);
         }
+
+        // 返回默认状态（没有发现验证码）
+        return {
+            success: true,
+            verification_codes_found: 0,
+            emails_found: messages.length,
+            should_stop_monitoring: false
+        };
 
     } catch (error) {
         console.error(`[邮件] 获取邮件失败: ${accountInfo.email}`, error);
@@ -767,6 +1025,15 @@ async function fetchNewEmails(accountId, accountInfo, sessionId) {
             accountInfo.access_token = null;
             accountInfo.current_status = 'reauth_needed';
         }
+
+        // 返回错误状态
+        return {
+            success: false,
+            verification_codes_found: 0,
+            emails_found: 0,
+            should_stop_monitoring: false,
+            error: error.message
+        };
     }
 }
 
@@ -909,8 +1176,8 @@ app.post('/api/accounts/validate', async (req, res) => {
 
         const tokenData = await tokenResponse.json();
 
-        // 2. 获取最近邮件
-        const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=3&$orderby=ReceivedDateTime desc', {
+        // 2. 获取最近5封邮件，不受时间限制
+        const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=5&$orderby=ReceivedDateTime desc', {
             headers: {
                 'Authorization': `Bearer ${tokenData.access_token}`,
                 'Accept': 'application/json'
@@ -1016,8 +1283,8 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
                             // Token刷新成功，继续处理
                             const tokenData = await response.json();
 
-                            // 获取最近3封邮件进行验证
-                            const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=3&$orderby=ReceivedDateTime desc', {
+                            // 获取最近5封邮件进行验证（符合用户需求）
+                            const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=5&$orderby=ReceivedDateTime desc', {
                                 headers: {
                                     'Authorization': `Bearer ${tokenData.access_token}`,
                                     'Accept': 'application/json'

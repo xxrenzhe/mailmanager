@@ -655,6 +655,14 @@
                         this.handleAccountStatusChanged(data);
                         break;
 
+                    case 'manual_fetch_complete':
+                        this.handleManualFetchComplete(data);
+                        break;
+
+                    case 'manual_fetch_error':
+                        this.handleManualFetchError(data);
+                        break;
+
                     case 'bulk_import_progress':
                         this.handleBulkImportProgress(data);
                         break;
@@ -759,6 +767,9 @@
                         account.refresh_token = data.refresh_token;
                     }
 
+                    // 更新最后检查时间，用于新邮件过滤
+                    account.last_check = new Date().toISOString();
+
                     this.saveAccounts();
                     this.render();
                     this.updateStats();
@@ -771,6 +782,54 @@
 
                     const message = statusMessages[data.new_status] || `账户状态更新为: ${data.new_status}`;
                     this.showNotification(`${account.email}: ${message}`, data.new_status === 'authorized' ? 'success' : 'warning');
+                }
+            }
+
+            // 处理手动取件完成事件
+            handleManualFetchComplete(data) {
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    // 更新账户最后检查时间
+                    account.last_check = new Date().toISOString();
+
+                    // 如果有验证码找到，也更新验证码信息
+                    if (data.verification_codes && data.verification_codes.length > 0) {
+                        if (!account.verification_codes) {
+                            account.verification_codes = [];
+                        }
+
+                        // 添加新的验证码到历史记录
+                        data.verification_codes.forEach(code => {
+                            account.verification_codes.unshift({
+                                code: code.code,
+                                sender: code.sender,
+                                received_at: code.received_at,
+                                created_at: new Date().toISOString()
+                            });
+                        });
+
+                        // 最多保留10个历史验证码
+                        if (account.verification_codes.length > 10) {
+                            account.verification_codes = account.verification_codes.slice(0, 10);
+                        }
+                    }
+
+                    this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
+                    // 显示成功消息
+                    const message = data.message || '邮件收取完成';
+                    this.showNotification(`${account.email}: ${message}`, 'success');
+                }
+            }
+
+            // 处理手动取件错��事件
+            handleManualFetchError(data) {
+                const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (account) {
+                    const errorMessage = data.error || '收取失败';
+                    this.showNotification(`${account.email}: ${errorMessage}`, 'error');
                 }
             }
 
@@ -1795,6 +1854,14 @@
                             </td>
                             <td class="px-3 py-3 whitespace-nowrap w-32">
                                 <div class="flex gap-1 flex-wrap">
+                                    <!-- 手动取件按钮 - 始终显示 -->
+                                    <button onclick="manualFetchEmails('${account.id}')"
+                                            class="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded transition text-base"
+                                            title="手动收取最新邮件">
+                                        取件
+                                    </button>
+
+                                    <!-- 状态按钮：重新授权状态或复制按钮 -->
                                     ${account.status === 'reauthorizing' ?
                                         `<span class="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-sm font-medium">
                                             自动重新授权中...
@@ -1808,6 +1875,7 @@
                                             复制
                                         </button>`
                                     }
+
                                     <button onclick="copyLatestCode('${account.id}')"
                                             class="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition text-base">
                                         验证码
@@ -3177,6 +3245,43 @@
 
             // 真实同步过程
             manager.syncAccountEmails(id);
+        }
+
+        // 手动收取邮件函数
+        async function manualFetchEmails(id) {
+            const account = manager.accounts.find(acc => acc.id === id);
+            if (!account) {
+                manager.showError('账户不存在');
+                return;
+            }
+
+            // 显示开始通知
+            manager.showNotification(`正在收取 ${account.email} 的最新邮件...`, 'info');
+
+            try {
+                const response = await fetch('/api/manual-fetch-emails', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        account_id: id,
+                        session_id: manager.sessionId
+                    })
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.details || result.message || '收取失败');
+                }
+
+                manager.showSuccess(`已启动 ${account.email} 的邮件收取，请稍候...`);
+
+            } catch (error) {
+                console.error('手动取件失败:', error);
+                manager.showError(`手动取件失败: ${error.message}`);
+            }
         }
 
         function filterAccounts() {
