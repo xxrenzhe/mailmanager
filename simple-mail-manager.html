@@ -206,39 +206,39 @@
                 <table class="w-full">
                     <thead class="bg-gray-50 border-b">
                         <tr>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-20" onclick="sortBySequence()">
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-16" onclick="sortBySequence()">
                                 <span class="flex items-center gap-1">
                                     序号
                                     <i id="seqSortIcon" class="fas fa-sort text-gray-400"></i>
                                 </span>
                             </th>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24" onclick="sortByStatus()">
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-20" onclick="sortByStatus()">
                                 <span class="flex items-center gap-1">
                                     状态
                                     <i id="statusSortIcon" class="fas fa-sort text-gray-400"></i>
                                 </span>
                             </th>
-                            <th class="px-4 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-80" onclick="sortByEmail()">
+                            <th class="px-4 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-40" onclick="sortByEmail()">
                                 <span class="flex items-center gap-1">
                                     邮箱地址
                                     <i id="emailSortIcon" class="fas fa-sort text-gray-400"></i>
                                 </span>
                             </th>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-16">选中</th>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-36">最新验证码</th>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-36" onclick="sortByCodeTime()">
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-14">选中</th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-32">最新验证码</th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28" onclick="sortByCodeTime()">
                                 <span class="flex items-center gap-1">
                                     验证码时间
                                     <i id="codeTimeSortIcon" class="fas fa-sort text-gray-400"></i>
                                 </span>
                             </th>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28" onclick="sortBySender()">
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24" onclick="sortBySender()">
                                 <span class="flex items-center gap-1">
                                     发件人
                                     <i id="senderSortIcon" class="fas fa-sort text-gray-400"></i>
                                 </span>
                             </th>
-                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-32">操作</th>
+                            <th class="px-3 py-3 text-left text-base font-medium text-gray-700 uppercase tracking-wider w-40">操作</th>
                         </tr>
                     </thead>
                     <tbody id="accountsTableBody" class="bg-white divide-y divide-gray-200">
@@ -572,23 +572,189 @@
                 await this.loadAccounts();
                 await this.sequenceManager.initialize(this.accounts);
 
-                // 启动SSE实时更新
-                this.connectSSE();
+                // 初始化WebSocket重连相关变量
+                this.wsConnected = false;
+                this.wsReconnectAttempts = 0;
+                this.wsReconnectTimer = null;
+
+                // 优先启动WebSocket实时更新
+                this.connectWebSocket();
 
                 this.render();
                 this.updateStats();
             }
 
-            // 连接SSE实时更新系统（支持多用户会话隔离）
+            // WebSocket实时更新系统 - 替代SSE提供更稳定的连接
+            connectWebSocket() {
+                if (this.websocket) {
+                    this.websocket.close();
+                }
+
+                // 从localStorage获取或生成会话ID
+                if (!this.sessionId) {
+                    const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                    if (savedSessionId) {
+                        this.sessionId = savedSessionId;
+                        console.log(`[WebSocket] 恢复会话ID: ${this.sessionId}`);
+                    } else {
+                        this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        localStorage.setItem('mail_manager_session_id', this.sessionId);
+                        console.log(`[WebSocket] 生成并保存会话ID: ${this.sessionId}`);
+                    }
+                }
+
+                try {
+                    console.log('[WebSocket] 正在连接实时更新服务...');
+                    // 连接策略：优先代理连接，备用直连
+                    let wsUrl;
+                    if (window.location.protocol === 'https:') {
+                        // HTTPS环境，使用wss
+                        wsUrl = `wss://${window.location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
+                    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                        // 本地开发环境，直连WebSocket端口
+                        wsUrl = `ws://localhost:3002?sessionId=${encodeURIComponent(this.sessionId)}`;
+                    } else {
+                        // 生产环境，使用代理连接
+                        wsUrl = `ws://${window.location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
+                    }
+
+                    console.log(`[WebSocket] 连接URL: ${wsUrl}`);
+                    this.websocket = new WebSocket(wsUrl);
+
+                    this.websocket.onopen = () => {
+                        console.log('[WebSocket] 实时更新连接成功');
+                        this.wsConnected = true;
+                        this.showNotification('已连接到WebSocket实时更新服务', 'success');
+
+                        // 订阅所有事件类型
+                        this.websocket.send(JSON.stringify({
+                            type: 'subscribe',
+                            events: [
+                                'verification_code_found',
+                                'account_status_changed',
+                                'manual_fetch_complete',
+                                'manual_fetch_error',
+                                'bulk_import_progress',
+                                'import_progress',
+                                'monitoring_started',
+                                'monitoring_ended'
+                            ]
+                        }));
+                    };
+
+                    this.websocket.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            this.handleWebSocketEvent(data);
+                        } catch (error) {
+                            console.error('[WebSocket] 解析事件数据失败:', error);
+                        }
+                    };
+
+                    this.websocket.onerror = (error) => {
+                        console.error('[WebSocket] 连接错误:', error);
+                        this.wsConnected = false;
+                        this.attemptWebSocketReconnect();
+                    };
+
+                    this.websocket.onclose = (event) => {
+                        console.log(`[WebSocket] 连接关闭: ${event.code} - ${event.reason}`);
+                        this.wsConnected = false;
+                        this.attemptWebSocketReconnect();
+                    };
+
+                } catch (error) {
+                    console.error('[WebSocket] 连接失败:', error);
+                    this.showNotification('无法连接WebSocket实时服务，尝试SSE备用方案', 'warning');
+                    this.connectSSE(); // 备用SSE连接
+                }
+            }
+
+            // WebSocket重连机制
+            attemptWebSocketReconnect() {
+                if (this.wsReconnectTimer) {
+                    clearTimeout(this.wsReconnectTimer);
+                }
+
+                const reconnectDelay = Math.min(1000 * Math.pow(2, this.wsReconnectAttempts), 30000);
+                this.wsReconnectAttempts++;
+
+                console.log(`[WebSocket] ${reconnectDelay/1000}秒后尝试第${this.wsReconnectAttempts}次重连...`);
+
+                this.wsReconnectTimer = setTimeout(() => {
+                    if (!this.wsConnected) {
+                        this.connectWebSocket();
+                    }
+                }, reconnectDelay);
+            }
+
+            // 处理WebSocket事件
+            handleWebSocketEvent(data) {
+                console.log('[WebSocket] 收到事件:', data);
+                console.log('[WebSocket] 事件类型:', data.type);
+
+                switch (data.type) {
+                    case 'connection_established':
+                        console.log(`[WebSocket] 连接确认: ${data.clientId}`);
+                        this.wsReconnectAttempts = 0; // 重置重连计数
+                        break;
+
+                    case 'ping':
+                        // 响应心跳
+                        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                            this.websocket.send(JSON.stringify({
+                                type: 'pong',
+                                timestamp: new Date().toISOString()
+                            }));
+                        }
+                        break;
+
+                    case 'verification_code_found':
+                        this.handleVerificationCodeFound(data);
+                        break;
+
+                    case 'account_status_changed':
+                        this.handleAccountStatusChanged(data);
+                        break;
+
+                    case 'manual_fetch_complete':
+                        this.handleManualFetchComplete(data);
+                        break;
+
+                    case 'manual_fetch_error':
+                        this.handleManualFetchError(data);
+                        break;
+
+                    case 'bulk_import_progress':
+                        this.handleBulkImportProgress(data);
+                        break;
+
+                    case 'import_progress':
+                        this.handleImportProgress(data);
+                        break;
+
+                    default:
+                        console.log(`[WebSocket] 未知事件类型: ${data.type}`);
+                }
+            }
+
+            // 连接SSE实时更新系统（WebSocket备用方案）
             connectSSE() {
                 if (this.eventSource) {
                     this.eventSource.close();
                 }
 
-                // 生成或获取会话ID
+                // 从localStorage获取或生成会话ID
                 if (!this.sessionId) {
-                    this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    console.log(`[SSE] 生成会话ID: ${this.sessionId}`);
+                    const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                    if (savedSessionId) {
+                        this.sessionId = savedSessionId;
+                        console.log(`[SSE] 恢复会话ID: ${this.sessionId}`);
+                    } else {
+                        this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        localStorage.setItem('mail_manager_session_id', this.sessionId);
+                        console.log(`[SSE] 生成并保存会话ID: ${this.sessionId}`);
+                    }
                 }
 
                 try {
@@ -621,6 +787,8 @@
             // 处理SSE事件
             handleSSEEvent(data) {
                 console.log('[SSE] 收到事件:', data);
+                console.log('[SSE] 事件类型:', data.type);
+                console.log('[SSE] 当前会话ID:', this.sessionId);
 
                 switch (data.type) {
                     case 'connection':
@@ -729,8 +897,11 @@
 
             // 处理发现验证码事件
             handleVerificationCodeFound(data) {
+                console.log('[SSE] 收到验证码事件:', data);
                 const account = this.accounts.find(acc => acc.id === data.account_id);
                 if (account) {
+                    console.log('[SSE] 找到账户:', account.email, '当前验证码数量:', account.codes?.length || 0);
+
                     account.codes.unshift({
                         code: data.code,
                         sender: data.sender,
@@ -749,6 +920,9 @@
                     this.updateStats();
 
                     this.showNotification(`收到新验证码: ${data.code} (${data.sender})`, 'success');
+                    console.log('[SSE] 验证码已更新到账户，重新渲染完成');
+                } else {
+                    console.log('[SSE] 未找到账户，ID:', data.account_id);
                 }
             }
 
@@ -1803,8 +1977,14 @@
                 const totalPages = Math.ceil(totalRecords / this.pageSize);
                 const from = (this.currentPage - 1) * this.pageSize + 1;
                 const to = Math.min(this.currentPage * this.pageSize, totalRecords);
+
+                console.log(`[分页调试] 总记录: ${totalRecords}, 每页: ${this.pageSize}, 总页数: ${totalPages}, 当前页: ${this.currentPage}`);
+                console.log(`[分页调试] 显示范围: ${from} - ${to}`);
+
                 const paginatedAccounts = this.sortAccounts([...this.filteredAccounts])
                     .slice(from - 1, to);
+
+                console.log(`[分页调试] 本页显示账户数: ${paginatedAccounts.length}`);
 
                 tbody.innerHTML = paginatedAccounts.map((account) => {
                     const latestCode = account.codes[0];
@@ -1814,18 +1994,18 @@
 
                     return `
                         <tr class="hover:bg-gray-50 transition-colors">
-                            <td class="px-3 py-3 whitespace-nowrap text-center w-20">
+                            <td class="px-3 py-3 whitespace-nowrap text-center w-16">
                                 <span class="text-base font-medium text-gray-900 bg-gray-100 px-2 py-1 rounded">
                                     ${account.sequence || account.import_seq || '-'}
                                 </span>
                             </td>
-                            <td class="px-3 py-3 whitespace-nowrap w-24">
+                            <td class="px-3 py-3 whitespace-nowrap w-20">
                                 <span class="${statusClass}">
                                     <i class="${statusIcon} mr-1"></i>
                                     <span class="text-base">${statusText}</span>
                                 </span>
                             </td>
-                            <td class="px-4 py-3 whitespace-nowrap w-80">
+                            <td class="px-4 py-3 whitespace-nowrap w-40">
                                 <div class="flex items-center">
                                     <i class="fas fa-envelope text-gray-400 mr-3 text-base"></i>
                                     <span class="text-base font-medium text-gray-900 cursor-pointer hover:text-blue-600 transition truncate"
@@ -1835,24 +2015,24 @@
                                     </span>
                                 </div>
                             </td>
-                            <td class="px-3 py-3 whitespace-nowrap text-center w-16">
+                            <td class="px-3 py-3 whitespace-nowrap text-center w-14">
                                 <input type="checkbox"
                                        class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                                        data-account-id="${account.id}"
                                        onchange="handleAccountSelection(this)">
                             </td>
-                            <td class="px-3 py-3 whitespace-nowrap w-24 code-cell">
+                            <td class="px-3 py-3 whitespace-nowrap w-32 code-cell">
                                 <div class="flex flex-col">
                                     ${this.getVerificationCodeDisplay(account)}
                                 </div>
                             </td>
-                            <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-36">
+                            <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-28">
                                 ${this.getActiveTimeDisplay(account)}
                             </td>
-                            <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-28">
+                            <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-24">
                                 ${this.getEmailSenderDisplay(account)}
                             </td>
-                            <td class="px-3 py-3 whitespace-nowrap w-32">
+                            <td class="px-3 py-3 whitespace-nowrap w-40">
                                 <div class="flex gap-1 flex-wrap">
                                     <!-- 手动取件按钮 - 始终显示 -->
                                     <button onclick="manualFetchEmails('${account.id}')"
@@ -2058,27 +2238,40 @@
 
             // 验证码显示逻辑 - 只显示纯数字验证码（参考accounts_simple.ejs）
             getVerificationCodeDisplay(account) {
+                console.log(`[验证码显示] 账户 ${account.email} 数据检查:`, {
+                    codes: account.codes,
+                    codesLength: account.codes?.length || 0,
+                    last_sync: account.last_sync,
+                    emailsLength: account.emails?.length || 0
+                });
+
                 if (!account.codes || account.codes.length === 0) {
+                    console.log(`[验证码显示] 账户 ${account.email} 无验证码数据`);
                     return '<span class="text-gray-400 text-base">无</span>';
                 }
 
                 const latestCode = account.codes[0];
+                console.log(`[验证码显示] 账户 ${account.email} 最新验证码:`, latestCode);
 
                 // 验证码显示逻辑：只要是从最近5封邮件中提取的验证码就显示
                 // 这包括导入时自动获取的验证码和手动同步获取的验证码
                 // 不基于时间判断，基于数据来源判断（从最新邮件提取）
 
-                // 如果账户有邮件数据，说明已经进行过邮件同步
+                // 如果账户有邮件��据，说明已经进行过邮件同步
                 const hasEmailData = account.emails && account.emails.length > 0;
 
                 // 如果账户有last_sync时间戳，说明进行过邮件同步
                 const hasBeenSynced = !!account.last_sync;
 
-                // 如果账户进行了邮件同步或有邮件数据，则显示验证码
-                if (!hasBeenSynced && !hasEmailData) {
-                    // 没有进行过邮件同步的账户不显示验证码（避免显示旧的历史验证码）
-                    return '<span class="text-gray-400 text-base">无</span>';
-                }
+                console.log(`[验证码显示] 账户 ${account.email} 同步状态:`, {
+                    hasEmailData,
+                    hasBeenSynced,
+                    last_sync: account.last_sync
+                });
+
+                // 简化验证码显示逻辑：只要有验证码数据就显示
+                // 后端已经成功提取了验证码，应该立即显示
+                console.log(`[验证码显示] 账户 ${account.email} 将显示验证码，跳过同步检查`);
 
                 // 检查是否为纯数字验证码
                 const isNumericCode = /^\d+$/.test(latestCode.code);
@@ -2146,15 +2339,18 @@
             // 复制邮箱地址并自动启动监控
             async copyEmailToClipboard(accountId) {
                 const account = this.accounts.find(acc => acc.id === accountId);
-                if (!account) return;
+                if (!account) {
+                    console.error(`[错误] 找不到账户ID: ${accountId}`);
+                    return;
+                }
 
                 // KISS 防抖机制：防止重复触发，但允许持续监控直到成功
                 const now = Date.now();
-                const lastMonitorTime = this.lastMonitorTimes?.[account.email] || 0;
+                const lastMonitorTime = this.lastMonitorTimes?.[accountId] || 0;
                 const DEBOUNCE_TIME = 30000; // 30秒防抖，避免重复触发
 
                 if (now - lastMonitorTime < DEBOUNCE_TIME) {
-                    console.log(`[防抖] 邮箱 ${account.email} 触发过于频繁，跳过重复触发`);
+                    console.log(`[防抖] 账户 ${account.email} (ID: ${accountId}) 触发过于频繁，跳过重复触发`);
                     return; // 静默跳过，不显示提示
                 }
 
@@ -2164,7 +2360,7 @@
 
                     // 记录触发时间（KISS 原则：简单的时间戳记录）
                     if (!this.lastMonitorTimes) this.lastMonitorTimes = {};
-                    this.lastMonitorTimes[account.email] = now;
+                    this.lastMonitorTimes[accountId] = now;
 
                     // 仅在特定场景触发监控：复制邮箱触发后台监控
                     // 监控将在后端持续运行60秒直到成功获取验证码
@@ -3255,19 +3451,47 @@
                 return;
             }
 
+            console.log('[手动取件] 找到账户:', account);
+            console.log('[手动取件] 账户邮箱:', account.email);
+            console.log('[手动取件] 账户ID:', id);
+            console.log('[手动取件] sessionId:', manager.sessionId);
+
             // 显示开始通知
             manager.showNotification(`正在收取 ${account.email} 的最新邮件...`, 'info');
 
             try {
+                // 确保sessionId存在，如果不存在则生成一个新的
+                if (!manager.sessionId) {
+                    const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                    if (savedSessionId) {
+                        manager.sessionId = savedSessionId;
+                        console.log('[手动取件] 恢复sessionId:', manager.sessionId);
+                    } else {
+                        manager.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        localStorage.setItem('mail_manager_session_id', manager.sessionId);
+                        console.log('[手动取件] 生成并保存新sessionId:', manager.sessionId);
+                    }
+                }
+
+                const requestData = {
+                    account_id: id,
+                    email: account.email,
+                    client_id: account.client_id,
+                    refresh_token: account.refresh_token,
+                    access_token: account.access_token,
+                    current_status: account.status,
+                    session_id: manager.sessionId
+                };
+
+                console.log('[手动取件] 发送的数据:', requestData);
+                console.log('[手动取件] sessionId类型和长度:', typeof manager.sessionId, manager.sessionId.length);
+
                 const response = await fetch('/api/manual-fetch-emails', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        account_id: id,
-                        session_id: manager.sessionId
-                    })
+                    body: JSON.stringify(requestData)
                 });
 
                 const result = await response.json();

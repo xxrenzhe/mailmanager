@@ -11,29 +11,76 @@
 # 拉取最新镜像
 docker pull ghcr.io/xxrenzhe/mailmanager:prod-latest
 
-# 运行容器
+# 运行容器（支持WebSocket）
 docker run -d \
   --name mailmanager \
   -p 80:80 \
+  -p 3002:3002 \
+  -e NODE_ENV=production \
+  -e PROXY_PORT=3001 \
+  -e WS_PORT=3002 \
   --restart unless-stopped \
   ghcr.io/xxrenzhe/mailmanager:prod-latest
 
 # 访问应用
 open http://localhost
+
+# 健康检查
+curl http://localhost/health
+curl http://localhost/ws-health
 ```
 
 **可选镜像标签:**
 - `ghcr.io/xxrenzhe/mailmanager:prod-latest` - 主分支最新版本 (推荐)
 - `ghcr.io/xxrenzhe/mailmanager:dev-latest` - 开发版本
-- `ghcr.io/xxrenzhe/mailmanager:prod-v1.0.0` - 特定版本标签
+- `ghcr.io/xxrenzhe/mailmanager:prod-v2.0.0` - WebSocket升级版本
 
 ### 🔧 环境变量配置
 ```bash
 docker run -d \
   --name mailmanager \
   -p 80:80 \
+  -p 3002:3002 \
   -e NODE_ENV=production \
   -e PROXY_PORT=3001 \
+  -e WS_PORT=3002 \
+  --restart unless-stopped \
+  ghcr.io/xxrenzhe/mailmanager:prod-latest
+```
+
+### 📊 服务状态检查
+```bash
+# 检查容器状态
+docker ps
+
+# 查看服务日志
+docker logs mailmanager
+
+# 健康检查
+curl http://localhost/health
+
+# WebSocket健康检查
+curl http://localhost/ws-health
+
+# 检查端口占用
+netstat -tulpn | grep -E ':(80|3002)'
+```
+
+### 🔧 带数据持久化部署
+```bash
+# 创建数据目录
+mkdir -p ./mailmanager-data ./mailmanager-logs
+
+# 运行容器（带数据卷挂载）
+docker run -d \
+  --name mailmanager \
+  -p 80:80 \
+  -p 3002:3002 \
+  -v $(pwd)/mailmanager-data:/app/data \
+  -v $(pwd)/mailmanager-logs:/app/logs \
+  -e NODE_ENV=production \
+  -e PROXY_PORT=3001 \
+  -e WS_PORT=3002 \
   --restart unless-stopped \
   ghcr.io/xxrenzhe/mailmanager:prod-latest
 ```
@@ -264,7 +311,33 @@ curl -s https://login.microsoftonline.com/common/oauth2/v2.0/token \
 
 ### 3. 实时通信方案
 
-**SSE 事件类型:**
+**WebSocket + SSE 双重保障:**
+
+**WebSocket事件类型（主要）:**
+```javascript
+{
+  type: 'connection_established',
+  clientId: 'ws_xxx',
+  sessionId: 'session_xxx',
+  timestamp: '2025-01-01T12:00:00Z'
+}
+{
+  type: 'verification_code_found',
+  sessionId: 'session_xxx',
+  account_id: 'xxx',
+  code: '123456',
+  sender: 'service@site.com',
+  received_at: '2025-01-01T12:00:00Z'
+}
+{
+  type: 'account_status_changed',
+  sessionId: 'session_xxx',
+  account_id: 'xxx',
+  status: 'authorized'
+}
+```
+
+**SSE事件类型（备用）:**
 ```javascript
 {
   type: 'monitoring_started',
@@ -279,13 +352,13 @@ curl -s https://login.microsoftonline.com/common/oauth2/v2.0/token \
   sender: 'service@site.com',
   received_at: '2025-01-01T12:00:00Z'
 }
-{
-  type: 'monitoring_ended',
-  account_id: 'xxx',
-  action: 'auto_stop',
-  message: '监控已结束'
-}
 ```
+
+**连接策略:**
+- **本地开发**: 直连 `ws://localhost:3002`
+- **生产HTTP**: 代理 `ws://domain.com/ws`
+- **生产HTTPS**: 安全连接 `wss://domain.com/ws`
+- **自动降级**: WebSocket失败时使用SSE
 
 ### 4. 性能优化策略
 
@@ -722,13 +795,15 @@ curl -X POST http://localhost:3001/api/microsoft/token \
 - **核心**: HTML5 + CSS3 + Vanilla JavaScript
 - **UI框架**: Tailwind CSS
 - **图标**: Font Awesome 6.4.0
-- **实时通信**: Server-Sent Events (SSE)
+- **实时通信**: WebSocket (主要) + Server-Sent Events (备用)
+- **重连机制**: 指数退避算法，自动降级
 
 ### 后端技术
 - **运行时**: Node.js
 - **框架**: Express.js
 - **代理**: CORS代理中间件
-- **事件**: Node.js EventEmitter
+- **实时通信**: WebSocket服务器 + EventEmitter
+- **进程管理**: Supervisord (Docker容器内)
 
 ### 外部服务
 - **邮件服务**: Microsoft Outlook REST API
@@ -822,10 +897,11 @@ PORT=3000
 ### 容器化部署（单容器架构）
 
 **架构特点：**
-- nginx 反向代理 + Node.js 应用集成在单个容器
-- 使用 supervisord 同时管理 nginx 和 Node.js 服务
-- 端口 80 对外提供 HTTP 服务，内部 3001 端口运行 Node.js
-- SSE 流特殊优化配置，支持长连接
+- nginx 反向代理 + Node.js + WebSocket 服务器集成在单个容器
+- 使用 supervisord 同时管理 nginx、Node.js 和 WebSocket 服务
+- 端口 80 对外提供 HTTP 服务，内部 3001 端口运行 Node.js，3002 端口运行 WebSocket
+- WebSocket 协议优化配置，支持双向实时通信
+- SSE 作为备用方案，确保服务连续性
 
 **Dockerfile 结构：**
 ```dockerfile
@@ -835,17 +911,18 @@ FROM node:18-alpine AS node-builder
 # Nginx 反向代理阶段
 FROM nginx:alpine AS nginx
 # 集成 supervisord 管理多进程
-# 内置 nginx 配置（端口 80 → 3001）
-# SSE 流特殊配置优化
+# 内置 nginx 配置（端口 80 → 3001, WebSocket代理 80 → 3002）
+# WebSocket 和 SSE 流特殊配置优化
 EXPOSE 80
 CMD ["supervisord"]
 ```
 
 **服务组件：**
-- **nginx** (端口 80): 反向代理，静态文件服务，SSL 终结
+- **nginx** (端口 80): 反向代理，静态文件服务，WebSocket 代理，SSL 终结
 - **Node.js** (内部端口 3001): 邮件管理 API，SSE 服务
+- **WebSocket** (内部端口 3002): 实时双向通信服务
 - **supervisord**: 进程管理器，自动重启和日志管理
-- **健康检查**: 内置 `/health` 端点监控服务状态
+- **健康检查**: 内置 `/health` 和 `/ws-health` 端点监控服务状态
 
 ### 单容器部署配置
 
@@ -860,7 +937,19 @@ server {
         client_max_body_size 50M;
     }
 
-    # SSE 流处理
+    # WebSocket 代理配置
+    location /ws {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_cache off;
+        proxy_buffering off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    # SSE 流处理（WebSocket备用方案）
     location /api/events/stream {
         proxy_pass http://127.0.0.1:3001;
         proxy_cache off;
@@ -872,6 +961,11 @@ server {
     # 健康检查
     location /health {
         return 200 "healthy\n";
+    }
+
+    # WebSocket健康检查
+    location /ws-health {
+        return 200 "websocket-healthy\n";
     }
 }
 ```
@@ -896,6 +990,21 @@ autorestart=true
 ```
 
 ## 🚀 版本更新日志
+
+### v2.1.0 - WebSocket实时通信升级版本 (2025-10-31)
+**重大更新:**
+- 🔄 **WebSocket实时通信**: 替代SSE，提供更稳定的连接
+- 🔌 **双重保障机制**: WebSocket主要 + SSE备用
+- 🤖 **智能重连**: 指数退避算法，自动恢复连接
+- 📡 **多端口支持**: HTTP(80) + WebSocket(3002) 双端口架构
+- 🛠️ **连接策略**: 本地/生产环境自适应连接方式
+
+**技术改进:**
+- WebSocket服务器独立进程管理
+- 前端智能连接降级机制
+- Nginx WebSocket代理优化配置
+- 实时通信性能大幅提升
+- 连接状态可视化管理
 
 ### v2.0.0 - 单容器架构版本 (2025-10-31)
 **重大更新:**
@@ -934,4 +1043,4 @@ autorestart=true
 ---
 
 *最后更新: 2025-10-31*
-*版本: v2.0.0*
+*版本: v2.1.0*

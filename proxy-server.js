@@ -7,9 +7,11 @@ const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const EventEmitter = require('events');
+const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PROXY_PORT || 3001;
+const WS_PORT = process.env.WS_PORT || 3002;
 
 // 性能和安全配置
 const MAX_CONNECTIONS = 1000; // 最大SSE连接数限制
@@ -466,7 +468,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
 
                 // 发送验证码发现事件
                 results.forEach(result => {
-                    eventEmitter.emit(`verification_code_found_${userSessionId}`, {
+                    pushEventToSession(userSessionId, {
                         type: 'verification_code_found',
                         sessionId: userSessionId,
                         account_id: account_id,
@@ -972,7 +974,7 @@ async function fetchNewEmails(accountId, accountInfo, sessionId, options = {}) {
                 console.log(`[验证码] 从邮件中提取到 ${results.length} 个验证码`);
 
                 results.forEach(result => {
-                    eventEmitter.emit(`verification_code_found_${sessionId}`, {
+                    pushEventToSession(sessionId, {
                         type: 'verification_code_found',
                         sessionId: sessionId,
                         account_id: accountId,
@@ -1203,7 +1205,7 @@ app.post('/api/accounts/validate', async (req, res) => {
 
             // 发送验证码发现事件
             verificationCodes.forEach(result => {
-                eventEmitter.emit(`verification_code_found_${sessionId || 'default'}`, {
+                pushEventToSession(sessionId || 'default', {
                     type: 'verification_code_found',
                     sessionId: sessionId || 'default',
                     account_id: accountId,
@@ -1456,7 +1458,7 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
     }
 
     try {
-        console.log(`[Token检查] 开始检查 ${accounts.length} 个账户的Token有效性`);
+        console.log(`[Token检查] 检查 ${accounts.length} 个账户`);
 
         const results = await Promise.allSettled(
             accounts.map(async (account) => {
@@ -1526,7 +1528,7 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
         const validTokens = results.filter(r => r.status === 'fulfilled' && r.value.valid).length;
         const invalidTokens = results.filter(r => r.status === 'fulfilled' && !r.value.valid).length;
 
-        console.log(`[Token检查] 检查完成: ${validTokens} 有效, ${invalidTokens} 无效`);
+        console.log(`[Token检查] 完成: ${validTokens} 有效, ${invalidTokens} 无效`);
 
         res.json({
             success: true,
@@ -1834,9 +1836,7 @@ app.post('/api/accounts/refresh-token-direct', async (req, res) => {
     }
 
     try {
-        console.log(`[直接Token刷新] 开始刷新Token，client_id: ${client_id.substring(0, 8)}...`);
-        console.log(`[直接Token刷新] refresh_token长度: ${refresh_token ? refresh_token.length : 'null'}`);
-        console.log(`[直接Token刷新] refresh_token前缀: ${refresh_token ? refresh_token.substring(0, 20) : 'null'}...`);
+        console.log(`[Token刷新] 开始刷新 ${client_id.substring(0, 8)}...`);
 
         // 完全模拟成功的curl命令 - 直接转发form数据
         const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
@@ -1861,7 +1861,7 @@ app.post('/api/accounts/refresh-token-direct', async (req, res) => {
         }
 
         const tokenData = await tokenResponse.json();
-        console.log(`[直接Token刷新] Token刷新成功，expires_in: ${tokenData.expires_in}秒`);
+        console.log(`[Token刷新] 刷新成功，有效期: ${tokenData.expires_in}秒`);
 
         res.json({
             success: true,
@@ -1953,10 +1953,10 @@ app.post('/api/extract-verification-codes', (req, res) => {
 
         console.log(`[Extract] 提取完成，找到 ${results.length} 个验证码`);
 
-        // 触发SSE事件通知客户端
+        // 触发WebSocket事件通知客户端
         if (results.length > 0) {
             results.forEach(result => {
-                eventEmitter.emit(`verification_code_found_${userSessionId}`, {
+                pushEventToSession(userSessionId, {
                     type: 'verification_code_found',
                     sessionId: userSessionId,
                     account_id: accountId,
@@ -2051,7 +2051,145 @@ app.use((req, res) => {
     });
 });
 
-// 启动服务器
+// WebSocket服务器 - 替代SSE提供更稳定的实时通信
+const wss = new WebSocket.Server({ port: WS_PORT });
+const wsClients = new Map(); // 存储WebSocket客户端连接
+
+console.log(`🔌 WebSocket服务器已配置 - 端口: ${WS_PORT}`);
+
+wss.on('connection', (ws, request) => {
+    const clientId = generateClientId();
+    const sessionId = extractSessionId(request) || 'default';
+
+    console.log(`[WebSocket] 新客户端连接: ${clientId} (会话: ${sessionId})`);
+
+    // 存储客户端信息
+    const clientInfo = {
+        id: clientId,
+        sessionId: sessionId,
+        ws: ws,
+        connectedAt: new Date(),
+        lastPing: new Date()
+    };
+
+    wsClients.set(clientId, clientInfo);
+
+    // 发送连接确认
+    ws.send(JSON.stringify({
+        type: 'connection_established',
+        clientId: clientId,
+        sessionId: sessionId,
+        timestamp: new Date().toISOString()
+    }));
+
+    // 处理客户端消息
+    ws.on('message', (data) => {
+        try {
+            const message = JSON.parse(data.toString());
+            handleWebSocketMessage(clientId, message);
+        } catch (error) {
+            console.error(`[WebSocket] 消息解析错误:`, error);
+        }
+    });
+
+    // 处理连接关闭
+    ws.on('close', (code, reason) => {
+        console.log(`[WebSocket] 客户端断开: ${clientId}, 原因: ${reason}`);
+        wsClients.delete(clientId);
+    });
+
+    // 处理连接错误
+    ws.on('error', (error) => {
+        console.error(`[WebSocket] 连接错误: ${clientId}:`, error);
+        wsClients.delete(clientId);
+    });
+
+    // 心跳检测
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }));
+            clientInfo.lastPing = new Date();
+        } else {
+            clearInterval(pingInterval);
+        }
+    }, 30000); // 30秒心跳
+});
+
+// 生成客户端ID
+function generateClientId() {
+    return `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// 从请求中提取会话ID
+function extractSessionId(request) {
+    const url = request.url;
+    const match = url.match(/sessionId=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+// 处理WebSocket消息
+function handleWebSocketMessage(clientId, message) {
+    const client = wsClients.get(clientId);
+    if (!client) return;
+
+    switch (message.type) {
+        case 'pong':
+            client.lastPing = new Date();
+            break;
+        case 'subscribe':
+            client.subscriptions = message.events || [];
+            console.log(`[WebSocket] 客户端 ${clientId} 订阅事件:`, client.subscriptions);
+            break;
+        default:
+            console.log(`[WebSocket] 未知消息类型: ${message.type}`);
+    }
+}
+
+// 广播消息到指定会话的所有客户端
+function broadcastToSession(sessionId, eventData) {
+    const message = JSON.stringify(eventData);
+    let sentCount = 0;
+
+    wsClients.forEach((client, clientId) => {
+        if (client.sessionId === sessionId && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(message);
+            sentCount++;
+        }
+    });
+
+    console.log(`[WebSocket] 广播到会话 ${sessionId}: ${eventData.type} (${sentCount}个客户端)`);
+    return sentCount;
+}
+
+// 广播消息到所有客户端
+function broadcastToAll(eventData) {
+    const message = JSON.stringify(eventData);
+    let sentCount = 0;
+
+    wsClients.forEach((client, clientId) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(message);
+            sentCount++;
+        }
+    });
+
+    console.log(`[WebSocket] 全网广播: ${eventData.type} (${sentCount}个客户端)`);
+    return sentCount;
+}
+
+// 统一事件推送函数 - 同时支持SSE和WebSocket（过渡期兼容）
+function pushEventToSession(sessionId, eventData) {
+    // WebSocket推送（优先）
+    const wsCount = broadcastToSession(sessionId, eventData);
+
+    // 如果WebSocket没有客户端，则使用SSE作为备用
+    if (wsCount === 0) {
+        eventEmitter.emit(`${eventData.type}_${sessionId}`, eventData);
+        console.log(`[事件推送] SSE备用推送: ${eventData.type} (会话: ${sessionId})`);
+    }
+}
+
+// 启动HTTP服务器
 app.listen(PORT, () => {
     console.log(`🚀 邮件管理代理服务器已启动`);
     console.log(`📍 代理端口: ${PORT}`);
@@ -2061,6 +2199,7 @@ app.listen(PORT, () => {
     console.log(`   1. 确保代理服务器运行在此端口`);
     console.log(`   2. 浏览器版本会自动使用代理解决CORS问题`);
     console.log(`   3. 支持所有Outlook API调用和OAuth token验证`);
+    console.log(`   4. WebSocket实时通信端口: ${WS_PORT}`);
 });
 
 // 高级验证码提取算法函数

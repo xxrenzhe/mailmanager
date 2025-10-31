@@ -36,7 +36,7 @@ COPY --chown=mailmanager:nodejs server/ ./server/
 RUN mkdir -p /app/data /app/etc && \
     chown -R mailmanager:nodejs /app/data
 
-# 创建 nginx 配置
+# 创建 nginx 配置（支持WebSocket代理）
 RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
 server {
     listen 80;
@@ -59,7 +59,34 @@ server {
         proxy_read_timeout 60s;
     }
 
-    # SSE 流处理（特殊配置）
+    # WebSocket 代理配置
+    location /ws {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket 特殊配置
+        proxy_cache off;
+        proxy_buffering off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+
+        # 心跳保活
+        proxy_set_header Proxy-Connection "";
+        proxy_connect_timeout 7d;
+    }
+
+    # 直接WebSocket端口访问（备用）
+    location /websocket {
+        return 301 /ws;
+    }
+
+    # SSE 流处理（特殊配置 - WebSocket备用方案）
     location /api/events/stream {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
@@ -84,6 +111,13 @@ server {
     location /health {
         access_log off;
         return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+
+    # WebSocket健康检查
+    location /ws-health {
+        access_log off;
+        return 200 "websocket-healthy\n";
         add_header Content-Type text/plain;
     }
 }
