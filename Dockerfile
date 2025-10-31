@@ -29,9 +29,8 @@ COPY --from=node-builder /app/node_modules ./node_modules
 # 复制应用文件
 COPY --chown=mailmanager:nodejs proxy-server.js ./
 COPY --chown=mailmanager:nodejs simple-mail-manager.html ./
+COPY --chown=mailmanager:nodejs public/ ./public/
 COPY --chown=mailmanager:nodejs server/ ./server/
-
-# 注意：public 目录暂时不复制，因为权限问题导致构建失败
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/data /app/logs /app/etc && \

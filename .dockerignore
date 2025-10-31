@@ -46,7 +46,7 @@ fetch_*.js
 import_*.html
 auth_url_generator.html
 proxy-server.html
-simple-mail-manager.html
+# simple-mail-manager.html - 生产环境需要，保留
 
 # 开发工具
 start-*.sh
