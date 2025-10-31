@@ -2,11 +2,83 @@
 1. 使用中文进行沟通和文档输出
 2. 遵循KISS原则，在确保实现业务需求的情况下，简化代码实现，提高可维护性
 
+# 🚀 快速开始
+
+## 单容器部署（推荐）
+
+### 🐳 Docker 部署
+```bash
+# 拉取最新镜像
+docker pull xxrenzhe/mailmanager:latest
+
+# 运行容器
+docker run -d \
+  --name mailmanager \
+  -p 80:80 \
+  --restart unless-stopped \
+  xxrenzhe/mailmanager:latest
+
+# 访问应用
+open http://localhost
+```
+
+### 🔧 环境变量配置
+```bash
+docker run -d \
+  --name mailmanager \
+  -p 80:80 \
+  -e NODE_ENV=production \
+  -e PROXY_PORT=3001 \
+  --restart unless-stopped \
+  xxrenzhe/mailmanager:latest
+```
+
+### 📊 服务状态检查
+```bash
+# 检查容器状态
+docker ps
+
+# 查看服务日志
+docker logs mailmanager
+
+# 健康检查
+curl http://localhost/health
+```
+
+## 本地开发环境
+
+### 📋 前置要求
+- Node.js 18+
+- npm 或 yarn
+
+### 🛠️ 安装和运行
+```bash
+# 1. 克隆仓库
+git clone https://github.com/xxrenzhe/mailmanager.git
+cd mailmanager
+
+# 2. 安装依赖
+npm install
+
+# 3. 启动服务
+node proxy-server.js
+
+# 4. 访问应用
+open http://localhost:3001
+```
+
 # 系统架构、功能描述和技术方案
 
 ## 系统概述
 
-MailManager 是一个现代化的邮件账户管理系统，主要功能是批量管理 Microsoft Outlook 邮箱账户，自动提取验证码，并提供实时监控功能。系统采用混合架构设计，结合了前端浏览器缓存和后端业务逻辑的优势。
+MailManager 是一个现代化的邮件账户管理系统，主要功能是批量管理 Microsoft Outlook 邮箱账户，自动提取验证码，并提供实时监控功能。系统采用单容器部署架构，集成了 nginx 反向代理和 Node.js 应用，提供高性能、高可用的邮件管理服务。
+
+### 🎯 核心价值
+- **批量管理**: 高效管理大量 Microsoft Outlook 邮箱账户
+- **智能监控**: 实时监控邮件并自动提取验证码
+- **单容器部署**: 简化部署和运维，降低基础设施复杂度
+- **实时更新**: SSE 技术实现毫秒级数据同步
+- **安全可靠**: 自动重新授权机制确保服务持续可用
 
 ## 核心功能
 
@@ -386,12 +458,184 @@ curl -X POST http://localhost:3001/api/microsoft/token \
 - 使用版本控制管理代码变更
 
 
+# 📖 使用指南
+
+## 🚀 快速上手
+
+### 第一步：访问系统
+- Docker 部署：`http://localhost`
+- 本地开发：`http://localhost:3001`
+
+### 第二步：批量导入邮箱
+1. 点击"导入邮箱"按钮
+2. 按格式输入邮箱信息（每行一个）：
+   ```
+   邮箱地址,客户端ID,刷新令牌
+   user@outlook.com,client_id,refresh_token
+   ```
+3. 点击"导入"开始批量处理
+
+### 第三步：监控验证码
+1. 复制需要监控的邮箱地址
+2. 系统自动启动 60 秒监控
+3. 新邮件中的验证码会实时显示
+
+## 🔧 高级功能
+
+### 实时监控特性
+- **自动触发**: 复制邮箱地址即开始监控
+- **智能时长**: 60秒自动停止，避免资源浪费
+- **实时更新**: SSE 技术实现毫秒级数据同步
+- **自动重授权**: 令牌过期时自动刷新
+
+### 验证码提取算法
+```javascript
+// 高可信度模式 (权重: 3.0)
+/(?:verification code|验证码)[\s:：\n\-]*(\d{4,8})/gi
+
+// 中等可信度模式 (权重: 2.0)
+/(?:verify|confirm|activate)[\s\S]{0,50}?(\\d{4,8})/gi
+
+// 低可信度模式 (权重: 1.0)
+/\b(\d{4,8})\b/g
+```
+
+### 邮件同步策略
+- 获取最近 5 封邮件进行分析
+- 基于发件人智能分类和评分
+- 历史验证码记录（最近 10 个）
+- 支持多种验证码格式识别
+
+## ⚡ 性能优化
+
+### 前端优化
+- 分页显示（每页 50 条记录）
+- 防抖搜索（300ms 延迟）
+- 数据缓存减少重复请求
+- 响应式设计适配各种设备
+
+### 后端优化
+- 连接池管理复用 HTTP 连接
+- 事件去重避免重复推送
+- 内存缓存监控任务状态
+- 速率限制防止 API 滥用
+
+## 🔒 安全配置
+
+### 数据安全
+- 客户端数据完全自主管理
+- 服务端不存储敏感信息
+- 最小权限原则
+- HTTPS 生产环境部署
+
+### 访问控制
+- CORS 策略配置
+- 请求大小限制（50MB）
+- 速率限制（15分钟200请求）
+- Token 过期验证
+
+## 🚨 故障排除
+
+### 常见问题
+
+#### 1. 容器启动失败
+```bash
+# 检查端口占用
+netstat -tulpn | grep :80
+
+# 查看容器日志
+docker logs mailmanager
+
+# 重启容器
+docker restart mailmanager
+```
+
+#### 2. 邮箱授权失败
+- **现象**: 账户状态显示"需重新授权"
+- **原因**: Refresh Token 已过期（90天有效期）
+- **解决**: 重新获取有效的 Microsoft refresh_token
+
+#### 3. 验证码提取失败
+- **检查邮件内容是否符合验证码模式**
+- **确认邮件格式为 4-8 位数字**
+- **查看服务器日志中的提取过程**
+
+#### 4. 监控功能异常
+```bash
+# 检查 SSE 连接
+curl -N http://localhost/api/events/stream
+
+# 验证 API 端点
+curl http://localhost/api/health
+```
+
+## 📋 监控和维护
+
+### 健康检查
+```bash
+# 服务健康状态
+curl http://localhost/health
+
+# 详细的系统状态
+curl http://localhost/api/health
+```
+
+### 日志管理
+```bash
+# 容器日志
+docker logs -f mailmanager
+
+# 应用日志（容器内）
+docker exec mailmanager tail -f /app/logs/mailmanager.log
+```
+
+### 数据备份
+- 用户数据存储在浏览器 LocalStorage
+- 定期导出重要的账户配置
+- 使用版本控制管理代码变更
+
+## 🔧 开发指南
+
+### 本地开发设置
+```bash
+# 克隆项目
+git clone https://github.com/xxrenzhe/mailmanager.git
+cd mailmanager
+
+# 安装依赖
+npm install
+
+# 启动开发服务器
+node proxy-server.js
+
+# 访问应用
+open http://localhost:3001
+```
+
+### 调试技巧
+```javascript
+// 启用详细日志
+localStorage.setItem('debug', 'true');
+
+// 查看 SSE 连接状态
+// 浏览器开发者工具 Network 标签
+```
+
+### API 测试
+```bash
+# 测试 Token 端点
+curl -X POST http://localhost:3001/api/microsoft/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"test","refresh_token":"test","grant_type":"refresh_token"}'
+```
+
 # 系统信息
 
 ## 1. 域名和服务
 - **生产环境**: https://www.mailmanager.dev
+- **Docker 环境**: http://localhost (端口 80)
 - **开发环境**: http://localhost:3001
-- **API代理**: http://localhost:3001/api
+- **API代理**: http://localhost/api
 
 ## 2. 代码分支策略
 - **main分支**: 生产环境代码，自动触发Docker镜像构建
@@ -596,3 +840,44 @@ autorestart=true
 command=curl -f http://localhost/health
 autorestart=true
 ```
+
+## 🚀 版本更新日志
+
+### v2.0.0 - 单容器架构版本 (2025-10-31)
+**重大更新:**
+- 🐳 **单容器部署**: 集成 nginx + Node.js + supervisord
+- 🚀 **GitHub Actions**: 自动化 Docker 构建和安全扫描
+- 📚 **完整文档**: 从快速开始到故障排除的全覆盖指南
+- 🔧 **架构优化**: 生产级部署配置和健康检查
+
+**技术改进:**
+- 多阶段构建优化镜像大小
+- 内置反向代理和负载均衡
+- 进程管理和自动重启机制
+- SSE 长连接优化配置
+
+### v1.5.0 - 智能监控版本
+**核心功能:**
+- 🤖 **自动重新授权**: 令牌过期时自动刷新
+- 📊 **实时监控系统**: 60秒智能监控机制
+- 🔄 **SSE 实时更新**: 毫秒级数据同步
+- 🎯 **验证码提取算法**: 多层级智能识别
+
+### v1.0.0 - 基础版本
+**初始功能:**
+- 邮箱账户批量管理
+- Microsoft Outlook API 集成
+- 基础验证码提取
+- 本地存储数据持久化
+
+## 📞 技术支持
+
+如有问题或建议，请通过以下方式联系：
+- **GitHub Issues**: https://github.com/xxrenzhe/mailmanager/issues
+- **文档更新**: 参考 `docs/MustKnowV1.md`
+- **社区讨论**: 欢迎 Pull Request 和代码贡献
+
+---
+
+*最后更新: 2025-10-31*
+*版本: v2.0.0*
