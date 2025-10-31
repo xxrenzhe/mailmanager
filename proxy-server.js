@@ -593,6 +593,95 @@ app.get('/api/events/stream/:sessionId?', (req, res) => {
     });
 });
 
+// 简单账户验��API（KISS原则）
+app.post('/api/accounts/validate', async (req, res) => {
+    const { sessionId, accountId, client_id, refresh_token } = req.body;
+
+    try {
+        console.log(`[验证] 开始验证账户 ${accountId}`);
+
+        // 1. 快速检查token有效性
+        const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: client_id,
+                refresh_token: refresh_token,
+                grant_type: 'refresh_token',
+                scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All'
+            })
+        });
+
+        if (!tokenResponse.ok) {
+            return res.json({
+                success: false,
+                status: 'reauth_needed',
+                message: 'Token验证失败'
+            });
+        }
+
+        const tokenData = await tokenResponse.json();
+
+        // 2. 获取最近邮件
+        const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=3&$orderby=ReceivedDateTime desc', {
+            headers: {
+                'Authorization': `Bearer ${tokenData.access_token}`,
+                'Accept': 'application/json'
+            }
+        });
+
+        let emails = [];
+        if (emailResponse.ok) {
+            const emailData = await emailResponse.json();
+            emails = emailData.value || [];
+        }
+
+        // 3. 提取验证码
+        let verificationCodes = [];
+        if (emails.length > 0) {
+            const results = extractVerificationCodesAdvanced(emails);
+            verificationCodes = results.map(r => ({
+                code: r.code,
+                sender: r.sender,
+                received_at: r.received_at,
+                score: r.score || 1.0
+            }));
+
+            // 发送验证码发现事件
+            verificationCodes.forEach(result => {
+                eventEmitter.emit(`verification_code_found_${sessionId || 'default'}`, {
+                    type: 'verification_code_found',
+                    sessionId: sessionId || 'default',
+                    account_id: accountId,
+                    code: result.code,
+                    sender: result.sender,
+                    received_at: result.received_at,
+                    score: result.score,
+                    timestamp: new Date().toISOString()
+                });
+            });
+        }
+
+        res.json({
+            success: true,
+            status: 'authorized',
+            message: `验证成功，找到 ${emails.length} 封邮件`,
+            emails_count: emails.length,
+            verification_codes: verificationCodes,
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token
+        });
+
+    } catch (error) {
+        console.error('[验证] 账户验证失败:', error);
+        res.json({
+            success: false,
+            status: 'error',
+            message: '验证过程出错'
+        });
+    }
+});
+
 // 高级验证码提取API（支持会话隔离）
 app.post('/api/extract-verification-codes', (req, res) => {
     const { sessionId, messages, accountId } = req.body;

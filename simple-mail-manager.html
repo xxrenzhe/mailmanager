@@ -2367,27 +2367,51 @@
                 try {
                     console.log(`[异步验证] 开始验证 ${account.email}`);
 
-                    // 快速验证token有效性
-                    const tokenValid = await this.quickTokenCheck(account.client_id, account.refresh_token);
-                    if (!tokenValid) {
-                        this.updateAccountStatus(account.id, 'reauth_needed');
-                        console.log(`[异步验证] ${account.email} token无效，需重新授权 (${Date.now() - startTime}ms)`);
-                        return;
-                    }
+                    // 使用简单统一的验证API（KISS原则）
+                    const response = await fetch('/api/accounts/validate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: this.sessionId,
+                            accountId: account.id,
+                            client_id: account.client_id,
+                            refresh_token: account.refresh_token
+                        })
+                    });
 
-                    // 获取邮件（限制为最近3封，提高速度）
-                    const emails = await this.fetchRecentEmailsFast(account);
-                    if (emails.length > 0) {
-                        await this.extractVerificationCodes(emails, account.id);
-                        this.updateAccountStatus(account.id, 'authorized');
+                    if (response.ok) {
+                        const result = await response.json();
+
+                        if (result.success) {
+                            // 更新账户的token信息
+                            if (result.access_token) {
+                                account.access_token = result.access_token;
+                            }
+                            if (result.refresh_token) {
+                                account.refresh_token = result.refresh_token;
+                            }
+
+                            this.updateAccountStatus(account.id, 'authorized');
+
+                            // 添加验证码到账户
+                            if (result.verification_codes && result.verification_codes.length > 0) {
+                                result.verification_codes.forEach(code => {
+                                    this.addVerificationCode(account.id, code);
+                                });
+                            }
+
+                            console.log(`[异步验证] ${account.email} 成功 (${Date.now() - startTime}ms) - ${result.message}`);
+                        } else {
+                            this.updateAccountStatus(account.id, result.status || 'reauth_needed');
+                            console.log(`[异步验证] ${account.email} 失败: ${result.message} (${Date.now() - startTime}ms)`);
+                        }
                     } else {
-                        this.updateAccountStatus(account.id, 'authorized'); // 无邮件也是成功
+                        this.updateAccountStatus(account.id, 'reauth_needed');
+                        console.warn(`[异步验证] ${account.email} API调用失败: ${response.status}`);
                     }
-
-                    console.log(`[异步验证] ${account.email} 完成 (${Date.now() - startTime}ms)`);
 
                 } catch (error) {
-                    console.warn(`[异步验证] ${account.email} 失败:`, error.message);
+                    console.warn(`[异步验证] ${account.email} 异常:`, error.message);
                     this.updateAccountStatus(account.id, 'reauth_needed');
                 }
             }
