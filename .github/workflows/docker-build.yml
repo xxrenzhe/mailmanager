@@ -111,22 +111,55 @@ jobs:
       with:
         sarif_file: 'trivy-results.sarif'
 
-  # Notify on success
+  # Notify on build result
   notify:
     runs-on: ubuntu-latest
     needs: [build, security-scan]
     if: always()
 
     steps:
-    - name: Notify on success
+    - name: Build successful notification
       if: needs.build.result == 'success'
       run: |
-        echo "✅ Docker image built and pushed successfully!"
-        echo "Repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "Tags: prod-latest"
+        echo "🎉 ==============================================="
+        echo "🚀 Docker Image Build & Deploy Successful!"
+        echo "🎉 ==============================================="
+        echo ""
+        echo "📦 Image Details:"
+        echo "  Repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+        echo "  Tag: prod-latest"
+        echo "  Pull Command: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest"
+        echo ""
+        echo "🔗 Quick Deploy:"
+        echo "  docker run -d --name mailmanager -p 80:80 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest"
+        echo ""
+        echo "✅ Build completed successfully!"
 
-    - name: Notify on failure
-      if: failure()
+    - name: Build failed notification
+      if: needs.build.result == 'failure' || needs.build.result == 'cancelled'
       run: |
-        echo "❌ Docker build failed!"
-        echo "Please check the workflow logs for details."
+        echo "❌ ==============================================="
+        echo "🚨 Docker Build Failed!"
+        echo "❌ ==============================================="
+        echo ""
+        echo "🔍 Debug Information:"
+        echo "  Build Result: ${{ needs.build.result }}"
+        echo "  Security Scan Result: ${{ needs.security-scan.result }}"
+        echo ""
+        echo "📋 Next Steps:"
+        echo "  1. Check the build job logs for detailed errors"
+        echo "  2. Review the GitHub Actions workflow"
+        echo "  3. Fix any issues and push changes"
+        echo ""
+
+    - name: Security scan summary
+      if: always() && needs.security-scan.result == 'success'
+      run: |
+        echo "🔒 Security Scan: ✅ PASSED"
+        echo "   No critical vulnerabilities detected"
+
+    - name: Security scan failed
+      if: needs.security-scan.result == 'failure'
+      run: |
+        echo "🔒 Security Scan: ⚠️  ISSUES FOUND"
+        echo "   Check Security tab in GitHub repository for details"
