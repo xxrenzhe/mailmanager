@@ -40,9 +40,9 @@ jobs:
       with:
         images: ${{ env.IMAGE_NAME }}
         tags: |
-          type=raw,value=prod-latest,enable={{is_default_branch}}
-          type=raw,value=dev-latest,enable={{branch == 'develop'}}
-          type=semver,pattern={{version}},suffix=-prod
+          ghcr.io/xxrenzhe/mailmanager:prod-latest
+          ghcr.io/xxrenzhe/mailmanager:dev-latest
+          ghcr.io/xxrenzhe/mailmanager:prod-{{version}}
         flavor: |
           latest=false
 
