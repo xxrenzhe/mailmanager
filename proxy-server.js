@@ -1546,6 +1546,8 @@ app.post('/api/accounts/refresh-token-direct', async (req, res) => {
 
     try {
         console.log(`[直接Token刷新] 开始刷新Token，client_id: ${client_id.substring(0, 8)}...`);
+        console.log(`[直接Token刷新] refresh_token长度: ${refresh_token ? refresh_token.length : 'null'}`);
+        console.log(`[直接Token刷新] refresh_token前缀: ${refresh_token ? refresh_token.substring(0, 20) : 'null'}...`);
 
         // 直接调用Microsoft OAuth token endpoint（类似curl）
         const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
