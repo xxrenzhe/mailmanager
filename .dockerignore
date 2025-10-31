@@ -1,0 +1,77 @@
+# 排除不必要的文件以减小构建上下文
+
+# Git 相关
+.git
+.gitignore
+.github
+
+# 临时文件和缓存
+*.tmp
+*.temp
+*.log
+.DS_Store
+Thumbs.db
+
+# 开发和测试文件
+test_*.js
+test_*.md
+debug_*.js
+*_test.js
+*.test.js
+tests/
+
+# 文档和说明文件
+*.md
+docs/
+README*
+
+# 配置文件示例
+*.example
+.env.example
+.env.local
+.env.development
+
+# 备份文件
+*.bak
+*.backup
+backup/
+
+# 临时脚本和工具
+create_*.js
+fix_*.js
+update_*.js
+verify_*.js
+resume_*.js
+fetch_*.js
+import_*.html
+auth_url_generator.html
+proxy-server.html
+simple-mail-manager.html
+
+# 开发工具
+start-*.sh
+
+# 数据文件（运行时生成）
+data/store.json
+data/store.json.*
+data/mailmanager.db
+
+# Node.js（node_modules 已在构建阶段处理）
+node_modules/
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 依赖管理
+package-lock.json
+
+# 本地开发文件
+.env
+*.log
