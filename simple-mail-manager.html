@@ -748,8 +748,17 @@
             handleAccountStatusChanged(data) {
                 const account = this.accounts.find(acc => acc.id === data.account_id);
                 if (account) {
-                    account.status = data.new_status;
+                    account.status = data.status;
                     account.updated_at = new Date().toISOString();
+
+                    // KISS 优化：更新token信息确保持久化
+                    if (data.access_token) {
+                        account.access_token = data.access_token;
+                    }
+                    if (data.refresh_token) {
+                        account.refresh_token = data.refresh_token;
+                    }
+
                     this.saveAccounts();
                     this.render();
                     this.updateStats();

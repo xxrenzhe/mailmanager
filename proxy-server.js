@@ -578,21 +578,32 @@ async function performMonitoringCheck(monitorId, email) {
                 try {
                     const authResult = await attemptTokenRefresh(accountInfo);
                     if (authResult.success) {
-                        console.log(`[监控检查] 账户 ${email} 重新授权成功`);
+                        console.log(`[监控检查] 账��� ${email} 重新授权成功`);
                         accountInfo.access_token = authResult.access_token;
+                        // 关键：更新refresh_token确保持久化
+                        if (authResult.refresh_token) {
+                            accountInfo.refresh_token = authResult.refresh_token;
+                        }
                         accountInfo.current_status = 'authorized';
 
-                        // 发送授权成功事件
+                        // 发送授权成功事件，包含新的token信息
                         const authSuccessEvent = {
                             sessionId: sessionId,
                             type: 'account_status_changed',
                             account_id: accountId,
                             email: email,
                             status: 'authorized',
+                            access_token: authResult.access_token,
+                            refresh_token: authResult.refresh_token,
                             message: `账户 ${email} 授权已恢复，开始检查邮件...`,
                             timestamp: new Date().toISOString()
                         };
                         eventEmitter.emit(`monitoring_event_${sessionId}`, authSuccessEvent);
+
+                        // KISS 优化：重新授权成功后立即尝试获取邮件
+                        console.log(`[监控检查] 账户 ${email} 重新授权成功，立即尝试获取邮件`);
+                        accountInfo._just_reauthorized = true; // 设置临时标记
+                        await fetchNewEmails(accountId, accountInfo, sessionId);
                     } else {
                         console.log(`[监控检查] 账户 ${email} 重新授权失败: ${authResult.error}`);
                     }
@@ -613,10 +624,11 @@ async function performMonitoringCheck(monitorId, email) {
         };
         eventEmitter.emit(`monitoring_event_${sessionId}`, progressEventData);
 
-        // 如果有有效的access_token，尝试获取邮件
-        if (accountInfo.access_token) {
+        // KISS 优化：避免重复获取邮件
+        // 如果刚刚重新授权成功，邮件已经被获取过了
+        if (accountInfo.access_token && !accountInfo._just_reauthorized) {
             await fetchNewEmails(accountId, accountInfo, sessionId);
-        } else {
+        } else if (!accountInfo.access_token) {
             const noTokenEvent = {
                 sessionId: sessionId,
                 type: 'monitoring_progress',
@@ -627,6 +639,9 @@ async function performMonitoringCheck(monitorId, email) {
             };
             eventEmitter.emit(`monitoring_event_${sessionId}`, noTokenEvent);
         }
+
+        // 清除临时标记
+        delete accountInfo._just_reauthorized;
 
     } catch (error) {
         console.error(`[监控检查] 检查失败: ${email}`, error);
@@ -674,6 +689,7 @@ async function attemptTokenRefresh(accountInfo) {
             return {
                 success: true,
                 access_token: data.access_token,
+                refresh_token: data.refresh_token, // 关键：返回新的refresh_token确保持久化
                 expires_in: data.expires_in
             };
         } else {
