@@ -1910,16 +1910,9 @@
                     return '<span class="text-gray-400 text-base">无</span>';
                 }
 
-                // 检查账户是否是刚导入的（5分钟内创建且未经过监控）
-                const now = new Date();
-                const createdAt = new Date(account.created_at);
-                const timeSinceCreation = now - createdAt;
-                const isRecentlyImported = timeSinceCreation < 5 * 60 * 1000; // 5分钟内
-
-                if (isRecentlyImported) {
-                    // 刚导入的账户不显示时间
-                    return '<span class="text-gray-400 text-base">无</span>';
-                }
+                // KISS 原则：移除复杂的时间检查逻辑
+                // 后端提取到验证码后应该立即显示，不需要等待冷却期
+                // 注释：刚导入的账户也可以显示验证码时间
 
                 // 显示验证码收件时间
                 return this.formatFullTime(latestCode.received_at);
@@ -1936,15 +1929,9 @@
                     return '<span class="text-gray-400 text-base">无</span>';
                 }
 
-                // 检查账户是否是刚导入的（5分钟内创建且未经过监控）
-                const now = new Date();
-                const createdAt = new Date(account.created_at);
-                const timeSinceCreation = now - createdAt;
-                const isRecentlyImported = timeSinceCreation < 5 * 60 * 1000; // 5分钟内
-
-                if (isRecentlyImported) {
-                    return '<span class="text-gray-400 text-base">无</span>';
-                }
+                // KISS 原则：移除复杂的时间检查逻辑
+                // 后端提取到验证码后应该立即显示发件人，不需要等待冷却期
+                // 注释：刚导入的账户也可以显示发件人信息
 
                 const sender = latestCode.sender;
                 let displayName = sender;
@@ -2084,21 +2071,32 @@
                 const account = this.accounts.find(acc => acc.id === accountId);
                 if (!account) return;
 
+                // KISS 防抖机制：防止重复触发，但允许持续监控直到成功
+                const now = Date.now();
+                const lastMonitorTime = this.lastMonitorTimes?.[account.email] || 0;
+                const DEBOUNCE_TIME = 30000; // 30秒防抖，避免重复触发
+
+                if (now - lastMonitorTime < DEBOUNCE_TIME) {
+                    console.log(`[防抖] 邮箱 ${account.email} 触发过于频繁，跳过重复触发`);
+                    return; // 静默跳过，不显示提示
+                }
+
                 try {
                     await navigator.clipboard.writeText(account.email);
                     this.showSuccess('邮箱已复制: ' + account.email);
 
-                    // 对所有账户都启动1分钟监控和授权检查
-                    try {
-                        console.log(`[监控] 开始为账户 ${account.email} 启动1分钟监控（后端将自动处理授权检查）`);
+                    // 记录触发时间（KISS 原则：简单的时间戳记录）
+                    if (!this.lastMonitorTimes) this.lastMonitorTimes = {};
+                    this.lastMonitorTimes[account.email] = now;
+
+                    // 仅在特定场景触发监控：复制邮箱触发后台监控
+                    // 监控将在后端持续运行60秒直到成功获取验证码
+                    console.log(`[监控] 开始为账户 ${account.email} 启动1分钟监控（将持续运行直到成功）`);
 
                     // 直接启动监控，后端会自动处理授权检查和邮件获取
                     await this.startMonitoringForAccount(account);
-                    } catch (authError) {
-                        console.warn('[授权] 账户', account.email, '授权检查异常:', authError);
-                    }
-                } catch (monitorError) {
-                    console.warn('[监控] 启动监控失败:', monitorError);
+                } catch (error) {
+                    console.warn('[监控] 启动监控失败:', error);
                     this.showError('启动监控失败，请稍后重试');
                 }
             }
