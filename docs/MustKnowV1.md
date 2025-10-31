@@ -653,14 +653,14 @@ curl -X POST http://localhost:3001/api/microsoft/token \
 - 镜像推送到Container Registry
 
 **第二步：手动部署到生产环境**
-- 在Cloudbear管理界面配置镜像拉取
+- 在ClawCloud管理界面配置镜像拉取
 - 部署新版本到生产环境
 - 验证部署结果
 
 ### 3.2 镜像标签策略
-- **main分支**: `ghcr.io/xxrenzhe/mailmanager:prod-latest`
-- **版本标签**: `ghcr.io/xxrenzhe/mailmanager:prod-[tag]` (如v1.0.0)
-- **开发分支**: `ghcr.io/xxrenzhe/mailmanager:dev-latest`
+- **main分支**: `xxrenzhe/mailmanager:prod-latest`
+- **版本标签**: `xxrenzhe/mailmanager:prod-[tag]` (如v1.0.0)
+- **开发分支**: `xxrenzhe/mailmanager:dev-latest`
 
 ## 4. 技术栈和依赖
 
