@@ -1785,11 +1785,17 @@
                                 ${this.getEmailSenderDisplay(account)}
                             </td>
                             <td class="px-3 py-3 whitespace-nowrap w-32">
-                                <div class="flex gap-1">
-                                    <button onclick="copyEmailToClipboard('${account.id}')"
-                                            class="px-2 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition text-base">
-                                        复制
-                                    </button>
+                                <div class="flex gap-1 flex-wrap">
+                                    ${account.reauth_required || account.status === 'reauth_required' || account.status === 'expired_refresh_token' || account.status === 'invalid_refresh_token' ?
+                                        `<button onclick="manager.handleReauthorizationClick('${account.id}')"
+                                                class="px-2 py-1 bg-orange-500 text-white hover:bg-orange-600 rounded transition text-base font-medium">
+                                            重新授权
+                                        </button>` :
+                                        `<button onclick="copyEmailToClipboard('${account.id}')"
+                                                class="px-2 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition text-base">
+                                            复制
+                                        </button>`
+                                    }
                                     <button onclick="copyLatestCode('${account.id}')"
                                             class="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition text-base">
                                         验证码
@@ -2587,6 +2593,184 @@
                     this.updateStats();
                 }
             }
+
+            // 处理OAuth回调
+            async handleOAuthCallback() {
+                console.log('[OAuth回调] 处理授权回调...');
+
+                try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const code = urlParams.get('code');
+                    const state = urlParams.get('state');
+                    const error = urlParams.get('error');
+
+                    if (error) {
+                        console.error('[OAuth回调] 授权失败:', error);
+                        this.showNotification(`授权失败: ${error}`, 'error');
+                        this.clearOAuthCallbackParams();
+                        return;
+                    }
+
+                    if (!code || !state) {
+                        console.error('[OAuth回调] 缺少必要参数');
+                        this.showNotification('授权回调缺少必要参数', 'error');
+                        this.clearOAuthCallbackParams();
+                        return;
+                    }
+
+                    console.log('[OAuth回调] 获取到授权码，开始兑换Token...');
+
+                    // 解析state参数获取账户信息
+                    let accountData;
+                    try {
+                        accountData = JSON.parse(atob(state));
+                        console.log('[OAuth回调] 解析账户信息:', accountData);
+                    } catch (e) {
+                        console.error('[OAuth回调] 无法解析state参数:', e);
+                        this.showNotification('授权回调参数解析失败', 'error');
+                        this.clearOAuthCallbackParams();
+                        return;
+                    }
+
+                    // 调用后端API兑换Token并更新账户
+                    const response = await fetch('/api/auth/callback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            code: code,
+                            account_id: accountData.account_id,
+                            email: accountData.email
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.message || `HTTP ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('[OAuth回调] Token兑换成功:', result);
+
+                    // 更新账户Token信息
+                    await this.updateAccountToken(accountData.account_id, result);
+
+                    // 清理URL参数
+                    this.clearOAuthCallbackParams();
+
+                    this.showNotification(`账户 ${accountData.email} 重新授权成功！`, 'success');
+
+                } catch (error) {
+                    console.error('[OAuth回调] 处理失败:', error);
+                    this.showNotification(`授权回调处理失败: ${error.message}`, 'error');
+                    this.clearOAuthCallbackParams();
+                }
+            }
+
+            // 更新账户Token
+            async updateAccountToken(accountId, tokenData) {
+                console.log(`[Token更新] 更新账户 ${accountId} 的Token信息`);
+
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) {
+                    console.error(`[Token更新] 找不到账户 ${accountId}`);
+                    return false;
+                }
+
+                try {
+                    // 更新账户信息
+                    account.refresh_token = tokenData.refresh_token;
+                    account.access_token = tokenData.access_token;
+                    account.token_expires_at = tokenData.expires_at;
+                    account.status = 'authorized';
+                    account.reauth_required = false;
+                    account.reauth_url = null;
+                    account.error = null;
+                    account.last_updated = new Date().toISOString();
+
+                    console.log(`[Token更新] 账户 ${account.email} Token更新成功`);
+
+                    // 保存并刷新UI
+                    await this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
+                    return true;
+                } catch (error) {
+                    console.error(`[Token更新] 更新账户 ${account.email} Token失败:`, error);
+                    return false;
+                }
+            }
+
+            // 处理重新授权按钮点击
+            async handleReauthorizationClick(accountId) {
+                console.log(`[重新授权] 用户点击重新授权按钮: ${accountId}`);
+
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) {
+                    console.error(`[重新授权] 找不到账户 ${accountId}`);
+                    return;
+                }
+
+                if (!account.reauth_url) {
+                    console.error(`[重新授权] 账户 ${account.email} 没有重新授权URL`);
+                    this.showNotification('请先生成重新授权链接', 'error');
+                    return;
+                }
+
+                try {
+                    // 构建state参数
+                    const stateData = {
+                        account_id: account.id,
+                        email: account.email,
+                        timestamp: Date.now()
+                    };
+                    const state = btoa(JSON.stringify(stateData));
+
+                    // 构建完整的OAuth URL
+                    const oauthUrl = account.reauth_url.replace(/&state=[^&]*/, `&state=${state}`);
+
+                    console.log(`[重新授权] 打开授权窗口: ${account.email}`);
+
+                    // 打开授权窗口
+                    const popup = window.open(
+                        oauthUrl,
+                        'oauth_popup',
+                        'width=800,height=600,scrollbars=yes,resizable=yes'
+                    );
+
+                    // 监听窗口关闭
+                    const checkClosed = setInterval(() => {
+                        if (popup.closed) {
+                            clearInterval(checkClosed);
+                            console.log('[重新授权] 授权窗口已关闭');
+
+                            // 延迟检查回调结果
+                            setTimeout(() => {
+                                this.handleOAuthCallback();
+                            }, 1000);
+                        }
+                    }, 1000);
+
+                    this.showNotification(`正在为账户 ${account.email} 打开重新授权窗口...`, 'info');
+
+                } catch (error) {
+                    console.error(`[重新授权] 打开授权窗口失败:`, error);
+                    this.showNotification(`打开授权窗口失败: ${error.message}`, 'error');
+                }
+            }
+
+            // 清理OAuth回调参数
+            clearOAuthCallbackParams() {
+                const url = new URL(window.location);
+                url.searchParams.delete('code');
+                url.searchParams.delete('state');
+                url.searchParams.delete('error');
+                url.searchParams.delete('session_state');
+
+                // 更新URL但不刷新页面
+                window.history.replaceState({}, document.title, url.pathname);
+                console.log('[OAuth回调] 已清理URL参数');
+            }
         }
 
         // 全局实例
@@ -2595,6 +2779,15 @@
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
             manager = new SimpleMailManager();
+
+            // 检查是否为OAuth回调
+            setTimeout(() => {
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.has('code') || urlParams.has('error')) {
+                    console.log('[初始化] 检测到OAuth回调，开始处理...');
+                    manager.handleOAuthCallback();
+                }
+            }, 500); // 延迟500ms确保管理器完全初始化
         });
 
         // 批量导入相关函数

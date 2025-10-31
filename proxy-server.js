@@ -1177,10 +1177,12 @@ app.post('/api/accounts/reauth-url', async (req, res) => {
         authUrl.searchParams.set('redirect_uri', redirect_uri || 'http://localhost:3001/auth/callback');
         authUrl.searchParams.set('scope', 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access');
         authUrl.searchParams.set('response_mode', 'query');
+        authUrl.searchParams.set('state', 'reauth_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
 
         res.json({
             success: true,
             auth_url: authUrl.toString(),
+            state: authUrl.searchParams.get('state'),
             message: '请使用此URL重新授权Microsoft账户'
         });
 
@@ -1189,6 +1191,113 @@ app.post('/api/accounts/reauth-url', async (req, res) => {
         res.status(500).json({
             success: false,
             error: '生成授权URL失败'
+        });
+    }
+});
+
+// OAuth回调处理 - 获取新的refresh_token
+app.post('/api/auth/callback', async (req, res) => {
+    const { code, state, client_id, redirect_uri } = req.body;
+
+    if (!code || !client_id) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少必要的OAuth参数'
+        });
+    }
+
+    try {
+        console.log(`[OAuth回调] 处理重新授权回调，client_id: ${client_id.substring(0, 8)}...`);
+
+        // 使用授权码获取refresh_token
+        const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: client_id,
+                code: code,
+                redirect_uri: redirect_uri || 'http://localhost:3001/auth/callback',
+                grant_type: 'authorization_code',
+                scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access'
+            })
+        });
+
+        if (!tokenResponse.ok) {
+            const errorData = await tokenResponse.text();
+            console.error(`[OAuth回调] Token交换失败:`, errorData);
+            throw new Error(`Token交换失败: ${tokenResponse.status}`);
+        }
+
+        const tokenData = await tokenResponse.json();
+
+        console.log(`[OAuth回调] 成功获取新Token，expires_in: ${tokenData.expires_in}秒`);
+
+        res.json({
+            success: true,
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token,
+            expires_in: tokenData.expires_in,
+            token_type: tokenData.token_type,
+            scope: tokenData.scope,
+            message: '重新授权成功，已获取新的访问令牌'
+        });
+
+    } catch (error) {
+        console.error('[OAuth回调] 处理重新授权失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '处理重新授权回调失败',
+            message: error.message
+        });
+    }
+});
+
+// 更新账户Token
+app.post('/api/accounts/update-token', async (req, res) => {
+    const { account_id, email, client_id, new_refresh_token, new_access_token, expires_in } = req.body;
+
+    if (!account_id || !new_refresh_token) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少必要参数'
+        });
+    }
+
+    try {
+        console.log(`[更新Token] 更新账户 ${email || account_id} 的Token`);
+
+        // 验证新Token是否有效
+        const testResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=1', {
+            headers: {
+                'Authorization': `Bearer ${new_access_token}`,
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!testResponse.ok) {
+            throw new Error(`新Token验证失败: ${testResponse.status}`);
+        }
+
+        console.log(`[更新Token] 账户 ${email || account_id} Token验证成功`);
+
+        res.json({
+            success: true,
+            message: 'Token更新成功',
+            account_id: account_id,
+            email: email,
+            updated_fields: {
+                refresh_token: true,
+                access_token: true,
+                expires_in: expires_in
+            }
+        });
+
+    } catch (error) {
+        console.error(`[更新Token] 更新账户 ${email || account_id} Token失败:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Token更新失败',
+            message: error.message
         });
     }
 });
