@@ -2354,13 +2354,66 @@
                         refresh_token: account.refresh_token
                     }));
 
-                    // 调用批量验证API - 后端自动控制并发
+                    // 第一步：Token预检查
+                    console.log(`[异步验证] 执行Token预检查...`);
+                    const checkResponse = await fetch('/api/accounts/check-tokens', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            accounts: accountsToValidate
+                        })
+                    });
+
+                    if (!checkResponse.ok) {
+                        throw new Error(`Token预检查失败: ${checkResponse.status}`);
+                    }
+
+                    const checkResult = await checkResponse.json();
+                    console.log(`[异步验证] Token预检查完成:`, checkResult);
+
+                    // 分析预检查结果
+                    const validAccounts = checkResult.results.filter(r => r.valid);
+                    const invalidAccounts = checkResult.results.filter(r => !r.valid);
+
+                    console.log(`[异步验证] 预检查结果: ${validAccounts.length} 个有效Token, ${invalidAccounts.length} 个无效Token`);
+
+                    // 更新无效Token的账户状态
+                    invalidAccounts.forEach(invalid => {
+                        const account = this.accounts.find(acc => acc.id === invalid.account_id);
+                        if (account) {
+                            account.status = invalid.status || 'failed';
+                            account.error = invalid.message;
+                            console.log(`[异步验证] 账户 ${account.email} Token无效: ${invalid.message}`);
+                        }
+                    });
+
+                    // 只对有效Token的账户进行批量验证
+                    if (validAccounts.length === 0) {
+                        this.showNotification('所有账户的Token都已失效，正在准备重新授权...', 'warning');
+                        await this.handleReauthorization(invalidAccounts);
+                        await this.loadAccounts();
+                        this.render();
+                        return;
+                    }
+
+                    // 如果有部分账户需要重新授权，提供快捷操作
+                    if (invalidAccounts.length > 0) {
+                        console.log(`[异步验证] ${invalidAccounts.length} 个账户需要重新授权`);
+                        this.showReauthorizationOptions(invalidAccounts);
+                    }
+
+                    console.log(`[异步验证] 开始对 ${validAccounts.length} 个有效Token账户进行批量验证...`);
+
+                    // 第二步：只验证有效Token的账户
+                    const validAccountIds = validAccounts.map(v => v.account_id);
+                    const accountsForBatchValidation = accountsToValidate.filter(acc => validAccountIds.includes(acc.id));
+
                     const response = await fetch('/api/accounts/batch-validate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             session_id: this.sessionId,
-                            accounts: accountsToValidate
+                            accounts: accountsForBatchValidation
                         })
                     });
 
@@ -2385,11 +2438,15 @@
                                     account.verification_codes = accountResult.verification_codes;
                                 }
                                 successCount++;
+                                console.log(`[异步验证] 账户 ${account.email} 验证成功`);
                             } else {
                                 account.status = accountResult.status || 'failed';
                                 account.error = accountResult.message;
                                 failureCount++;
+                                console.log(`[异步验证] 账户 ${account.email} 验证失败: ${accountResult.status} - ${accountResult.message}`);
                             }
+                        } else {
+                            console.error(`[异步验证] 找不到账户 ${accountResult.account_id}`);
                         }
                     });
 
@@ -2415,6 +2472,93 @@
             // quickTokenCheck 方法已删除 - 现在使用 /api/accounts/validate 统一API
 
             // fetchRecentEmailsFast 方法已删除 - 现在使用 /api/accounts/validate 统一API
+
+            // 处理重新授权流程
+            async handleReauthorization(invalidAccounts) {
+                console.log(`[重新授权] 开始处理 ${invalidAccounts.length} 个失效账户`);
+
+                for (const invalid of invalidAccounts) {
+                    const account = this.accounts.find(acc => acc.id === invalid.account_id);
+                    if (account) {
+                        try {
+                            console.log(`[重新授权] 为账户 ${account.email} 生成授权URL`);
+
+                            const response = await fetch('/api/accounts/reauth-url', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    client_id: account.client_id,
+                                    redirect_uri: window.location.origin + '/auth/callback'
+                                })
+                            });
+
+                            if (response.ok) {
+                                const result = await response.json();
+                                console.log(`[重新授权] 为账户 ${account.email} 生成授权URL成功`);
+
+                                // 存储重新授权信息
+                                account.reauth_url = result.auth_url;
+                                account.reauth_required = true;
+                                account.status = 'reauth_required';
+
+                                this.showNotification(`账户 ${account.email} 需要重新授权，请点击重新授权按钮`, 'warning');
+                            } else {
+                                console.error(`[重新授权] 为账户 ${account.email} 生成授权URL失败`);
+                                this.showNotification(`账户 ${account.email} 重新授权URL生成失败`, 'error');
+                            }
+                        } catch (error) {
+                            console.error(`[重新授权] 处理账户 ${account.email} 时出错:`, error);
+                            this.showNotification(`账户 ${account.email} 重新授权处理失败`, 'error');
+                        }
+                    }
+                }
+            }
+
+            // 显示重新授权选项
+            showReauthorizationOptions(invalidAccounts) {
+                const reauthRequired = invalidAccounts.filter(inv =>
+                    inv.status === 'expired_refresh_token' || inv.status === 'invalid_refresh_token'
+                );
+
+                if (reauthRequired.length > 0) {
+                    this.showNotification(
+                        `检测到 ${reauthRequired.length} 个账户需要重新授权。您可以选择：\n` +
+                        `1. 点击"重新授权"按钮逐个处理\n` +
+                        `2. 使用批量重新授权功能`,
+                        'info',
+                        10000 // 10秒显示时间
+                    );
+                }
+            }
+
+            // 批量重新授权
+            async batchReauthorize() {
+                const failedAccounts = this.accounts.filter(acc =>
+                    acc.status === 'reauth_required' ||
+                    acc.status === 'expired_refresh_token' ||
+                    acc.status === 'invalid_refresh_token'
+                );
+
+                if (failedAccounts.length === 0) {
+                    this.showNotification('没有需要重新授权的账户', 'info');
+                    return;
+                }
+
+                console.log(`[批量重新授权] 开始处理 ${failedAccounts.length} 个账户`);
+                this.showNotification(`正在为 ${failedAccounts.length} 个账户生成重新授权链接...`, 'info');
+
+                await this.handleReauthorization(failedAccounts.map(acc => ({
+                    account_id: acc.id,
+                    email: acc.email,
+                    status: acc.status,
+                    message: acc.error || '需要重新授权'
+                })));
+
+                await this.saveAccounts();
+                this.render();
+
+                this.showNotification(`已生成 ${failedAccounts.length} 个重新授权链接，请点击对应账户的"重新授权"按钮`, 'success');
+            }
 
             sendImportProgress(processed, total, currentEmail) {
                 if (this.eventSource && this.sseConnected) {

@@ -725,7 +725,9 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
         console.log(`[批量验证] 开始批量验证 ${accounts.length} 个账户`);
 
         const results = [];
-        const batchSize = 3; // 并发限制
+        let batchSize = calculateOptimalBatchSize(accounts.length);
+
+        console.log(`[批量验证] 使用动态批量大小: ${batchSize}, 总账户数: ${accounts.length}`);
 
         // 分批处理，避免API限制
         for (let i = 0; i < accounts.length; i += batchSize) {
@@ -797,33 +799,44 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
 
                             try {
                                 const errorData = await response.json();
-                                console.log(`[批量验证] 账户 ${account.email} Token刷新失败:`, errorData);
+                                console.log(`[批量验证] 账户 ${account.email} Token刷新失败:`, {
+                                    error: errorData.error,
+                                    description: errorData.error_description,
+                                    status: response.status,
+                                    codes: errorData.error_codes
+                                });
 
                                 // 根据错误类型决定是否重试
                                 if (errorData.error === 'invalid_grant') {
-                                    message = 'Refresh Token已过期，需要手动重新授权';
-                                    status = 'expired_refresh_token';
+                                    if (errorData.error_description && errorData.error_description.includes('expired')) {
+                                        message = 'Refresh Token已过期，需要手动重新授权';
+                                        status = 'expired_refresh_token';
+                                    } else {
+                                        message = 'Refresh Token无效，需要手动重新授权';
+                                        status = 'invalid_refresh_token';
+                                    }
                                     shouldRetry = false; // 完全过期，不重试
                                 } else if (errorData.error === 'invalid_client') {
-                                    message = 'Client ID配置错误';
+                                    message = 'Client ID配置错误或应用未注册';
                                     status = 'invalid_client_id';
                                     shouldRetry = false; // 配置错误，不重试
                                 } else if (errorData.error === 'temporarily_unavailable' || response.status === 429) {
-                                    message = 'Microsoft服务暂时不可用';
+                                    message = 'Microsoft服务暂时不可用，稍后重试';
                                     status = 'service_unavailable';
                                     shouldRetry = true; // 服务问题，可以重试
                                 } else if (errorData.error === 'internal_server_error') {
-                                    message = 'Microsoft内部服务器错误';
+                                    message = 'Microsoft内部服务器错误，稍后重试';
                                     status = 'server_error';
                                     shouldRetry = true; // 服务器错误，可以重试
                                 } else {
                                     message = `Token刷新失败: ${errorData.error_description || errorData.error}`;
-                                    status = 'unknown_error';
+                                    status = 'token_refresh_error';
                                     shouldRetry = true; // 未知错误，可以重试
                                 }
                             } catch (e) {
-                                message = `HTTP ${response.status}: Token刷新失败`;
-                                status = 'network_error';
+                                console.log(`[批量验证] 账户 ${account.email} 响应解析失败:`, e.message);
+                                message = `HTTP ${response.status}: Token刷新失败，响应格式异常`;
+                                status = 'response_parse_error';
                                 shouldRetry = response.status >= 500 || response.status === 429; // 服务器错误时重试
                             }
 
@@ -871,7 +884,11 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
             // 处理批次结果
             batchResults.forEach(promiseResult => {
                 if (promiseResult.status === 'fulfilled') {
-                    results.push(promiseResult.value);
+                    const result = promiseResult.value;
+                    results.push(result);
+
+                    // 保存验证历史
+                    saveValidationHistory(result.account_id, result);
                 } else {
                     console.error(`[批量验证] 批次处理异常:`, promiseResult.reason);
                 }
@@ -897,6 +914,244 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
         res.status(500).json({
             success: false,
             error: '批量验证过程出错'
+        });
+    }
+});
+
+// Token有效性预检查API
+app.post('/api/accounts/check-tokens', async (req, res) => {
+    const { accounts } = req.body;
+
+    if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid accounts data'
+        });
+    }
+
+    try {
+        console.log(`[Token检查] 开始检查 ${accounts.length} 个账户的Token有效性`);
+
+        const results = await Promise.allSettled(
+            accounts.map(async (account) => {
+                try {
+                    console.log(`[Token检查] 检查账户 ${account.email} 的Token`);
+
+                    const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            client_id: account.client_id,
+                            refresh_token: account.refresh_token,
+                            grant_type: 'refresh_token',
+                            scope: 'https://outlook.office.com/Mail.Read offline_access'
+                        })
+                    });
+
+                    if (response.ok) {
+                        const tokenData = await response.json();
+                        return {
+                            account_id: account.id,
+                            email: account.email,
+                            valid: true,
+                            expires_in: tokenData.expires_in,
+                            message: 'Token有效'
+                        };
+                    } else {
+                        let status = 'unknown_error';
+                        let message = 'Token验证失败';
+
+                        try {
+                            const errorData = await response.json();
+                            if (errorData.error === 'invalid_grant') {
+                                status = 'expired_refresh_token';
+                                message = 'Refresh Token已过期或无效';
+                            } else if (errorData.error === 'invalid_client') {
+                                status = 'invalid_client_id';
+                                message = 'Client ID配置错误';
+                            } else {
+                                message = `Token验证失败: ${errorData.error_description || errorData.error}`;
+                            }
+                        } catch (e) {
+                            message = `HTTP ${response.status}: Token验证失败`;
+                        }
+
+                        return {
+                            account_id: account.id,
+                            email: account.email,
+                            valid: false,
+                            status: status,
+                            message: message
+                        };
+                    }
+                } catch (error) {
+                    console.error(`[Token检查] 账户 ${account.email} 检查异常:`, error.message);
+                    return {
+                        account_id: account.id,
+                        email: account.email,
+                        valid: false,
+                        status: 'network_error',
+                        message: '网络连接失败'
+                    };
+                }
+            })
+        );
+
+        const validTokens = results.filter(r => r.status === 'fulfilled' && r.value.valid).length;
+        const invalidTokens = results.filter(r => r.status === 'fulfilled' && !r.value.valid).length;
+
+        console.log(`[Token检查] 检查完成: ${validTokens} 有效, ${invalidTokens} 无效`);
+
+        res.json({
+            success: true,
+            message: `Token检查完成: ${validTokens} 有效, ${invalidTokens} 无效`,
+            valid_count: validTokens,
+            invalid_count: invalidTokens,
+            results: results.map(r => r.status === 'fulfilled' ? r.value : {
+                account_id: r.reason?.account_id || 'unknown',
+                email: r.reason?.email || 'unknown',
+                valid: false,
+                status: 'check_failed',
+                message: '检查过程异常'
+            })
+        });
+
+    } catch (error) {
+        console.error('[Token检查] 批量检查失败:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Token检查过程出错'
+        });
+    }
+});
+
+// 计算最优批量大小
+function calculateOptimalBatchSize(totalAccounts) {
+    const memoryUsage = process.memoryUsage();
+    const memoryUtilization = memoryUsage.heapUsed / memoryUsage.heapTotal;
+
+    // 基础批量大小
+    let baseBatchSize = 3;
+
+    // 根据内存使用率调整
+    if (memoryUtilization > 0.8) {
+        baseBatchSize = 1; // 高内存使用时降低并发
+    } else if (memoryUtilization < 0.4) {
+        baseBatchSize = 5; // 低内存使用时可以增加并发
+    }
+
+    // 根据账户数量调整
+    if (totalAccounts > 50) {
+        baseBatchSize = Math.min(baseBatchSize, 2); // 大量账户时更保守
+    } else if (totalAccounts < 10) {
+        baseBatchSize = Math.min(baseBatchSize + 1, 5); // 少量账户时可以更激进
+    }
+
+    // 根据时间调整（避开高峰时段）
+    const hour = new Date().getHours();
+    if (hour >= 9 && hour <= 17) {
+        baseBatchSize = Math.max(baseBatchSize - 1, 1); // 工作时间降低并发
+    }
+
+    console.log(`[批量大小计算] 内存使用率: ${(memoryUtilization * 100).toFixed(1)}%, 基础批量大小: ${baseBatchSize}`);
+
+    return Math.max(baseBatchSize, 1);
+}
+
+// 验证历史记录存储
+const validationHistory = new Map(); // accountId -> validation records
+
+// 保存验证历史
+function saveValidationHistory(accountId, result) {
+    if (!validationHistory.has(accountId)) {
+        validationHistory.set(accountId, []);
+    }
+
+    const history = validationHistory.get(accountId);
+    history.unshift({
+        timestamp: new Date().toISOString(),
+        success: result.success,
+        status: result.status,
+        message: result.message,
+        verification_codes_count: result.verification_codes?.length || 0,
+        processing_time_ms: result.processing_time_ms || 0
+    });
+
+    // 只保留最近10条记录
+    if (history.length > 10) {
+        history.pop();
+    }
+}
+
+// 获取验证历史API
+app.post('/api/accounts/validation-history', (req, res) => {
+    const { account_ids } = req.body;
+
+    try {
+        const history = {};
+
+        if (account_ids && Array.isArray(account_ids)) {
+            // 返回指定账户的历史
+            account_ids.forEach(accountId => {
+                history[accountId] = validationHistory.get(accountId) || [];
+            });
+        } else {
+            // 返回所有账户的历史
+            validationHistory.forEach((records, accountId) => {
+                history[accountId] = records;
+            });
+        }
+
+        // 计算统计信息
+        const stats = {
+            total_accounts: Object.keys(history).length,
+            total_validations: Object.values(history).reduce((sum, records) => sum + records.length, 0),
+            success_rate: 0,
+            most_common_status: {},
+            recent_activity: []
+        };
+
+        // 计算成功率
+        let totalSuccess = 0;
+        const statusCounts = {};
+
+        Object.values(history).forEach(records => {
+            records.forEach(record => {
+                if (record.success) totalSuccess++;
+                statusCounts[record.status] = (statusCounts[record.status] || 0) + 1;
+
+                // 收集最近活动
+                if (stats.recent_activity.length < 10) {
+                    stats.recent_activity.push({
+                        account_id: 'unknown',
+                        timestamp: record.timestamp,
+                        success: record.success,
+                        status: record.status
+                    });
+                }
+            });
+        });
+
+        stats.success_rate = stats.total_validations > 0 ? (totalSuccess / stats.total_validations * 100).toFixed(1) : 0;
+        stats.most_common_status = Object.entries(statusCounts)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 5)
+            .reduce((obj, [status, count]) => {
+                obj[status] = count;
+                return obj;
+            }, {});
+
+        res.json({
+            success: true,
+            history: history,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('[验证历史] 获取历史记录失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '获取验证历史失败'
         });
     }
 });
