@@ -47,6 +47,7 @@ jobs:
           latest=false
 
     - name: Build and push Docker image
+      id: build
       uses: docker/build-push-action@v5
       with:
         context: .
@@ -60,7 +61,7 @@ jobs:
     - name: Generate image metadata
       run: |
         echo "Image tags: ${{ steps.meta.outputs.tags }}"
-        echo "Image digest: ${{ steps.meta.outputs.digest }}"
+        echo "Image digest: ${{ steps.build.outputs.digest }}"
 
     - name: Create deploy summary
       run: |
