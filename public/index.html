@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MailManager - 浏览器版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .status-pending { color: #F59E0B; }
+        .status-authorized { color: #10B981; }
+        .status-error { color: #EF4444; }
+        .monitoring { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .code-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 50;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .tab-active {
+            border-bottom: 2px solid #3B82F6;
+            color: #3B82F6;
+        }
+        .offline-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #EF4444;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        .storage-indicator {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: #10B981;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- 离线指示器 -->
+    <div id="offlineIndicator" class="offline-indicator" style="display: none;">
+        <i class="fas fa-wifi-slash mr-1"></i>离线模式
+    </div>
+
+    <!-- 存储指示器 -->
+    <div class="storage-indicator">
+        <i class="fas fa-database mr-1"></i>
+        <span id="storageSize">0 KB</span>
+    </div>
+
+    <div class="container mx-auto px-4 py-6 max-w-7xl">
+        <!-- 头部 -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">
+                        <i class="fas fa-envelope mr-2"></i>MailManager (浏览器版)
+                    </h1>
+                    <p class="text-gray-600 mt-1">简单高效的邮箱验证码管理 - 数据完全本地存储</p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="showAddAccountModal()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition">
+                        <i class="fas fa-plus mr-1"></i>添加账户
+                    </button>
+                    <button onclick="refreshData()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition">
+                        <i class="fas fa-sync-alt mr-1"></i>刷新
+                    </button>
+                    <button onclick="showSettingsModal()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition">
+                        <i class="fas fa-cog mr-1"></i>设置
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="stat-number" id="totalAccounts">0</div>
+                <div class="stat-label">总账户数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number text-green-600" id="authorizedCount">0</div>
+                <div class="stat-label">已授权</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number text-yellow-600" id="pendingCount">0</div>
+                <div class="stat-label">待授权</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number text-red-600" id="errorCount">0</div>
+                <div class="stat-label">授权失败</div>
+            </div>
+        </div>
+
+        <!-- 标签页 -->
+        <div class="bg-white rounded-lg shadow-sm mb-6">
+            <div class="border-b border-gray-200">
+                <nav class="flex -mb-px">
+                    <button onclick="switchTab('accounts')" id="accountsTab" class="tab-active py-4 px-6 text-sm font-medium">
+                        <i class="fas fa-users mr-2"></i>账户列表
+                    </button>
+                    <button onclick="switchTab('codes')" id="codesTab" class="py-4 px-6 text-sm font-medium text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-key mr-2"></i>验证码
+                    </button>
+                    <button onclick="switchTab('import')" id="importTab" class="py-4 px-6 text-sm font-medium text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-file-import mr-2"></i>导入/导出
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- 账户列表页面 -->
+        <div id="accountsContent" class="bg-white rounded-lg shadow-sm">
+            <div class="p-4">
+                <div class="flex justify-between items-center mb-4">
+                    <input type="text" id="searchInput" placeholder="搜索邮箱..."
+                           class="flex-1 px-4 py-2 border border-gray-300 rounded-lg mr-4"
+                           oninput="searchAccounts()">
+                    <select id="statusFilter" class="px-4 py-2 border border-gray-300 rounded-lg" onchange="filterAccounts()">
+                        <option value="">所有状态</option>
+                        <option value="pending">待授权</option>
+                        <option value="authorized">已授权</option>
+                        <option value="error">授权失败</option>
+                    </select>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortAccounts('email')">
+                                邮箱地址 <i class="fas fa-sort text-gray-400 ml-1"></i>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最新验证码</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">收件时间</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountsTableBody" class="bg-white divide-y divide-gray-200">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 验证码页面 -->
+        <div id="codesContent" class="bg-white rounded-lg shadow-sm p-6" style="display: none;">
+            <div class="text-center text-gray-500">
+                <i class="fas fa-key text-4xl mb-4"></i>
+                <p class="text-lg">暂无验证码数据</p>
+                <p class="text-sm">添加账户后，验证码将显示在这里</p>
+            </div>
+        </div>
+
+        <!-- 导入/导出页面 -->
+        <div id="importContent" class="bg-white rounded-lg shadow-sm p-6" style="display: none;">
+            <div class="grid md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">
+                        <i class="fas fa-file-export mr-2"></i>导出数据
+                    </h3>
+                    <p class="text-gray-600 mb-4">将您的账户和验证码数据导出为JSON文件</p>
+                    <button onclick="exportData()" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition">
+                        <i class="fas fa-download mr-2"></i>导出数据
+                    </button>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">
+                        <i class="fas fa-file-import mr-2"></i>导入数据
+                    </h3>
+                    <p class="text-gray-600 mb-4">从JSON文件导入账户和验证码数据</p>
+                    <input type="file" id="importFile" accept=".json" class="w-full mb-4 px-3 py-2 border border-gray-300 rounded-lg">
+                    <button onclick="importData()" class="w-full bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg transition">
+                        <i class="fas fa-upload mr-2"></i>导入数据
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <h4 class="text-sm font-medium text-yellow-800">
+                    <i class="fas fa-info-circle mr-1"></i>数据安全说明
+                </h4>
+                <p class="text-sm text-yellow-700 mt-1">
+                    • 所有数据仅存储在您的浏览器中<br>
+                    • 清除浏览器缓存将永久删除数据<br>
+                    • 建议定期导出数据作为备份
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加账户模态框 -->
+    <div id="addAccountModal" class="modal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900">添加邮箱账户</h3>
+                <button onclick="closeModal('addAccountModal')" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <form id="addAccountForm" onsubmit="addAccount(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">邮箱地址</label>
+                    <input type="email" id="accountEmail" required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                           placeholder="example@outlook.com">
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">账户名称（可选）</label>
+                    <input type="text" id="accountName"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                           placeholder="个人账户">
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">授权状态</label>
+                    <select id="accountStatus" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        <option value="pending">待授权</option>
+                        <option value="authorized">已授权</option>
+                        <option value="error">授权失败</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">备注（可选）</label>
+                    <textarea id="accountNotes" rows="3"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="添加备注信息..."></textarea>
+                </div>
+
+                <div class="flex justify-end gap-3">
+                    <button type="button" onclick="closeModal('addAccountModal')"
+                            class="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition">
+                        取消
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition">
+                        <i class="fas fa-plus mr-1"></i>添加账户
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 设置模态框 -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900">设置</h3>
+                <button onclick="closeModal('settingsModal')" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">检查频率</label>
+                    <select id="checkFrequency" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        <option value="30000">30秒</option>
+                        <option value="60000">1分钟</option>
+                        <option value="300000" selected>5分钟</option>
+                        <option value="600000">10分钟</option>
+                        <option value="1800000">30分钟</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">保留验证码数量</label>
+                    <input type="number" id="keepCodesCount" value="10" min="1" max="100"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">数据管理</label>
+                    <div class="space-x-2">
+                        <button onclick="clearOldData()"
+                                class="px-3 py-1 text-sm bg-red-500 hover:bg-red-600 text-white rounded">
+                            <i class="fas fa-trash mr-1"></i>清理旧数据
+                        </button>
+                        <button onclick="exportAllData()"
+                                class="px-3 py-1 text-sm bg-green-500 hover:bg-green-600 text-white rounded">
+                            <i class="fas fa-download mr-1"></i>导出所有
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end mt-6">
+                <button onclick="saveSettings()" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition">
+                    保存设置
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入客户端存储 -->
+    <script src="clientStorage.js"></script>
+
+    <script>
+        // 全局状态
+        let accounts = [];
+        let filteredAccounts = [];
+        let selectedAccounts = new Set();
+        let currentTab = 'accounts';
+        let sortColumn = '';
+        let sortDirection = 'asc';
+        let checkInterval = null;
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initClientStorage();
+            loadSettings();
+            loadData();
+            setupNetworkListener();
+            startAutoCheck();
+        });
+
+        // 初始化客户端存储
+        async function initClientStorage() {
+            try {
+                await clientStorage.init();
+                console.log('[App] 客户端存储初始化成功');
+            } catch (error) {
+                console.error('[App] 客户端存储初始化失败:', error);
+                alert('浏览器不支持IndexedDB，部分功能可能无法使用');
+            }
+        }
+
+        // 网络状态监听
+        function setupNetworkListener() {
+            const offlineIndicator = document.getElementById('offlineIndicator');
+
+            window.addEventListener('online', () => {
+                offlineIndicator.style.display = 'none';
+                console.log('[App] 网络已连接');
+            });
+
+            window.addEventListener('offline', () => {
+                offlineIndicator.style.display = 'block';
+                console.log('[App] 网络已断开');
+            });
+        }
+
+        // 加载数据
+        async function loadData() {
+            try {
+                accounts = await clientStorage.getAllAccounts();
+                filteredAccounts = [...accounts];
+                updateStats();
+                renderAccountsTable();
+                updateStorageIndicator();
+            } catch (error) {
+                console.error('[App] 加载数据失败:', error);
+                showError('加载数据失败');
+            }
+        }
+
+        // 更新统计信息
+        function updateStats() {
+            const stats = {
+                total: accounts.length,
+                authorized: accounts.filter(a => a.status === 'authorized').length,
+                pending: accounts.filter(a => a.status === 'pending').length,
+                error: accounts.filter(a => a.status === 'error').length
+            };
+
+            document.getElementById('totalAccounts').textContent = stats.total;
+            document.getElementById('authorizedCount').textContent = stats.authorized;
+            document.getElementById('pendingCount').textContent = stats.pending;
+            document.getElementById('errorCount').textContent = stats.error;
+        }
+
+        // 更新存储指示器
+        async function updateStorageIndicator() {
+            try {
+                const stats = await clientStorage.getStats();
+                document.getElementById('storageSize').textContent = `${stats.storageSizeKB} KB`;
+            } catch (error) {
+                console.warn('[App] 更新存储指示器失败:', error);
+            }
+        }
+
+        // 渲染账户表格
+        function renderAccountsTable() {
+            const tbody = document.getElementById('accountsTableBody');
+            tbody.innerHTML = '';
+
+            filteredAccounts.forEach(account => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <input type="checkbox" class="account-checkbox" data-id="${account.id}"
+                               ${selectedAccounts.has(account.id) ? 'checked' : ''}>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="text-sm font-medium text-gray-900">${account.email}</div>
+                        ${account.name ? `<div class="text-xs text-gray-500">${account.name}</div>` : ''}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="status-${account.status}">
+                            ${getStatusText(account.status)}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="code-badge" id="code-${account.id}">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </span>
+                    </td>
+                    <td class="px-66 py-4 whitespace-nowrap text-sm text-gray-500" id="time-${account.id}">
+                        -
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                        <button onclick="editAccount(${account.id})"
+                                class="text-blue-600 hover:text-blue-900 mr-3">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button onclick="deleteAccount(${account.id})"
+                                class="text-red-600 hover:text-red-900">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            // 加载每个账户的最新验证码
+            filteredAccounts.forEach(account => {
+                loadLatestCode(account);
+            });
+        }
+
+        // 加载最新验证码
+        async function loadLatestCode(account) {
+            try {
+                const codes = await clientStorage.getLatestCodes(account.id, 1);
+                if (codes.length > 0) {
+                    const codeElement = document.getElementById(`code-${account.id}`);
+                    const timeElement = document.getElementById(`time-${account.id}`);
+
+                    if (codeElement) {
+                        codeElement.textContent = codes[0].code;
+                        codeElement.className = 'code-badge';
+                    }
+
+                    if (timeElement) {
+                        const time = new Date(codes[0].received_at);
+                        timeElement.textContent = formatTime(time);
+                    }
+                } else {
+                    // 没有验证码
+                    const codeElement = document.getElementById(`code-${account.id}`);
+                    const timeElement = document.getElementById(`time-${account.id}`);
+
+                    if (codeElement) {
+                        codeElement.innerHTML = '<span class="text-gray-400">暂无</span>';
+                        codeElement.className = '';
+                    }
+
+                    if (timeElement) {
+                        timeElement.textContent = '-';
+                    }
+                }
+            } catch (error) {
+                console.warn(`[App] 加载账户 ${account.id} 验证码失败:`, error);
+            }
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': '待授权',
+                'authorized': '已授权',
+                'error': '授权失败'
+            };
+            return statusMap[status] || status;
+        }
+
+        // 格式化时间
+        function formatTime(date) {
+            const now = new Date();
+            const diff = now - date;
+
+            if (diff < 60000) {
+                return '刚刚';
+            } else if (diff < 3600000) {
+                return Math.floor(diff / 60000) + '分钟前';
+            } else if (diff < 86400000) {
+                return Math.floor(diff / 3600000) + '小时前';
+            } else {
+                return date.toLocaleDateString('zh-CN');
+            }
+        }
+
+        // 添加账户
+        async function addAccount(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('accountEmail').value.trim();
+            const name = document.getElementById('accountName').value.trim();
+            const status = document.getElementById('accountStatus').value;
+            const notes = document.getElementById('accountNotes').value.trim();
+
+            try {
+                // 检查邮箱是否已存在
+                const existingAccount = await clientStorage.getAccountByEmail(email);
+                if (existingAccount) {
+                    showError('该邮箱地址已存在');
+                    return;
+                }
+
+                const account = {
+                    email,
+                    name: name || email,
+                    status,
+                    notes,
+                    refresh_token_enc: '',
+                    client_id: '',
+                    access_token: '',
+                    access_token_expires_at: null
+                };
+
+                await clientStorage.saveAccount(account);
+                await loadData();
+                closeModal('addAccountModal');
+                showSuccess('账户添加成功');
+
+                // 清空表单
+                document.getElementById('addAccountForm').reset();
+
+            } catch (error) {
+                console.error('[App] 添加账户失败:', error);
+                showError('添加账户失败');
+            }
+        }
+
+        // 编辑账户
+        function editAccount(id) {
+            const account = accounts.find(a => a.id === id);
+            if (!account) return;
+
+            document.getElementById('accountEmail').value = account.email;
+            document.getElementById('accountName').value = account.name || '';
+            document.getElementById('accountStatus').value = account.status;
+            document.getElementById('accountNotes').value = account.notes || '';
+
+            document.getElementById('addAccountModal').querySelector('h3').textContent = '编辑账户';
+            showModal('addAccountModal');
+
+            // 修改表单提交处理
+            const form = document.getElementById('addAccountForm');
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+
+                account.email = document.getElementById('accountEmail').value.trim();
+                account.name = document.getElementById('accountName').value.trim();
+                account.status = document.getElementById('accountStatus').value;
+                account.notes = document.getElementById('accountNotes').value.trim();
+                account.updated_at = new Date().toISOString();
+
+                try {
+                    await clientStorage.saveAccount(account);
+                    await loadData();
+                    closeModal('addAccountModal');
+                    showSuccess('账户更新成功');
+
+                    // 恢复表单
+                    form.onsubmit = addAccount;
+                    document.getElementById('addAccountModal').querySelector('h3').textContent = '添加邮箱账户';
+                } catch (error) {
+                    console.error('[App] 更新账户失败:', error);
+                    showError('更新账户失败');
+                }
+            };
+        }
+
+        // 删除账户
+        async function deleteAccount(id) {
+            if (!confirm('确定要删除这个账户吗？所有相关数据也将被删除。')) {
+                return;
+            }
+
+            try {
+                await clientStorage.deleteAccount(id);
+                await loadData();
+                showSuccess('账户删除成功');
+            } catch (error) {
+                console.error('[App] 删除账户失败:', error);
+                showError('删除账户失败');
+            }
+        }
+
+        // 搜索账户
+        function searchAccounts() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const statusFilter = document.getElementById('statusFilter').value;
+
+            filteredAccounts = accounts.filter(account => {
+                const matchSearch = !searchTerm ||
+                    account.email.toLowerCase().includes(searchTerm) ||
+                    (account.name && account.name.toLowerCase().includes(searchTerm));
+
+                const matchStatus = !statusFilter || account.status === statusFilter;
+
+                return matchSearch && matchStatus;
+            });
+
+            renderAccountsTable();
+        }
+
+        // 状态过滤
+        function filterAccounts() {
+            searchAccounts();
+        }
+
+        // 排序
+        function sortAccounts(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            filteredAccounts.sort((a, b) => {
+                let aVal = a[column];
+                let bVal = b[column];
+
+                if (typeof aVal === 'string') {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+
+                if (sortDirection === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                } else {
+                    return aVal < bVal ? 1 : -1;
+                }
+            });
+
+            renderAccountsTable();
+        }
+
+        // 全选/取消全选
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.account-checkbox');
+
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAll.checked;
+                const id = parseInt(checkbox.dataset.id);
+                if (selectAll.checked) {
+                    selectedAccounts.add(id);
+                } else {
+                    selectedAccounts.delete(id);
+                }
+            });
+        }
+
+        // 切换标签页
+        function switchTab(tab) {
+            // 隐藏所有内容
+            document.getElementById('accountsContent').style.display = 'none';
+            document.getElementById('codesContent').style.display = 'none';
+            document.getElementById('importContent').style.display = 'none';
+
+            // 移除所有标签激活状态
+            document.getElementById('accountsTab').classList.remove('tab-active');
+            document.getElementById('codesTab').classList.remove('tab-active');
+            document.getElementById('importTab').classList.remove('tab-active');
+
+            // 激活当前标签
+            document.getElementById(tab + 'Tab').classList.add('tab-active');
+            document.getElementById(tab + 'Content').style.display = 'block';
+
+            currentTab = tab;
+        }
+
+        // 显示模态框
+        function showModal(modalId) {
+            document.getElementById(modalId).style.display = 'block';
+        }
+
+        // 关闭模态框
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // 显示设置模态框
+        function showSettingsModal() {
+            showModal('settingsModal');
+            loadSettings();
+        }
+
+        // 加载设置
+        async function loadSettings() {
+            try {
+                const settings = {
+                    checkFrequency: await clientStorage.getSetting('checkFrequency', 300000),
+                    keepCodesCount: await clientStorage.getSetting('keepCodesCount', 10)
+                };
+
+                document.getElementById('checkFrequency').value = settings.checkFrequency;
+                document.getElementById('keepCodesCount').value = settings.keepCodesCount;
+            } catch (error) {
+                console.warn('[App] 加载设置失败:', error);
+            }
+        }
+
+        // 保存设置
+        async function saveSettings() {
+            try {
+                const settings = {
+                    checkFrequency: parseInt(document.getElementById('checkFrequency').value),
+                    keepCodesCount: parseInt(document.getElementById('keepCodesCount').value)
+                };
+
+                await clientStorage.saveSetting('checkFrequency', settings.checkFrequency);
+                await clientStorage.saveSetting('keepCodesCount', settings.keepCodesCount);
+
+                closeModal('settingsModal');
+                showSuccess('设置保存成功');
+
+                // 重启自动检查
+                startAutoCheck();
+            } catch (error) {
+                console.error('[App] 保存设置失败:', error);
+                showError('保存设置失败');
+            }
+        }
+
+        // 启动自动检查
+        function startAutoCheck() {
+            if (checkInterval) {
+                clearInterval(checkInterval);
+            }
+
+            loadSettings().then(settings => {
+                checkInterval = setInterval(() => {
+                    checkAllAccounts();
+                }, settings.checkFrequency);
+
+                console.log(`[App] 自动检查已启动，间隔: ${settings.checkFrequency / 1000}秒`);
+            });
+        }
+
+        // 检查所有账户
+        async function checkAllAccounts() {
+            console.log('[App] 开始检查账户状态...');
+
+            for (const account of accounts) {
+                try {
+                    // 模拟检查逻辑
+                    // 在实际应用中，这里会调用真实的API检查授权状态
+                    if (account.status === 'pending' && account.refresh_token_enc) {
+                        // 尝试使用现有token
+                        const isValid = await validateToken(account);
+                        if (isValid) {
+                            await clientStorage.updateAccountStatus(account.id, 'authorized');
+                            console.log(`[App] 账户 ${account.email} 授权恢复成功`);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`[App] 检查账户 ${account.email} 失败:`, error);
+                }
+            }
+
+            await loadData();
+        }
+
+        // 验证Token（模拟）
+        async function validateToken(account) {
+            // 这里应该实现真实的Token验证逻辑
+            // 由于是浏览器版本，无法直接调用Microsoft API
+            // 可以提供手动验证的界面
+
+            return account.refresh_token_enc && account.refresh_token_enc.length > 0;
+        }
+
+        // 刷新数据
+        async function refreshData() {
+            await loadData();
+            showSuccess('数据已刷新');
+        }
+
+        // 导出数据
+        async function exportData() {
+            try {
+                const data = await clientStorage.exportData();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `mailmanager_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showSuccess('数据导出成功');
+            } catch (error) {
+                console.error('[App] 导出数据失败:', error);
+                showError('导出数据失败');
+            }
+        }
+
+        // 导出所有数据
+        async function exportAllData() {
+            await exportData();
+        }
+
+        // 导入数据
+        async function importData() {
+            const fileInput = document.getElementById('importFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                showError('请选择要导入的文件');
+                return;
+            }
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                const result = await clientStorage.importData(data);
+
+                await loadData();
+                closeModal('importModal');
+
+                showSuccess(`导入成功！
+                    账户: ${result.importedAccounts} 个
+                    验证码: ${result.importedCodes} 个
+                    设置: ${result.importedSettings} 个`);
+
+                // 清空文件输入
+                fileInput.value = '';
+            } catch (error) {
+                console.error('[App] 导入数据失败:', error);
+                showError('导入数据失败：' + error.message);
+            }
+        }
+
+        // 清理旧数据
+        async function clearOldData() {
+            if (!confirm('确定要清理超过保留数量的旧验证码吗？')) {
+                return;
+            }
+
+            try {
+                loadSettings().then(async settings => {
+                    let totalDeleted = 0;
+
+                    for (const account of accounts) {
+                        const deleted = await clientStorage.deleteOldCodes(account.id, settings.keepCodesCount);
+                        totalDeleted += deleted;
+                    }
+
+                    await loadData();
+                    showSuccess(`清理完成！删除了 ${totalDeleted} 个旧验证码`);
+                });
+            } catch (error) {
+                console.error('[App] 清理数据失败:', error);
+                showError('清理数据失败');
+            }
+        }
+
+        // 通知函数
+        function showSuccess(message) {
+            showNotification(message, 'success');
+        }
+
+        function showError(message) {
+            showNotification(message, 'error');
+        }
+
+        function showInfo(message) {
+            showNotification(message, 'info');
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-green-500' :
+                             type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+
+            notification.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50`;
+            notification.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas ${type === 'success' ? 'fa-check-circle' :
+                                    type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    document.body.removeChild(notification);
+                }
+            }, 3000);
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            if (event.target.className === 'modal') {
+                event.target.style.display = 'none';
+            }
+        };
+    </script>
+</body>
+</html>

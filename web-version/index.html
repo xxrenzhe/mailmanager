@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="邮件验证码管理系统 - 高效管理多个邮箱账户的验证码提取和监控">
+    <title>邮件验证码管理系统</title>
+
+    <!-- CSS样式 -->
+    <link rel="stylesheet" href="css/modern-ui.css">
+
+    <!-- PWA支持 -->
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="邮件管理">
+
+    <!-- 图标 -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234f46e5'><path d='M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z'/></svg>">
+</head>
+<body>
+    <!-- 主应用容器 -->
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="app-title">
+                    <div class="app-icon">📧</div>
+                    <span>邮件管理</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-title">主要功能</div>
+                    <button class="nav-item active" data-page="dashboard">
+                        <span class="nav-icon">📊</span>
+                        <span>控制台</span>
+                    </button>
+                    <button class="nav-item" data-page="accounts">
+                        <span class="nav-icon">👥</span>
+                        <span>账户管理</span>
+                    </button>
+                    <button class="nav-item" data-page="codes">
+                        <span class="nav-icon">🔢</span>
+                        <span>验证码</span>
+                    </button>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-title">工具</div>
+                    <button class="nav-item" id="importBtn">
+                        <span class="nav-icon">📥</span>
+                        <span>导入数据</span>
+                    </button>
+                    <button class="nav-item" id="exportBtn">
+                        <span class="nav-icon">📤</span>
+                        <span>导出数据</span>
+                    </button>
+                    <button class="nav-item" id="settingsBtn">
+                        <span class="nav-icon">⚙️</span>
+                        <span>设置</span>
+                    </button>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-title">其他</div>
+                    <button class="nav-item" id="helpBtn">
+                        <span class="nav-icon">❓</span>
+                        <span>帮助</span>
+                    </button>
+                    <button class="nav-item" id="aboutBtn">
+                        <span class="nav-icon">ℹ️</span>
+                        <span>关于</span>
+                    </button>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 顶部栏 -->
+            <header class="header">
+                <div class="header-left">
+                    <button class="btn btn-icon" id="sidebarToggle" title="切换侧边栏">
+                        <span>☰</span>
+                    </button>
+                    <h1 class="header-title" id="pageTitle">控制台</h1>
+                </div>
+
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="addAccountBtn">
+                        <span>➕</span>
+                        <span>添加账户</span>
+                    </button>
+                    <button class="btn btn-secondary" id="refreshBtn">
+                        <span>🔄</span>
+                        <span>刷新</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- 页面内容区 -->
+            <div class="content-area" id="contentArea">
+                <!-- 控制台页面 -->
+                <div class="page" id="dashboardPage">
+                    <!-- 统计卡片 -->
+                    <div class="stats-grid" id="statsGrid">
+                        <div class="stat-card primary">
+                            <div class="stat-icon primary">📧</div>
+                            <div class="stat-value" id="totalAccounts">0</div>
+                            <div class="stat-label">总账户数</div>
+                            <div class="stat-change positive">
+                                <span>↑</span>
+                                <span>活跃</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card success">
+                            <div class="stat-icon success">✅</div>
+                            <div class="stat-value" id="authorizedAccounts">0</div>
+                            <div class="stat-label">已授权</div>
+                            <div class="stat-change positive">
+                                <span>↑</span>
+                                <span>正常</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card warning">
+                            <div class="stat-icon warning">⏳</div>
+                            <div class="stat-value" id="pendingAccounts">0</div>
+                            <div class="stat-label">待授权</div>
+                            <div class="stat-change negative">
+                                <span>⚠️</span>
+                                <span>需要处理</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card danger">
+                            <div class="stat-icon danger">❌</div>
+                            <div class="stat-value" id="reauthAccounts">0</div>
+                            <div class="stat-label">需重新授权</div>
+                            <div class="stat-change negative">
+                                <span>↑</span>
+                                <span>紧急</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 最近活动 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">
+                                <span>🕒</span>
+                                <span>最近活动</span>
+                            </h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="recentActivity">
+                                <p style="color: var(--gray-500); text-align: center; padding: 20px;">
+                                    暂无最近活动
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 账户管理页面 -->
+                <div class="page hidden" id="accountsPage">
+                    <!-- 账户表格 -->
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h2 class="card-title">
+                                <span>👥</span>
+                                <span>账户列表</span>
+                            </h2>
+
+                            <div class="table-controls">
+                                <div class="search-input">
+                                    <span class="search-icon">🔍</span>
+                                    <input type="text" id="searchInput" placeholder="搜索邮箱地址...">
+                                </div>
+
+                                <select class="filter-select" id="statusFilter">
+                                    <option value="">所有状态</option>
+                                    <option value="authorized">已授权</option>
+                                    <option value="pending">待授权</option>
+                                    <option value="reauth_needed">需重新授权</option>
+                                    <option value="error">错误</option>
+                                </select>
+
+                                <button class="btn btn-secondary" id="bulkSyncBtn">
+                                    <span>🔄</span>
+                                    <span>批量同步</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="table-wrapper">
+                            <table class="modern-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort="checkbox">
+                                            <label class="custom-checkbox">
+                                                <input type="checkbox" id="selectAll">
+                                                <span class="checkmark"></span>
+                                            </label>
+                                        </th>
+                                        <th data-sort="status">状态 <span class="sort-icon">↕</span></th>
+                                        <th data-sort="email">邮箱地址 <span class="sort-icon">↕</span></th>
+                                        <th data-sort="code">最新验证码 <span class="sort-icon">↕</span></th>
+                                        <th data-sort="received">收件时间 <span class="sort-icon">↕</span></th>
+                                        <th data-sort="sender">发件人 <span class="sort-icon">↕</span></th>
+                                        <th data-sort="updated">更新时间 <span class="sort-icon">↕</span></th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="accountsTableBody">
+                                    <!-- 动态生成的账户行 -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="card-footer">
+                            <div class="table-info">
+                                <span id="tableInfo">显示 0 个账户</span>
+                            </div>
+                            <div class="table-pagination">
+                                <button class="btn btn-secondary btn-sm" id="prevPageBtn" disabled>
+                                    <span>⬅️</span>
+                                    <span>上一页</span>
+                                </button>
+                                <span id="pageInfo">第 1 页，共 1 页</span>
+                                <button class="btn btn-secondary btn-sm" id="nextPageBtn" disabled>
+                                    <span>下一页</span>
+                                    <span>➡️</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 验证码页面 -->
+                <div class="page hidden" id="codesPage">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">
+                                <span>🔢</span>
+                                <span>最新验证码</span>
+                            </h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="codesList">
+                                <p style="color: var(--gray-500); text-align: center; padding: 20px;">
+                                    暂无验证码记录
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 添加/编辑账户模态框 -->
+    <div class="modal" id="accountModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">添加账户</h3>
+                <button class="modal-close" id="modalClose">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="accountForm">
+                    <div class="form-group">
+                        <label class="form-label" for="accountEmail">邮箱地址 *</label>
+                        <input type="email" class="form-input" id="accountEmail" required placeholder="example@outlook.com">
+                        <div class="form-help">请输入完整的邮箱地址</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="accountDisplay">显示名称</label>
+                        <input type="text" class="form-input" id="accountDisplay" placeholder="账户显示名称（可选）">
+                        <div class="form-help">为账户设置一个友好的显示名称</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="accountNotes">备注</label>
+                        <textarea class="form-textarea" id="accountNotes" placeholder="账户相关备注信息（可选）"></textarea>
+                        <div class="form-help">添加任何相关的备注信息</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modalCancel">取消</button>
+                <button class="btn btn-primary" id="modalSave">
+                    <span>💾</span>
+                    <span>保存</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- OAuth授权模态框 -->
+    <div class="modal" id="oauthModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Outlook 授权</h3>
+                <button class="modal-close" id="oauthClose">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <div id="oauthContent">
+                    <div class="form-group">
+                        <label class="form-label">邮箱地址</label>
+                        <div id="oauthEmail" style="font-weight: 600; color: var(--primary-color);"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">授权状态</label>
+                        <div id="oauthStatus" style="display: flex; align-items: center; gap: 8px;">
+                            <span class="loading"></span>
+                            <span>准备授权...</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">操作说明</label>
+                        <ol style="margin-left: 20px; color: var(--gray-600); line-height: 1.8;">
+                            <li>点击下方"开始授权"按钮</li>
+                            <li>在弹出窗口中登录您的Outlook账户</li>
+                            <li>同意邮件管理权限</li>
+                            <li>完成授权后自动关闭窗口</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="oauthCancel">取消</button>
+                <button class="btn btn-primary" id="oauthStartBtn">
+                    <span>🔐</span>
+                    <span>开始授权</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据导入模态框 -->
+    <div class="modal" id="importModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">导入数据</h3>
+                <button class="modal-close" id="importClose">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">选择数据文件</label>
+                    <input type="file" class="form-input" id="importFile" accept=".json">
+                    <div class="form-help">请选择之前导出的JSON格式数据文件</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">
+                        <input type="checkbox" id="clearExistingData">
+                        清空现有数据
+                    </label>
+                    <div class="form-help">勾选此项将删除当前所有数据后再导入</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">
+                        <input type="checkbox" id="skipValidation" checked>
+                        跳过数据验证
+                    </label>
+                    <div class="form-help">快速导入，跳过数据格式验证</div>
+                </div>
+
+                <div id="importProgress" style="display: none; margin-top: 20px;">
+                    <div class="form-label">导入进度</div>
+                    <div style="background: var(--gray-200); border-radius: 4px; overflow: hidden; margin-top: 8px;">
+                        <div id="importProgressBar" style="height: 8px; background: var(--primary-color); width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <div id="importStatus" style="margin-top: 8px; font-size: 0.875rem; color: var(--gray-600);"></div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="importCancelBtn">取消</button>
+                <button class="btn btn-primary" id="importStartBtn">
+                    <span>📥</span>
+                    <span>开始导入</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 存储指示器 -->
+    <div class="storage-indicator" id="storageIndicator">
+        <div class="storage-status">
+            <span>💾</span>
+            <span>本地存储</span>
+        </div>
+        <div class="storage-bar">
+            <div class="storage-fill" id="storageFill" style="width: 0%;"></div>
+        </div>
+        <div class="storage-text" id="storageText">0 KB / 0 KB</div>
+    </div>
+
+    <!-- JavaScript模块 -->
+    <script src="js/optimizedStorage.js"></script>
+    <script src="js/app.js"></script>
+
+    <!-- Service Worker注册 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(registrationError => {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>

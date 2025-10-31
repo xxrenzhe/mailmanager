@@ -5,15 +5,19 @@
   "type": "commonjs",
   "main": "server/index.js",
   "scripts": {
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "migrate": "node scripts/migrate_to_sqlite.js",
+    "deploy": "node scripts/deploy_kiss.js",
+    "start": "node server/index.js"
   },
   "dependencies": {
-    "dayjs": "^1.11.13",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "ejs": "^3.1.10",
     "express": "^4.19.2",
-    "node-fetch": "^3.3.2"
+    "google-auth-library": "^10.3.1",
+    "http-proxy-middleware": "^3.0.5",
+    "node-fetch": "^3.3.2",
+    "sqlite3": "^5.1.7"
   }
 }
-
-
