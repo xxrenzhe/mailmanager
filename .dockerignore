@@ -70,7 +70,7 @@ node_modules/
 Thumbs.db
 
 # 依赖管理
-package-lock.json
+# package-lock.json - 构建需要，保留
 
 # 本地开发文件
 .env
