@@ -9,14 +9,14 @@
 ### 🐳 Docker 部署
 ```bash
 # 拉取最新镜像
-docker pull xxrenzhe/mailmanager:latest
+docker pull ghcr.io/xxrenzhe/mailmanager:prod-latest
 
 # 运行容器
 docker run -d \
   --name mailmanager \
   -p 80:80 \
   --restart unless-stopped \
-  xxrenzhe/mailmanager:latest
+  ghcr.io/xxrenzhe/mailmanager:prod-latest
 
 # 访问应用
 open http://localhost
@@ -30,7 +30,7 @@ docker run -d \
   -e NODE_ENV=production \
   -e PROXY_PORT=3001 \
   --restart unless-stopped \
-  xxrenzhe/mailmanager:latest
+  ghcr.io/xxrenzhe/mailmanager:prod-latest
 ```
 
 ### 📊 服务状态检查
@@ -658,9 +658,9 @@ curl -X POST http://localhost:3001/api/microsoft/token \
 - 验证部署结果
 
 ### 3.2 镜像标签策略
-- **main分支**: `xxrenzhe/mailmanager:prod-latest`
-- **版本标签**: `xxrenzhe/mailmanager:prod-[tag]` (如v1.0.0)
-- **开发分支**: `xxrenzhe/mailmanager:dev-latest`
+- **main分支**: `ghcr.io/xxrenzhe/mailmanager:prod-latest`
+- **版本标签**: `ghcr.io/xxrenzhe/mailmanager:prod-[tag]` (如v1.0.0)
+- **开发分支**: `ghcr.io/xxrenzhe/mailmanager:dev-latest`
 
 ## 4. 技术栈和依赖
 
