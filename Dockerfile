@@ -89,8 +89,9 @@ server {
 }
 EOF
 
-# 创建 supervisord 配置
-RUN cat > /etc/supervisor/conf.d/mailmanager.conf << 'EOF'
+# 创建 supervisord 配置目录和配置文件
+RUN mkdir -p /etc/supervisor/conf.d && \
+    cat > /etc/supervisor/conf.d/mailmanager.conf << 'EOF'
 [supervisord]
 nodaemon=true
 user=root
