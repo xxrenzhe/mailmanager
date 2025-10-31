@@ -1549,15 +1549,15 @@ app.post('/api/accounts/refresh-token-direct', async (req, res) => {
         console.log(`[直接Token刷新] refresh_token长度: ${refresh_token ? refresh_token.length : 'null'}`);
         console.log(`[直接Token刷新] refresh_token前缀: ${refresh_token ? refresh_token.substring(0, 20) : 'null'}...`);
 
-        // 直接调用Microsoft OAuth token endpoint（类似curl）
+        // 完全模拟成功的curl命令 - 不包含scope参数
         const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 client_id: client_id,
                 refresh_token: refresh_token,
-                grant_type: 'refresh_token',
-                scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access'
+                grant_type: 'refresh_token'
+                // 注意：不包含scope参数，完全模拟成功的curl命令
             })
         });
 
