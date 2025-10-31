@@ -65,23 +65,23 @@ jobs:
     - name: Create deploy summary
       run: |
         echo "## 🚀 Docker Image Built Successfully!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GitHub_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Image Details" >> $GITHUB_SUMMARY
         echo "- **Repository**: `${{ env.IMAGE_NAME }}`" >> $GITHUB_SUMMARY
-        echo "- **Tags**: `${{ join(steps.meta.outputs.tags, ', ') }}`" >> $GitHub_SUMMARY
+        echo "- **Tags**: `${{ join(steps.meta.outputs.tags, ', ') }}`" >> $GITHUB_SUMMARY
         echo "- **Digest**: `${{ steps.meta.outputs.digest }}`" >> $ITHUB_SUMMARY
-        echo "- **Platforms**: `linux/amd64, linux/arm64`" >> $GitHub_SUMMARY
+        echo "- **Platforms**: `linux/amd64, linux/arm64`" >> $GITHUB_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Build Information" >> $GitHub_STEP_SUMMARY
+        echo "### 📋 Build Information" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit**: `${{ github.sha }}`" >> $GITHUB_SUMMARY
-        echo "- **Branch**: `${{ github.ref_name }}`" >> $GitHub_SUMMARY
+        echo "- **Branch**: `${{ github.ref_name }}`" >> $GITHUB_SUMMARY
         echo "- **Actor**: `${{ github.actor }}`" >> $GITHUB_SUMMARY
         echo "- **Workflow**: `${{ github.workflow }}`" >> $GITHUB_SUMMARY
         echo "- **Run ID**: `${{ github.run_id }}`" >> $ITHUB_SUMMARY
         echo "" >> $ITHUB_STEP_SUMMARY
-        echo "### 🔄 Next Steps" >> $GitHub_SUMMARY
+        echo "### 🔄 Next Steps" >> $GITHUB_SUMMARY
         echo "1. **Manual Deploy**: Use the new Docker image in your cloud platform" >> $GITHUB_STEP_SUMMARY
-        echo "2. **Image Tag**: `docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main`" >> $GitHub_STEP_SUMMARY
+        echo "2. **Image Tag**: `docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest`" >> $GITHUB_STEP_SUMMARY
         echo "3. **Production**: Deploy to your production environment" >> $GITHUB_SUMMARY
         echo "" >> $ITHUB_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
@@ -101,7 +101,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.build.outputs.tags }}
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest
         format: 'sarif'
         output: 'trivy-results.sarif'
 
@@ -123,7 +123,7 @@ jobs:
       run: |
         echo "✅ Docker image built and pushed successfully!"
         echo "Repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "Tags: ${{ needs.build.outputs.tags }}"
+        echo "Tags: prod-latest"
 
     - name: Notify on failure
       if: failure()
