@@ -1314,96 +1314,24 @@
 
                     if (response.ok) {
                         const data = await response.json();
-                        console.log(`[Extract] 服务端提取完成，找��� ${data.results?.length || 0} 个验证码`);
+                        console.log(`[Extract] 服务端提取完成，找到 ${data.results?.length || 0} 个验证码`);
                         return data.results || [];
                     } else {
-                        console.error('[Extract] 服务端API调用失败:', response.status);
-                        // 回退到本地提取算法
-                        return this.extractVerificationCodesLocal(messages);
+                        const errorText = await response.text();
+                        console.error('[Extract] 服务端API调用失败:', response.status, errorText);
+                        return [];
                     }
                 } catch (error) {
-                    console.error('[Extract] 服务端API调用失败:', error);
-                    // 回退到本地提取算法
-                    return this.extractVerificationCodesLocal(messages);
+                    console.error('[Extract] 服务端API调用异常:', error);
+                    return [];
                 }
             }
 
-            // 本地验证码提取器（作为服务端API的回退方案）
-            extractVerificationCodesLocal(messages) {
-                const verificationCodes = [];
+            // 本地验证码提取已移除 - 完全依赖后端API
+            // extractVerificationCodesLocal() - 已删除，使用服务端API替代
 
-                for (const message of messages) {
-                    const messageData = this.parseMessage(message);
-                    if (!messageData) continue;
-
-                    const candidates = this.findVerificationCandidates(messageData);
-
-                    for (const candidate of candidates) {
-                        const validation = this.isValidVerificationCode(
-                            candidate.code,
-                            messageData.fullContent,
-                            candidate.context
-                        );
-
-                        if (validation.valid) {
-                            verificationCodes.push({
-                                ...candidate,
-                                ...messageData,
-                                validation,
-                                score: this.calculateScore(candidate, messageData)
-                            });
-                        }
-                    }
-                }
-
-                // 去重并按分数和时间排序
-                const uniqueCodes = this.deduplicateVerificationCodes(verificationCodes);
-                return uniqueCodes.sort((a, b) => {
-                    if (b.score !== a.score) {
-                        return b.score - a.score;
-                    }
-                    return new Date(b.received_at) - new Date(a.received_at);
-                });
-            }
-
-            // 解析邮件消息
-            parseMessage(message) {
-                try {
-                    const subject = message.Subject || message.subject || '无标题';
-                    const from = message.From || message.from;
-                    const receivedDateTime = message.ReceivedDateTime || message.receivedDateTime;
-                    const messageId = message.Id || message.id;
-
-                    let bodyContent = message.Body?.Content || message.body?.content || message.body?.preview || '';
-
-                    // 清理HTML内容，只保留可见文本
-                    if (bodyContent && bodyContent.includes('<')) {
-                        bodyContent = this.cleanHtmlContent(bodyContent);
-                    }
-
-                    const sender = from?.EmailAddress?.Name || from?.emailAddress?.name || from?.name || 'Unknown';
-                    const senderEmail = from?.EmailAddress?.Address || from?.emailAddress?.address || from || 'Unknown';
-
-                    // 智能发送者识别和域名映射
-                    const senderInfo = this.intelligentSenderRecognition(sender, senderEmail, subject);
-
-                    return {
-                        subject,
-                        sender: senderInfo.displayName,
-                        senderEmail,
-                        senderDomain: senderInfo.domain,
-                        senderType: senderInfo.type,
-                        senderCategory: senderInfo.category,
-                        received_at: receivedDateTime || new Date().toISOString(),
-                        messageId,
-                        fullContent: `${subject}\n${bodyContent}`,
-                        bodyContent
-                    };
-                } catch (error) {
-                    console.error('[Parse] 解析邮件失败:', error);
-                    return null;
-                }
-            }
+            // 本地邮件解析已移除 - 完全依赖后端API
+            // parseMessage() - 已删除，使用服务端API替代
 
             // 智能发送者识别和域名映射
             intelligentSenderRecognition(senderName, senderEmail, subject) {
