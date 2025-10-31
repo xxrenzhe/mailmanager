@@ -1333,66 +1333,14 @@
             // 本地邮件解析已移除 - 完全依赖后端API
             // parseMessage() - 已删除，使用服务端API替代
 
-            // 智能发送者识别和域名映射
-            intelligentSenderRecognition(senderName, senderEmail, subject) {
-                const domain = this.extractDomain(senderEmail);
-                const displayName = this.cleanSenderName(senderName, senderEmail);
+            // 本地智能发送者识别已移除 - 完全依赖后端API
+            // intelligentSenderRecognition() - 已删除，使用服务端API替代
 
-                // 发件人类型识别
-                const type = this.identifySenderType(domain, senderName, subject);
+            // 本地域名提取已移除 - 完全依赖后端API
+            // extractDomain() - 已删除，使用服务端API替代
 
-                // 发件人分类
-                const category = this.categorizeSender(domain, type, subject);
-
-                return {
-                    displayName,
-                    domain,
-                    type,
-                    category
-                };
-            }
-
-            // 提取域名
-            extractDomain(email) {
-                if (!email || email === 'Unknown') return 'unknown';
-
-                const atIndex = email.lastIndexOf('@');
-                if (atIndex === -1) return email.toLowerCase();
-
-                const domain = email.substring(atIndex + 1).toLowerCase();
-
-                // 移除常见的子域名前缀获取主域名
-                const commonSubdomains = ['mail.', 'email.', 'smtp.', 'outlook.', 'notification.', 'noreply.', 'no-reply.'];
-                for (const subdomain of commonSubdomains) {
-                    if (domain.startsWith(subdomain)) {
-                        return domain.substring(subdomain.length);
-                    }
-                }
-
-                return domain;
-            }
-
-            // 清理发件人名称
-            cleanSenderName(senderName, senderEmail) {
-                // 如果发件人名称是邮箱地址，提取@前的部分
-                if (senderName && senderName.includes('@')) {
-                    const atIndex = senderName.lastIndexOf('@');
-                    senderName = senderName.substring(0, atIndex);
-                }
-
-                // 移除常见的引号和特殊字符
-                if (senderName) {
-                    senderName = senderName.replace(/^["']+|["']+$/g, '').trim();
-                }
-
-                // 如果没有发件人名称或名称过于简短，使用邮箱名称
-                if (!senderName || senderName.length < 2 || senderName === 'Unknown') {
-                    const domain = this.extractDomain(senderEmail);
-                    return domain.charAt(0).toUpperCase() + domain.slice(1);
-                }
-
-                return senderName;
-            }
+            // 本地发件人名称清理已移除 - 完全依赖后端API
+            // cleanSenderName() - 已删除，使用服务端API替代
 
             // 识别发件人类型
             identifySenderType(domain, senderName, subject) {
