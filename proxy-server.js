@@ -134,18 +134,21 @@ app.get('/api/outlook/*', (req, res) => {
     });
 });
 
-// 监控管理器
-const activeMonitors = new Map(); // 存储活跃的监控任务
+// 监控管理器（支持多用户会话隔离）
+const activeMonitors = new Map(); // 存储活跃的监控任务 (monitorId -> task)
+const sessionMonitors = new Map(); // 存储会话监控映射 (sessionId -> Set<monitorId>)
 
 // 监控触发端点 - 复制邮箱时自动启动监控
 app.post('/api/monitor/copy-trigger', (req, res) => {
-    const { account_id, email, client_id, refresh_token, current_status, access_token } = req.body;
+    const { sessionId, account_id, email, client_id, refresh_token, current_status, access_token } = req.body;
+    const userSessionId = sessionId || 'default';
 
-    console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${account_id}`);
+    console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${account_id} (会话: ${userSessionId})`);
     console.log(`[监控触发] 账户状态: ${current_status}, 有access_token: ${!!access_token}`);
 
     // 存储账户信息用于后续的授权尝试
     const accountInfo = {
+        sessionId: userSessionId,
         account_id,
         email,
         client_id,
@@ -155,15 +158,25 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
         last_auth_attempt: null
     };
 
+    // 生成唯一的监控任务ID（包含会话信息）
+    const monitorId = `${userSessionId}_${account_id}`;
+
     // 如果已有监控任务，先清除
-    if (activeMonitors.has(account_id)) {
-        console.log(`[监控] 清除账户 ${account_id} 的现有监控`);
-        clearTimeout(activeMonitors.get(account_id).timeoutId);
-        activeMonitors.delete(account_id);
+    if (activeMonitors.has(monitorId)) {
+        console.log(`[监控] 清除账户 ${account_id} 的现有监控 (会话: ${userSessionId})`);
+        clearTimeout(activeMonitors.get(monitorId).timeoutId);
+        activeMonitors.delete(monitorId);
+
+        // 从会话监控映射中移除
+        if (sessionMonitors.has(userSessionId)) {
+            sessionMonitors.get(userSessionId).delete(monitorId);
+        }
     }
 
     // 启动新的监控任务
     const monitoringTask = {
+        monitorId: monitorId,
+        sessionId: userSessionId,
         accountId: account_id,
         email: email,
         accountInfo: accountInfo, // 存储完整的账户信息
@@ -172,20 +185,36 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
         timeoutId: null
     };
 
-    // 存储监控任务后立即进行第一次检查
-    activeMonitors.set(account_id, monitoringTask);
-    performMonitoringCheck(account_id, email);
+    // 存储监控任务到活跃监控映射
+    activeMonitors.set(monitorId, monitoringTask);
+
+    // 添加到会话监控映射
+    if (!sessionMonitors.has(userSessionId)) {
+        sessionMonitors.set(userSessionId, new Set());
+    }
+    sessionMonitors.get(userSessionId).add(monitorId);
+
+    console.log(`[监控] 启动监控任务: ${monitorId}, 会话: ${userSessionId}`);
+    performMonitoringCheck(monitorId, email);
 
     // 设置定时器 - 每15秒检查一次
     const monitoringInterval = setInterval(() => {
-        performMonitoringCheck(account_id, email);
+        performMonitoringCheck(monitorId, email);
         monitoringTask.checkCount++;
     }, 15000);
 
     // 设置1分钟停止定时器
     const stopTimeout = setTimeout(() => {
         clearInterval(monitoringInterval);
-        activeMonitors.delete(account_id);
+        activeMonitors.delete(monitorId);
+
+        // 从会话监控映射中移除
+        if (sessionMonitors.has(userSessionId)) {
+            sessionMonitors.get(userSessionId).delete(monitorId);
+            if (sessionMonitors.get(userSessionId).size === 0) {
+                sessionMonitors.delete(userSessionId);
+            }
+        }
 
         console.log(`[监控] 1分钟监控结束: ${email}, 共检查 ${monitoringTask.checkCount + 1} 次`);
 
@@ -201,7 +230,8 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
             timestamp: new Date().toISOString()
         };
 
-        eventEmitter.emit('monitoring_event', stopEventData);
+        // 发送给特定会话
+        eventEmitter.emit(`monitoring_event_${userSessionId}`, stopEventData);
         console.log(`[SSE] 发送���控结束事件: ${stopEventData.message}`);
     }, 60000);
 
@@ -210,6 +240,7 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
 
     // 触发SSE事件通知所有客户端
     const eventData = {
+        sessionId: userSessionId,
         type: 'monitoring_started',
         account_id: account_id,
         email: email,
@@ -218,8 +249,9 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
         timestamp: new Date().toISOString()
     };
 
-    eventEmitter.emit('monitoring_event', eventData);
-    console.log(`[SSE] 触发监控事件: ${eventData.message}`);
+    // 发送给特定会话
+    eventEmitter.emit(`monitoring_event_${userSessionId}`, eventData);
+    console.log(`[SSE] 触发监控事件 (会话: ${userSessionId}): ${eventData.message}`);
 
     res.json({
         success: true,
@@ -230,13 +262,41 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
     });
 });
 
+// 导入进度事件触发端点（支持会话隔离）
+app.post('/api/events/trigger', (req, res) => {
+    const { sessionId, ...eventData } = req.body;
+    console.log(`[事件触发] ${eventData.type}: ${eventData.message} (会话: ${sessionId || 'all'})`);
+
+    // 通过SSE发送事件，支持会话隔离
+    const fullEventData = {
+        ...eventData,
+        sessionId: sessionId,
+        timestamp: new Date().toISOString()
+    };
+
+    if (sessionId) {
+        // 发送给特定会话
+        eventEmitter.emit(`monitoring_event_${sessionId}`, fullEventData);
+    } else {
+        // 发送给所有会话（向后兼容）
+        eventEmitter.emit('monitoring_event', fullEventData);
+    }
+
+    res.json({
+        success: true,
+        message: '事件已发送'
+    });
+});
+
 // 执行监控检查的函数
-async function performMonitoringCheck(accountId, email) {
-    const monitoringTask = activeMonitors.get(accountId);
+async function performMonitoringCheck(monitorId, email) {
+    const monitoringTask = activeMonitors.get(monitorId);
     if (!monitoringTask || !monitoringTask.accountInfo) {
-        console.error(`[监控检查] 找不到账户信息: ${accountId}`);
+        console.error(`[监控检查] 找不到监控任务: ${monitorId}`);
         return;
     }
+
+    const { accountId, sessionId } = monitoringTask;
 
     const { accountInfo } = monitoringTask;
 
@@ -262,6 +322,7 @@ async function performMonitoringCheck(accountId, email) {
 
                         // 发送授权成功事件
                         const authSuccessEvent = {
+                            sessionId: sessionId,
                             type: 'account_status_changed',
                             account_id: accountId,
                             email: email,
@@ -269,7 +330,7 @@ async function performMonitoringCheck(accountId, email) {
                             message: `账户 ${email} 授权已恢复，开始检查邮件...`,
                             timestamp: new Date().toISOString()
                         };
-                        eventEmitter.emit('monitoring_event', authSuccessEvent);
+                        eventEmitter.emit(`monitoring_event_${sessionId}`, authSuccessEvent);
                     } else {
                         console.log(`[监控检查] 账户 ${email} 重新授权失败: ${authResult.error}`);
                     }
@@ -281,32 +342,35 @@ async function performMonitoringCheck(accountId, email) {
 
         // 发送监控进度事件
         const progressEventData = {
+            sessionId: sessionId,
             type: 'monitoring_progress',
             account_id: accountId,
             email: email,
             message: `正在检查 ${email} 的新邮件...`,
             timestamp: new Date().toISOString()
         };
-        eventEmitter.emit('monitoring_event', progressEventData);
+        eventEmitter.emit(`monitoring_event_${sessionId}`, progressEventData);
 
         // 如果有有效的access_token，尝试获取邮件
         if (accountInfo.access_token) {
-            await fetchNewEmails(accountId, accountInfo);
+            await fetchNewEmails(accountId, accountInfo, sessionId);
         } else {
             const noTokenEvent = {
+                sessionId: sessionId,
                 type: 'monitoring_progress',
                 account_id: accountId,
                 email: email,
                 message: `账户 ${email} 暂无有效授权，跳过邮件检查`,
                 timestamp: new Date().toISOString()
             };
-            eventEmitter.emit('monitoring_event', noTokenEvent);
+            eventEmitter.emit(`monitoring_event_${sessionId}`, noTokenEvent);
         }
 
     } catch (error) {
         console.error(`[监控检查] 检查失败: ${email}`, error);
         // 发送错误事件
         const errorEventData = {
+            sessionId: sessionId,
             type: 'monitoring_error',
             account_id: accountId,
             email: email,
@@ -315,7 +379,7 @@ async function performMonitoringCheck(accountId, email) {
             timestamp: new Date().toISOString()
         };
 
-        eventEmitter.emit('monitoring_event', errorEventData);
+        eventEmitter.emit(`monitoring_event_${sessionId}`, errorEventData);
     }
 }
 
@@ -362,7 +426,7 @@ async function attemptTokenRefresh(accountInfo) {
 }
 
 // 获取新邮件
-async function fetchNewEmails(accountId, accountInfo) {
+async function fetchNewEmails(accountId, accountInfo, sessionId) {
     try {
         const response = await fetch(`https://outlook.office.com/api/v2.0/me/messages?$orderby=ReceivedDateTime desc&$top=5`, {
             headers: {
@@ -388,8 +452,9 @@ async function fetchNewEmails(accountId, accountInfo) {
                 console.log(`[验证码] 从邮件中提取到 ${results.length} 个验证码`);
 
                 results.forEach(result => {
-                    eventEmitter.emit('verification_code_found', {
+                    eventEmitter.emit(`verification_code_found_${sessionId}`, {
                         type: 'verification_code_found',
+                        sessionId: sessionId,
                         account_id: accountId,
                         code: result.code,
                         sender: result.sender,
@@ -403,13 +468,14 @@ async function fetchNewEmails(accountId, accountInfo) {
 
                 // 发送验证码发现事件
                 const codesFoundEvent = {
+                    sessionId: sessionId,
                     type: 'monitoring_progress',
                     account_id: accountId,
                     email: accountInfo.email,
                     message: `发现 ${results.length} 个新验证码`,
                     timestamp: new Date().toISOString()
                 };
-                eventEmitter.emit('monitoring_event', codesFoundEvent);
+                eventEmitter.emit(`monitoring_event_${sessionId}`, codesFoundEvent);
             }
         } else {
             console.log(`[邮件] 账户 ${accountInfo.email} 没有新邮件`);
@@ -427,7 +493,7 @@ async function fetchNewEmails(accountId, accountInfo) {
 }
 
 // SSE事件流端点 - 实时更新
-app.get('/api/events/stream', (req, res) => {
+app.get('/api/events/stream/:sessionId?', (req, res) => {
     // 设置SSE响应头
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -437,10 +503,17 @@ app.get('/api/events/stream', (req, res) => {
         'Access-Control-Allow-Headers': 'Cache-Control'
     });
 
-    const clientId = Date.now().toString();
-    connectedClients.add({ id: clientId, response: res });
+    // 使用会话ID或生成默认ID
+    const sessionId = req.params.sessionId || 'default';
+    const clientId = `${sessionId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    console.log(`[SSE] 新的客户端连接: ${clientId}, 当前连接数: ${connectedClients.size}`);
+    connectedClients.add({
+        id: clientId,
+        response: res,
+        sessionId: sessionId
+    });
+
+    console.log(`[SSE] 新的客户端连接: ${clientId} (会话: ${sessionId}), 当前连接数: ${connectedClients.size}`);
 
     // 发送连接确认
     const welcomeEvent = {
@@ -453,13 +526,25 @@ app.get('/api/events/stream', (req, res) => {
 
     res.write(`data: ${JSON.stringify(welcomeEvent)}\n\n`);
 
-    // 监听各种事件并转发给客户端
+    // 监听各种事件并转发给客户端（支持会话隔离）
     const eventHandlers = {
-        monitoring_event: (data) => {
+        [`monitoring_event_${sessionId}`]: (data) => {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
         },
-        verification_code_found: (data) => {
+        [`verification_code_found_${sessionId}`]: (data) => {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
+        },
+        monitoring_event: (data) => {
+            // 只有当没有指定会话时才接收全局事件（向后兼容）
+            if (!data.sessionId || data.sessionId === sessionId) {
+                res.write(`data: ${JSON.stringify(data)}\n\n`);
+            }
+        },
+        verification_code_found: (data) => {
+            // 只有当没有指定会话时才接收全局事件（向后兼容）
+            if (!data.sessionId || data.sessionId === sessionId) {
+                res.write(`data: ${JSON.stringify(data)}\n\n`);
+            }
         },
         account_status_changed: (data) => {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -508,9 +593,10 @@ app.get('/api/events/stream', (req, res) => {
     });
 });
 
-// 高级验证码提取API
+// 高级验证码提取API（支持会话隔离）
 app.post('/api/extract-verification-codes', (req, res) => {
-    const { messages, accountId } = req.body;
+    const { sessionId, messages, accountId } = req.body;
+    const userSessionId = sessionId || 'default';
 
     if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({
@@ -530,8 +616,9 @@ app.post('/api/extract-verification-codes', (req, res) => {
         // 触发SSE事件通知客户端
         if (results.length > 0) {
             results.forEach(result => {
-                eventEmitter.emit('verification_code_found', {
+                eventEmitter.emit(`verification_code_found_${userSessionId}`, {
                     type: 'verification_code_found',
+                    sessionId: userSessionId,
                     account_id: accountId,
                     code: result.code,
                     sender: result.sender,
