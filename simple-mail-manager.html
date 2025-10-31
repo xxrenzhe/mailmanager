@@ -2210,9 +2210,9 @@
                                 } else {
                                     // 检查是否是授权过期错误
                                     if (authResult && authResult.is_auth_error) {
-                                        this.showWarning(`账户 ${account.email} 授权已过期，需要重新授权。但监控将继续尝试...`);
+                                        this.showNotification(`账户 ${account.email} 授权已过期，需要重新授权。但监控将继续尝试...`, 'warning');
                                     } else {
-                                        this.showWarning(`账户 ${account.email} 授权失败，但监控将继续尝试...`);
+                                        this.showNotification(`账户 ${account.email} 授权失败，但监控将继续尝试...`, 'warning');
                                     }
                                 }
                             } catch (authError) {
@@ -2223,7 +2223,7 @@
                                     `账户 ${account.email} 授权已过期，需要重新获取授权信息` :
                                     `账户 ${account.email} 授权失败，但监控将继续尝试`;
 
-                                this.showWarning(errorResponse);
+                                this.showNotification(errorResponse, 'warning');
                             }
                         }
 
