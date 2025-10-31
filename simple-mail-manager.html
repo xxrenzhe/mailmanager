@@ -2376,20 +2376,28 @@
                     let failureCount = 0;
 
                     result.results.forEach(accountResult => {
-                        const account = this.accounts.find(acc => acc.id === accountResult.account_id);
-                        if (account) {
-                            if (accountResult.success) {
-                                account.status = 'authorized';
-                                account.last_check = new Date().toISOString();
-                                if (accountResult.verification_codes && accountResult.verification_codes.length > 0) {
-                                    account.verification_codes = accountResult.verification_codes;
+                        // 处理Promise.allSettled的结果结构
+                        if (accountResult.status === 'fulfilled' && accountResult.value) {
+                            const resultData = accountResult.value;
+                            const account = this.accounts.find(acc => acc.id === resultData.account_id);
+                            if (account) {
+                                if (resultData.success) {
+                                    account.status = 'authorized';
+                                    account.last_check = new Date().toISOString();
+                                    if (resultData.verification_codes && resultData.verification_codes.length > 0) {
+                                        account.verification_codes = resultData.verification_codes;
+                                    }
+                                    successCount++;
+                                } else {
+                                    account.status = resultData.status || 'failed';
+                                    account.error = resultData.message;
+                                    failureCount++;
                                 }
-                                successCount++;
-                            } else {
-                                account.status = 'failed';
-                                account.error = accountResult.error;
-                                failureCount++;
                             }
+                        } else if (accountResult.status === 'rejected') {
+                            // 处理被拒��的Promise
+                            console.error(`[异步验证] 账户验证失败:`, accountResult.reason);
+                            failureCount++;
                         }
                     });
 
