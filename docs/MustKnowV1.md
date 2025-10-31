@@ -22,6 +22,11 @@ docker run -d \
 open http://localhost
 ```
 
+**可选镜像标签:**
+- `ghcr.io/xxrenzhe/mailmanager:prod-latest` - 主分支最新版本 (推荐)
+- `ghcr.io/xxrenzhe/mailmanager:dev-latest` - 开发版本
+- `ghcr.io/xxrenzhe/mailmanager:prod-v1.0.0` - 特定版本标签
+
 ### 🔧 环境变量配置
 ```bash
 docker run -d \
