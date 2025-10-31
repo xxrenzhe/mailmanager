@@ -26,6 +26,243 @@ app.use(express.static(__dirname));
 const eventEmitter = new EventEmitter();
 let connectedClients = new Set();
 
+// 后台自动Token刷新和重新授权系统
+class AutoTokenManager {
+    constructor() {
+        this.refreshQueue = [];
+        this.processing = false;
+        this.refreshInProgress = new Map(); // 防止重复刷新
+        this.deviceCodePolling = new Map(); // 设备码轮询管理
+    }
+
+    // 智能Token检查和自动刷新
+    async checkAndRefreshToken(account, accountId, sessionId) {
+        try {
+            console.log(`[自动Token管理] 检查账户 ${account.email} 的Token状态`);
+
+            // 如果已经在刷新中，跳过
+            if (this.refreshInProgress.has(accountId)) {
+                console.log(`[自动Token管理] 账户 ${account.email} 正在刷新中，跳过`);
+                return this.refreshInProgress.get(accountId);
+            }
+
+            const refreshPromise = this.performTokenRefresh(account, accountId, sessionId);
+            this.refreshInProgress.set(accountId, refreshPromise);
+
+            try {
+                const result = await refreshPromise;
+                return result;
+            } finally {
+                this.refreshInProgress.delete(accountId);
+            }
+
+        } catch (error) {
+            console.error(`[自动Token管理] 账户 ${account.email} Token检查失败:`, error);
+            this.refreshInProgress.delete(accountId);
+            return { success: false, needsReauth: true };
+        }
+    }
+
+    // 执行Token刷新
+    async performTokenRefresh(account, accountId, sessionId) {
+        try {
+            // 1. 首先尝试使用refresh_token自动刷新
+            if (account.refresh_token && this.isRefreshTokenValid(account)) {
+                console.log(`[自动Token管理] 尝试自动刷新账户 ${account.email} 的Token`);
+
+                const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        client_id: account.client_id,
+                        refresh_token: account.refresh_token,
+                        grant_type: 'refresh_token',
+                        scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access'
+                    })
+                });
+
+                if (tokenResponse.ok) {
+                    const tokenData = await tokenResponse.json();
+                    console.log(`[自动Token管理] 账户 ${account.email} Token自动刷新成功`);
+
+                    // 验证新Token
+                    const isValid = await this.validateNewToken(tokenData.access_token);
+                    if (isValid) {
+                        // 通知前端Token已自动刷新
+                        this.notifyTokenRefreshed(accountId, sessionId, {
+                            email: account.email,
+                            autoRefreshed: true,
+                            message: 'Token已自动刷新'
+                        });
+
+                        return {
+                            success: true,
+                            access_token: tokenData.access_token,
+                            refresh_token: tokenData.refresh_token || account.refresh_token,
+                            expires_in: tokenData.expires_in,
+                            autoRefreshed: true
+                        };
+                    }
+                } else {
+                    console.warn(`[自动Token管理] 账户 ${account.email} Token刷新失败: ${tokenResponse.status}`);
+                }
+            }
+
+            // 2. 如果自动刷新失败，尝试后台静默重新授权
+            console.log(`[自动Token管理] 开始为账户 ${account.email} 执行后台重新授权`);
+            return await this.performBackgroundReauth(account, accountId, sessionId);
+
+        } catch (error) {
+            console.error(`[自动Token管理] 账户 ${account.email} Token刷新异常:`, error);
+            return { success: false, needsReauth: true, error: error.message };
+        }
+    }
+
+    // 检查refresh_token是否仍然有效（提前30分钟刷新）
+    isRefreshTokenValid(account) {
+        if (!account.token_expires_at) return true; // 如果没有过期时间，尝试刷新
+
+        const expirationTime = new Date(account.token_expires_at);
+        const now = new Date();
+
+        // 如果Token过期时间在30分钟内，认为需要刷新
+        const thirtyMinutesFromNow = new Date(now.getTime() + 30 * 60 * 1000);
+        return expirationTime > thirtyMinutesFromNow;
+    }
+
+    // 验证新Token的有效性
+    async validateNewToken(accessToken) {
+        try {
+            const response = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=1', {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Accept': 'application/json'
+                }
+            });
+            return response.ok;
+        } catch (error) {
+            console.error(`[自动Token管理] Token验证失败:`, error);
+            return false;
+        }
+    }
+
+    // 后台重新授权（使用保存的凭据自动处理）
+    async performBackgroundReauth(account, accountId, sessionId) {
+        try {
+            console.log(`[后台重新授权] 开始为账户 ${account.email} 执行后台���新授权`);
+
+            // 对于已经失效的Token，直接标记需要重新授权并生成新的授权URL
+            const authUrl = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
+            authUrl.searchParams.set('client_id', account.client_id);
+            authUrl.searchParams.set('response_type', 'code');
+            authUrl.searchParams.set('redirect_uri', 'http://localhost:3001/auth/callback');
+            authUrl.searchParams.set('scope', 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access');
+            authUrl.searchParams.set('response_mode', 'query');
+            authUrl.searchParams.set('state', JSON.stringify({
+                account_id: accountId,
+                email: account.email,
+                auto_reauth: true,
+                timestamp: Date.now()
+            }));
+
+            // 通知前端需要自动重新授权
+            this.notifyAutoReauthRequired(accountId, sessionId, {
+                email: account.email,
+                auth_url: authUrl.toString(),
+                message: '系统检测到Token失效，正在自动重新授权...'
+            });
+
+            // 监听OAuth回调
+            return await this.waitForOAuthCallback(accountId, sessionId);
+
+        } catch (error) {
+            console.error(`[后台重新授权] 账户 ${account.email} 后台重新授权失败:`, error);
+            return { success: false, needsReauth: true, error: error.message };
+        }
+    }
+
+    // 等待OAuth回调
+    async waitForOAuthCallback(accountId, sessionId, timeoutMs = 300000) { // 5分钟超时
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                eventEmitter.removeListener(`oauth_callback_${accountId}`, callback);
+                resolve({ success: false, error: 'OAuth回调超时' });
+            }, timeoutMs);
+
+            const callback = (data) => {
+                clearTimeout(timeout);
+                console.log(`[后台重新授权] 收到账户 ${accountId} 的OAuth回调结果:`, data);
+
+                if (data.success) {
+                    this.notifyTokenRefreshed(accountId, sessionId, {
+                        email: data.email,
+                        autoReauthed: true,
+                        message: '账户已自动重新授权'
+                    });
+                }
+
+                resolve(data);
+            };
+
+            eventEmitter.once(`oauth_callback_${accountId}`, callback);
+        });
+    }
+
+    // 通知Token已刷新
+    notifyTokenRefreshed(accountId, sessionId, data) {
+        const eventData = {
+            type: 'token_refreshed',
+            account_id: accountId,
+            ...data
+        };
+        eventEmitter.emit(`monitoring_event_${sessionId}`, eventData);
+    }
+
+    // 通知需要自动重新授权
+    notifyAutoReauthRequired(accountId, sessionId, data) {
+        const eventData = {
+            type: 'auto_reauth_required',
+            account_id: accountId,
+            ...data
+        };
+        eventEmitter.emit(`monitoring_event_${sessionId}`, eventData);
+    }
+
+    // 批量自动刷新Token
+    async batchRefreshTokens(accounts, sessionId) {
+        console.log(`[自动Token管理] 开始批量自动刷新 ${accounts.length} 个账户的Token`);
+
+        const results = [];
+        const batchSize = 3; // 并发限制
+
+        for (let i = 0; i < accounts.length; i += batchSize) {
+            const batch = accounts.slice(i, i + batchSize);
+
+            const batchPromises = batch.map(async (account) => {
+                const result = await this.checkAndRefreshToken(account, account.id, sessionId);
+                return { account_id: account.id, result };
+            });
+
+            const batchResults = await Promise.allSettled(batchPromises);
+            results.push(...batchResults.map(r => r.status === 'fulfilled' ? r.value : {
+                account_id: r.reason.account_id,
+                result: { success: false, error: r.reason.message }
+            }));
+
+            // 批次间延迟
+            if (i + batchSize < accounts.length) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        console.log(`[自动Token管理] 批量刷新完成，结果:`, results);
+        return results;
+    }
+}
+
+// 创建全局自动Token管理器实例
+const autoTokenManager = new AutoTokenManager();
+
 // 内存监控和清理机制
 setInterval(() => {
     const memoryUsage = process.memoryUsage();
@@ -1195,9 +1432,9 @@ app.post('/api/accounts/reauth-url', async (req, res) => {
     }
 });
 
-// OAuth回调处理 - 获取新的refresh_token
+// OAuth回调处理 - 支持自动Token管理
 app.post('/api/auth/callback', async (req, res) => {
-    const { code, state, client_id, redirect_uri } = req.body;
+    const { code, state, client_id, redirect_uri, account_id, email } = req.body;
 
     if (!code || !client_id) {
         return res.status(400).json({
@@ -1207,7 +1444,7 @@ app.post('/api/auth/callback', async (req, res) => {
     }
 
     try {
-        console.log(`[OAuth回调] 处理重新授权回调，client_id: ${client_id.substring(0, 8)}...`);
+        console.log(`[OAuth回调] 处理重新授权回调，账户: ${email || account_id}, client_id: ${client_id.substring(0, 8)}...`);
 
         // 使用授权码获取refresh_token
         const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
@@ -1232,7 +1469,13 @@ app.post('/api/auth/callback', async (req, res) => {
 
         console.log(`[OAuth回调] 成功获取新Token，expires_in: ${tokenData.expires_in}秒`);
 
-        res.json({
+        // 验证新Token
+        const isValid = await autoTokenManager.validateNewToken(tokenData.access_token);
+        if (!isValid) {
+            throw new Error('新Token验证失败');
+        }
+
+        const response = {
             success: true,
             access_token: tokenData.access_token,
             refresh_token: tokenData.refresh_token,
@@ -1240,13 +1483,110 @@ app.post('/api/auth/callback', async (req, res) => {
             token_type: tokenData.token_type,
             scope: tokenData.scope,
             message: '重新授权成功，已获取新的访问令牌'
-        });
+        };
+
+        // 如果是自动重新授权，触发事件通知
+        if (state) {
+            try {
+                const stateData = JSON.parse(state);
+                if (stateData.auto_reauth && stateData.account_id) {
+                    console.log(`[OAuth回调] 触发自动重新授权完成事件: ${stateData.account_id}`);
+                    eventEmitter.emit(`oauth_callback_${stateData.account_id}`, {
+                        success: true,
+                        account_id: stateData.account_id,
+                        email: stateData.email,
+                        ...response
+                    });
+                }
+            } catch (e) {
+                console.warn(`[OAuth回调] 无法解析state参数:`, e);
+            }
+        }
+
+        res.json(response);
 
     } catch (error) {
         console.error('[OAuth回调] 处理重新授权失败:', error);
+
+        // 如果是自动重新授权，触发失败事件
+        if (state) {
+            try {
+                const stateData = JSON.parse(state);
+                if (stateData.auto_reauth && stateData.account_id) {
+                    eventEmitter.emit(`oauth_callback_${stateData.account_id}`, {
+                        success: false,
+                        account_id: stateData.account_id,
+                        email: stateData.email,
+                        error: error.message
+                    });
+                }
+            } catch (e) {
+                console.warn(`[OAuth回调] 无法解析state参数:`, e);
+            }
+        }
+
         res.status(500).json({
             success: false,
             error: '处理重新授权回调失败',
+            message: error.message
+        });
+    }
+});
+
+// 直接Token刷新API - 类似curl方式
+app.post('/api/accounts/refresh-token-direct', async (req, res) => {
+    const { client_id, refresh_token } = req.body;
+
+    if (!client_id || !refresh_token) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少client_id或refresh_token'
+        });
+    }
+
+    try {
+        console.log(`[直接Token刷新] 开始刷新Token，client_id: ${client_id.substring(0, 8)}...`);
+
+        // 直接调用Microsoft OAuth token endpoint（类似curl）
+        const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: client_id,
+                refresh_token: refresh_token,
+                grant_type: 'refresh_token',
+                scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access'
+            })
+        });
+
+        if (!tokenResponse.ok) {
+            const errorData = await tokenResponse.text();
+            console.error(`[直接Token刷新] Token刷新失败:`, errorData);
+            return res.status(400).json({
+                success: false,
+                error: 'Token刷新失败',
+                details: `HTTP ${tokenResponse.status}`
+            });
+        }
+
+        const tokenData = await tokenResponse.json();
+        console.log(`[直接Token刷新] Token刷新成功，expires_in: ${tokenData.expires_in}秒`);
+
+        res.json({
+            success: true,
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token,
+            expires_in: tokenData.expires_in,
+            token_type: tokenData.token_type,
+            scope: tokenData.scope,
+            message: 'Token刷新成功'
+        });
+
+    } catch (error) {
+        console.error('[直接Token刷新] 处理失败:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Token刷新处理失败',
             message: error.message
         });
     }

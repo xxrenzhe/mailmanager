@@ -97,7 +97,7 @@ MailManager 是一个现代化的邮件账户管理系统，主要功能是批�
 
 ### 2. Microsoft Outlook 集成
 - **REST API**: 使用 Microsoft Outlook REST API 进行邮件操作
-- **Token 管理**: 自动刷新 access_token，支持 refresh_token 机制
+- **Token 管理**: 直接调用 Microsoft OAuth token endpoint刷新 access_token
 - **邮件检索**: 获取最近5封邮件，支持智能验证码提取
 - **CORS 代理**: 内置代理服务器解决跨域访问问题
 
@@ -223,15 +223,23 @@ MailManager 是一个现代化的邮件账户管理系统，主要功能是批�
 
 ### 1. Microsoft Outlook 集成方案
 
-**认证机制:**
-- 使用 OAuth 2.0 Refresh Token 流程
+**Token刷新机制:**
+- 直接调用 Microsoft OAuth token endpoint
 - Client ID + Refresh Token → Access Token
-- Access Token 1小时有效期，自动刷新
+- Access Token 1小时有效期，refresh_token 长期有效
 
 **API 端点:**
-- Token: `https://login.microsoftonline.com/common/oauth2/v2.0/token`
+- Token刷新: `https://login.microsoftonline.com/common/oauth2/v2.0/token`
 - 邮件: `https://outlook.office.com/api/v2.0/me/messages`
 - 权限范围: `IMAP.AccessAsUser.All`, `Mail.ReadWrite`, `SMTP.Send`
+
+**实现方式:**
+```bash
+curl -s https://login.microsoftonline.com/common/oauth2/v2.0/token \
+  -d 'client_id=CLIENT_ID' \
+  -d 'grant_type=refresh_token' \
+  -d 'refresh_token=REFRESH_TOKEN'
+```
 
 ### 2. 智能验证码提取算法
 
@@ -376,17 +384,17 @@ node proxy-server.js
 curl http://localhost:3001/api/health
 ```
 
-#### 2. Microsoft OAuth授权失败 (AADSTS70000)
+#### 2. Microsoft Token刷新失败 (AADSTS70000)
 **症状**: 账户状态显示为"需重新授权"，错误信息包含 `AADSTS70000: The request was denied because one or more scopes requested are unauthorized or expired`
 
-**原因**: Refresh Token 已过期（通常90天有效期）
+**原因**: Refresh Token 已过期
 
 **解决方案**:
 - 重新获取有效的 Microsoft refresh_token
 - 确认 Azure 应用注册的 client_id 正确
 - 确认应用有正确的API权限（Mail.Read, IMAP.AccessAsUser.All等）
 
-**自动恢复机制**: 系统会在监控时自动尝试重新授权，无需手动干预
+**自动恢复机制**: 系统会自动调用Token刷新API处理失效的refresh_token
 
 #### 3. 邮件同步失败
 **症状**: 账户状态为"已授权"但无法获取邮件
@@ -904,10 +912,10 @@ autorestart=true
 
 ### v1.5.0 - 智能监控版本
 **核心功能:**
-- 🤖 **自动重新授权**: 令牌过期时自动刷新
 - 📊 **实时监控系统**: 60秒智能监控机制
 - 🔄 **SSE 实时更新**: 毫秒级数据同步
 - 🎯 **验证码提取算法**: 多层级智能识别
+- 🔧 **Token自动刷新**: 直接调用Microsoft API刷新失效token
 
 ### v1.0.0 - 基础版本
 **初始功能:**
