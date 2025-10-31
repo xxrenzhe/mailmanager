@@ -521,42 +521,78 @@ PORT=3000
 
 ## 10. 部署架构
 
-### 容器化部署
-```dockerfile
-# 多阶段构建
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
+### 容器化部署（单容器架构）
 
-FROM node:18-alpine AS runtime
-WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
-COPY . .
-EXPOSE 3001
-CMD ["node", "proxy-server.js"]
+**架构特点：**
+- nginx 反向代理 + Node.js 应用集成在单个容器
+- 使用 supervisord 同时管理 nginx 和 Node.js 服务
+- 端口 80 对外提供 HTTP 服务，内部 3001 端口运行 Node.js
+- SSE 流特殊优化配置，支持长连接
+
+**Dockerfile 结构：**
+```dockerfile
+# 多阶段构建：Node.js 应用构建
+FROM node:18-alpine AS node-builder
+
+# Nginx 反向代理阶段
+FROM nginx:alpine AS nginx
+# 集成 supervisord 管理多进程
+# 内置 nginx 配置（端口 80 → 3001）
+# SSE 流特殊配置优化
+EXPOSE 80
+CMD ["supervisord"]
 ```
 
-### 反向代理配置
+**服务组件：**
+- **nginx** (端口 80): 反向代理，静态文件服务，SSL 终结
+- **Node.js** (内部端口 3001): 邮件管理 API，SSE 服务
+- **supervisord**: 进程管理器，自动重启和日志管理
+- **健康检查**: 内置 `/health` 端点监控服务状态
+
+### 单容器部署配置
+
+**Nginx 内置配置（自动生成）：**
 ```nginx
 server {
     listen 80;
-    server_name mailmanager.dev;
 
+    # 主要应用代理
     location / {
-        proxy_pass http://localhost:3001;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://127.0.0.1:3001;
+        client_max_body_size 50M;
     }
 
+    # SSE 流处理
     location /api/events/stream {
-        proxy_pass http://localhost:3001;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://127.0.0.1:3001;
         proxy_cache off;
-        proxy_set_header Connection '';
+        proxy_buffering off;
         proxy_http_version 1.1;
-        chunked_transfer_encoding off;
+        proxy_read_timeout 3600s;
+    }
+
+    # 健康检查
+    location /health {
+        return 200 "healthy\n";
     }
 }
+```
+
+**进程管理（supervisord）：**
+```ini
+[supervisord]
+nodaemon=true
+
+[program:nginx]
+command=nginx -g "daemon off;"
+autorestart=true
+
+[program:mailmanager]
+command=node /app/proxy-server.js
+user=mailmanager
+autorestart=true
+
+[program:health-check]
+command=curl -f http://localhost/health
+autorestart=true
 ```
