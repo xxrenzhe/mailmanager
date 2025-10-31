@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Parse Test</title>
+</head>
+<body>
+    <h1>Import Parse Test</h1>
+    <textarea id="testInput" style="width: 100%; height: 200px;">test@example.com----password123----abc123-def456-ghi789----jkl012-mno345-pqr678-stu901-vwx234</textarea>
+    <br>
+    <button onclick="testParse()">Test Parse</button>
+    <pre id="output"></pre>
+
+    <script>
+        // 智能解析单行导入数据（与原系统相同的逻辑）
+        function parseImportLine(line) {
+            console.log(`[Parse Debug] 解析行:`, line);
+
+            // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
+            let parts = line.split('----');
+            console.log(`[Parse Debug] 第一次分割结果:`, parts, `字段数: ${parts.length}`);
+
+            if (parts.length !== 4) {
+                // 如果不是4个字段，尝试智能重构
+                const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+                const uuidMatch = line.match(uuidRegex);
+                console.log(`[Parse Debug] UUID匹配结果:`, uuidMatch);
+
+                if (uuidMatch) {
+                    const uuidIndex = line.indexOf(uuidMatch[0]);
+                    const beforeUuid = line.substring(0, uuidIndex).trim();
+                    const afterUuid = line.substring(uuidIndex + uuidMatch[0].length).trim();
+
+                    const beforeParts = beforeUuid.split(/-+/);
+                    if (beforeParts.length >= 2) {
+                        parts = [
+                            beforeParts[0],
+                            beforeParts[1],
+                            uuidMatch[0],
+                            afterUuid.replace(/^-+/, '')
+                        ];
+                        console.log(`[Parse Debug] 智能重构结果:`, parts);
+                    }
+                }
+            }
+
+            if (parts.length < 4) {
+                console.warn(`[Parse] 无效数据格式，期望4个字段，实际${parts.length}个:`, line);
+                return null;
+            }
+
+            const [email, password, client_id, refresh_token_enc] = parts;
+            const result = {
+                email: email.trim(),
+                password: password ? password.trim() : '',
+                client_id: client_id.trim(),
+                refresh_token: refresh_token_enc.trim()
+            };
+
+            console.log(`[Parse Debug] 最终解析结果:`, {
+                email: result.email,
+                hasClientId: !!result.client_id,
+                clientIdLength: result.client_id.length,
+                hasRefreshToken: !!result.refresh_token,
+                refreshTokenLength: result.refresh_token.length
+            });
+
+            return result;
+        }
+
+        function testParse() {
+            const input = document.getElementById('testInput').value;
+            const lines = input.split('\n').filter(line => line.trim());
+            const results = [];
+
+            for (const line of lines) {
+                const result = parseImportLine(line.trim());
+                results.push({ line, result });
+            }
+
+            document.getElementById('output').textContent = JSON.stringify(results, null, 2);
+        }
+    </script>
+</body>
+</html>

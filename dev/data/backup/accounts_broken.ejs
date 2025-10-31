@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>账户</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /* CSS变量支持深色模式 */
+    :root {
+      --bg-primary: #f7f8fa;
+      --bg-secondary: #fff;
+      --bg-header: #fafbfc;
+      --text-primary: #222;
+      --text-secondary: #666;
+      --text-muted: #777;
+      --border-color: #eee;
+      --border-light: #e5e7eb;
+      --primary-color: #0b5fff;
+      --success-color: #10b981;
+      --error-color: #ef4444;
+      --warning-color: #f59e0b;
+      --shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+
+    /* 深色模式 */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1a1a1a;
+        --bg-secondary: #2d2d2d;
+        --bg-header: #252525;
+        --text-primary: #f3f4f6;
+        --text-secondary: #d1d5db;
+        --text-muted: #9ca3af;
+        --border-color: #374151;
+        --border-light: #4b5563;
+        --shadow: 0 1px 2px rgba(0,0,0,.2);
+      }
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      margin: 16px;
+      color: var(--text-primary);
+      background: var(--bg-primary);
+      transition: all 0.3s ease;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border-light);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn.loading::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 16px;
+      height: 16px;
+      margin: -8px 0 0 -8px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .btn.primary {
+      background: var(--primary-color);
+      color: #fff;
+      border-color: var(--primary-color);
+    }
+
+    .btn.success {
+      background: var(--success-color);
+      color: #fff;
+      border-color: var(--success-color);
+    }
+
+    .btn.ghost {
+      background: transparent;
+      border-color: var(--border-light);
+    }
+
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .table-container {
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .table-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--bg-header);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 12px 8px;
+      border-bottom: 1px solid var(--border-color);
+      vertical-align: top;
+    }
+
+    th {
+      text-align: left;
+      color: var(--text-secondary);
+      font-weight: 600;
+      background: var(--bg-header);
+      font-size: 12px;
+      letter-spacing: .02em;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.2s ease;
+    }
+
+    th:hover {
+      background: var(--border-color);
+    }
+
+    th.sortable::after {
+      content: '↕';
+      margin-left: 8px;
+      opacity: 0.3;
+    }
+
+    th.sort-asc::after {
+      content: '↑';
+      opacity: 1;
+    }
+
+    th.sort-desc::after {
+      content: '↓';
+      opacity: 1;
+    }
+
+    .muted {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .right { margin-left: auto; }
+
+    .pill {
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--border-light);
+      background: var(--bg-header);
+      font-weight: 500;
+    }
+
+    .status-authorized {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--success-color);
+      border-color: rgba(16, 185, 129, 0.2);
+    }
+
+    .status-pending {
+      background: rgba(245, 158, 11, 0.1);
+      color: var(--warning-color);
+      border-color: rgba(245, 158, 11, 0.2);
+    }
+
+    /* 分页样式 */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .pagination .page-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border-light);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      cursor: pointer;
+      font-size: 14px;
+      min-width: 36px;
+      text-align: center;
+    }
+
+    .pagination .page-btn:hover {
+      background: var(--primary-color);
+      color: #fff;
+      border-color: var(--primary-color);
+    }
+
+    .pagination .page-btn.active {
+      background: var(--primary-color);
+      color: #fff;
+      border-color: var(--primary-color);
+    }
+
+    .pagination .page-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* 通知气泡 */
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 16px 20px;
+      border-radius: 8px;
+      color: #fff;
+      font-weight: 500;
+      z-index: 1000;
+      max-width: 300px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+      transform: translateX(400px);
+      transition: transform 0.3s ease;
+    }
+
+    .notification.show {
+      transform: translateX(0);
+    }
+
+    .notification.success {
+      background: var(--success-color);
+    }
+
+    .notification.error {
+      background: var(--error-color);
+    }
+
+    .notification.warning {
+      background: var(--warning-color);
+    }
+
+    /* 代码高亮 */
+    .code {
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      background: var(--bg-header);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+      .container {
+        margin: 8px;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      .row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn {
+        width: 100%;
+        margin-bottom: 8px;
+      }
+
+      table {
+        font-size: 14px;
+      }
+
+      th, td {
+        padding: 8px 4px;
+      }
+    }
+  </style>
+  <script>
+    // 本地存储管理
+    const storage = {
+      get: function(key) {
+        try {
+          return JSON.parse(localStorage.getItem(key) || 'null');
+        } catch(e) {
+          return null;
+        }
+      },
+      set: function(key, value) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch(e) {
+          console.warn('LocalStorage保存失败:', e);
+        }
+      },
+      remove: function(key) {
+        try {
+          localStorage.removeItem(key);
+        } catch(e) {
+          console.warn('LocalStorage删除失败:', e);
+        }
+      }
+    };
+
+    // 全局状态管理
+    const state = {
+      currentPage: <%= pagination ? pagination.current : 1 %>,
+      pageSize: <%= pagination ? pagination.pageSize : 10 %>,
+      sortField: '<%= sort %>',
+      sortOrder: '<%= order %>',
+      searchQuery: '<%= q || "" %>',
+      accounts: <%- JSON.stringify(accounts) %>,
+      pagination: <%- JSON.stringify(pagination || {}) %>
+    };
+
+    // 保存状态到本地存储
+    function saveState() {
+      storage.set('mailmanager_state', {
+        sortField: state.sortField,
+        sortOrder: state.sortOrder,
+        pageSize: state.pageSize,
+        lastVisit: new Date().toISOString()
+      });
+    }
+
+    // 从本地存储恢复状态
+    function restoreState() {
+      const saved = storage.get('mailmanager_state');
+      if (saved) {
+        state.sortField = saved.sortField || 'last_active_at';
+        state.sortOrder = saved.sortOrder || 'desc';
+        state.pageSize = saved.pageSize || 10;
+      }
+    }
+
+    // 通知系统
+    function showNotification(message, type = 'success') {
+      const existing = document.querySelector('.notification');
+      if (existing) existing.remove();
+
+      const notification = document.createElement('div');
+      notification.className = `notification ${type}`;
+      notification.textContent = message;
+      document.body.appendChild(notification);
+
+      setTimeout(() => notification.classList.add('show'), 100);
+      setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+    }
+
+    // 复制功能
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showNotification('已复制到剪贴板', 'success');
+      } catch(e) {
+        console.error(e);
+        showNotification('复制失败', 'error');
+      }
+    }
+
+    // 取件功能
+    function pickup(id, btn) {
+      const b = btn;
+      b.disabled = true;
+      b.classList.add('loading');
+      b.textContent = '';
+
+      fetch(`/accounts/${id}/pickup`, { method: 'POST' })
+        .then(r => r.json())
+        .then(j => {
+          if (j.ok) {
+            showNotification('取件成功', 'success');
+            setTimeout(() => location.reload(), 1500);
+          } else {
+            showNotification('取件失败: ' + (j.message || '未知错误'), 'error');
+          }
+        })
+        .catch(e => {
+          console.error(e);
+          showNotification('网络错误', 'error');
+        })
+        .finally(() => {
+          b.disabled = false;
+          b.classList.remove('loading');
+          b.textContent = '取件';
+        });
+    }
+
+    // 排序功能
+    function sortBy(field) {
+      const th = document.querySelector(`th[data-field="${field}"]`);
+
+      // 更新排序状态
+      if (state.sortField === field) {
+        state.sortOrder = state.sortOrder === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sortField = field;
+        state.sortOrder = 'desc';
+      }
+
+      // 更新UI
+      document.querySelectorAll('th').forEach(t => {
+        t.classList.remove('sort-asc', 'sort-desc');
+      });
+      th.classList.add(state.sortOrder === 'asc' ? 'sort-asc' : 'sort-desc');
+
+      // 重新加载数据
+      loadAccounts();
+    }
+
+    // 分页功���
+    function goToPage(page) {
+      state.currentPage = page;
+      loadAccounts();
+    }
+
+    // 加载数据
+    function loadAccounts() {
+      const params = new URLSearchParams({
+        q: state.searchQuery,
+        sort: state.sortField,
+        order: state.sortOrder,
+        page: state.currentPage,
+        size: state.pageSize
+      });
+
+      window.location.href = `/?${params.toString()}`;
+    }
+
+    // 搜索功能
+    function handleSearch() {
+      state.searchQuery = document.getElementById('searchInput').value;
+      state.currentPage = 1;
+      loadAccounts();
+    }
+
+    // 批量操作
+    function bulkCopy(field) {
+      const sep = document.getElementById('sep').value === 'comma' ? ', ' : '\n';
+      const sels = Array.from(document.querySelectorAll('.rowchk:checked'));
+      const vals = sels.map(x => x.dataset[field]).filter(Boolean);
+
+      if (!vals.length) {
+        showNotification('请选择要复制的行', 'warning');
+        return;
+      }
+
+      copyText(vals.join(sep));
+    }
+
+    // 全选/取消全选
+    function toggleAll(checkbox) {
+      document.querySelectorAll('.rowchk').forEach(c => c.checked = checkbox.checked);
+    }
+
+    // 页面初始化
+    document.addEventListener('DOMContentLoaded', function() {
+      // 设置当前排序状态
+      const currentTh = document.querySelector(`th[data-field="${state.sortField}"]`);
+      if (currentTh) {
+        currentTh.classList.add(state.sortOrder === 'asc' ? 'sort-asc' : 'sort-desc');
+      }
+
+      // 搜索框回车事件
+      document.getElementById('searchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          handleSearch();
+        }
+      });
+
+      // 键盘快捷键
+      document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey || e.metaKey) {
+          if (e.key === 'a') {
+            e.preventDefault();
+            document.getElementById('selectAll').checked = true;
+            toggleAll(document.getElementById('selectAll'));
+          }
+        }
+      });
+    });
+
+    // 兼容旧的toast函数
+    function toast(msg) {
+      showNotification(msg, 'success');
+    }
+  </script>
+</head>
+<body>
+  <div class="container">
+    <!-- 搜���和筛选区域 -->
+    <div class="card">
+      <div class="row" style="flex-wrap: wrap; gap: 12px;">
+        <div style="flex: 1; min-width: 200px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">搜索邮箱</label>
+          <input type="text" id="searchInput" value="<%= q||'' %>" placeholder="输入邮箱关键字..."
+                 style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-light); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 8px;">
+          <button type="button" class="btn primary" onclick="handleSearch()">
+            搜索
+          </button>
+          <a class="btn" href="/import" style="background: var(--primary-color); color: white;">
+            批量导入
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量操作区域 -->
+    <div class="card">
+      <div class="row" style="align-items: center; gap: 12px;">
+        <div class="row" style="align-items: center; gap: 8px;">
+          <label style="margin: 0;">批量操作:</label>
+          <select id="sep" style="padding: 6px; border: 1px solid var(--border-light); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">
+            <option value="nl">换行分隔</option>
+            <option value="comma">逗号分隔</option>
+          </select>
+        </div>
+        <button type="button" class="btn ghost" onclick="bulkCopy('email')">📧 复制邮箱</button>
+        <button type="button" class="btn ghost" onclick="bulkCopy('code')">🔢 复制验证码</button>
+        <div style="margin-left: auto; font-size: 12px; color: var(--text-muted);">
+          共 <span id="totalCount"><%= accounts.length %></span> 个账户
+        </div>
+      </div>
+    </div>
+
+    <!-- 表格区域 -->
+    <div class="table-container">
+      <table>
+        <thead class="table-header">
+          <tr>
+            <th style="width: 40px;">
+              <input type="checkbox" id="selectAll" onchange="toggleAll(this)">
+            </th>
+            <th data-field="email" class="sortable" onclick="sortBy('email')">邮箱</th>
+            <th data-field="status" class="sortable" onclick="sortBy('status')">状态</th>
+            <th data-field="last_active_at" class="sortable" onclick="sortBy('last_active_at')">活跃时间</th>
+            <th style="width: 120px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% accounts.forEach(a => { %>
+            <tr>
+              <td>
+                <input type="checkbox" class="rowchk"
+                       data-email="<%= a.email %>"
+                       data-code="<%= a.latestCode ? a.latestCode.code : '' %>">
+              </td>
+              <td>
+                <div style="margin-bottom: 4px;">
+                  <strong style="font-size: 14px;"><%= a.email %></strong>
+                </div>
+                <div class="muted" style="font-size: 11px; margin-bottom: 6px;">
+                  ClientID: <span class="code"><%= a.client_id %></span>
+                </div>
+                <% if (a.latestCode) { %>
+                  <div class="row" style="gap: 6px; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 12px;">验证码:</span>
+                    <strong style="color: var(--success-color); font-family: monospace; background: rgba(16, 185, 129, 0.1); padding: 2px 6px; border-radius: 4px;">
+                      <%= a.latestCode.code %>
+                    </strong>
+                    <button type="button" class="btn ghost" style="padding: 2px 8px; font-size: 11px;" onclick="copyText('<%= a.latestCode.code %>')">
+                      复制
+                    </button>
+                    <span class="muted" style="font-size: 11px;">
+                      <%= new Date(a.latestCode.received_at).toLocaleDateString() %>
+                    </span>
+                  </div>
+                <% } else { %>
+                  <div class="muted" style="font-size: 12px;">暂无验证码</div>
+                <% } %>
+              </td>
+              <td>
+                <span class="pill status-<%= a.status %>">
+                  <%= a.status === 'authorized' ? '✅ 已授权' : '⏳ 待授权' %>
+                </span>
+              </td>
+              <td>
+                <% if (a.last_active_at) { %>
+                  <div style="font-size: 12px;">
+                    <div><%= new Date(a.last_active_at).toLocaleDateString() %></div>
+                    <div class="muted" style="font-size: 11px;"><%= new Date(a.last_active_at).toLocaleTimeString() %></div>
+                  </div>
+                <% } else { %>
+                  <span class="muted">—</span>
+                <% } %>
+              </td>
+              <td>
+                <button type="button" class="btn primary" onclick="pickup('<%= a.id %>', this)">
+                  📬 取件
+                </button>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 分页区域 -->
+    <% if (accounts.length > 0) { %>
+    <div class="card">
+      <div class="pagination">
+        <button class="page-btn" onclick="goToPage(1)" <%= 1 === 1 ? 'disabled' : '' ?>>
+          首页
+        </button>
+        <button class="page-btn" onclick="goToPage(<%= Math.max(1, 1 - 1) %>)" <%= 1 === 1 ? 'disabled' : '' %>>
+          ‹
+        </button>
+        <span style="margin: 0 12px; color: var(--text-muted);">
+          第 1 页
+        </span>
+        <button class="page-btn" disabled>
+          ›
+        </button>
+        <button class="page-btn" disabled>
+          末页
+        </button>
+      </div>
+    </div>
+    <% } %>
+
+    <!-- 空状态 -->
+    <% if (accounts.length === 0) { %>
+    <div class="card" style="text-align: center; padding: 60px 20px;">
+      <div style="font-size: 48px; margin-bottom: 16px;">📭</div>
+      <h3 style="margin: 0 0 8px 0; color: var(--text-secondary);">暂无邮箱账户</h3>
+      <p class="muted" style="margin: 0;">
+        <%= q ? '没有找到匹配的邮箱账户' : '请先导入邮箱账户' %>
+      </p>
+      <% if (!q) { %>
+        <a href="/import" class="btn primary" style="margin-top: 16px;">
+          立即导入
+        </a>
+      <% } %>
+    </div>
+    <% } %>
+  </div>
+
+  </body>
+</html>
+
+

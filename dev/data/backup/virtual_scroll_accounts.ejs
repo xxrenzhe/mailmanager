@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>账户 - 高性能版本</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+      margin: 16px;
+      background: #f5f5f5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      min-width: 40px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .btn.primary {
+      background: #007bff;
+      color: white;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* 虚拟滚动容器 */
+    .virtual-scroll-container {
+      height: 600px;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      background: white;
+    }
+
+    .virtual-scroll-content {
+      position: relative;
+      overflow-y: auto;
+      height: 100%;
+    }
+
+    .virtual-scroll-spacer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      pointer-events: none;
+    }
+
+    .virtual-scroll-items {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+    }
+
+    /* 表格样式 */
+    .virtual-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .virtual-table th,
+    .virtual-table td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .virtual-table th {
+      background: #f8f9fa;
+      font-weight: 600;
+      cursor: pointer;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .virtual-table th:nth-child(1) { width: 40px; }  /* checkbox */
+    .virtual-table th:nth-child(2) { width: 300px; } /* email */
+    .virtual-table th:nth-child(3) { width: 100px; } /* status */
+    .virtual-table th:nth-child(4) { width: 150px; } /* last active */
+    .virtual-table th:nth-child(5) { width: 200px; } /* actions */
+
+    .muted {
+      color: #666;
+      font-size: 12px;
+    }
+    .pill {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      background: #e9ecef;
+    }
+    .status-authorized {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status-pending {
+      background: #fff3cd;
+      color: #856404;
+    }
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 16px;
+      background: #28a745;
+      color: white;
+      border-radius: 4px;
+      z-index: 1000;
+      transform: translateX(400px);
+      transition: transform 0.3s ease;
+      max-width: 300px;
+    }
+    .notification.show {
+      transform: translateX(0);
+    }
+    .notification.error {
+      background: #dc3545;
+    }
+    .notification.info {
+      background: #17a2b8;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    /* 加载状态 */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* 统计信息 */
+    .stats-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    .stats-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .stats-value {
+      font-weight: bold;
+      color: #007bff;
+    }
+
+    /* 搜索过滤 */
+    .filter-bar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .filter-bar input {
+      flex: 1;
+      min-width: 200px;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+
+    .filter-bar select {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: white;
+    }
+
+    /* 性能指标 */
+    .performance-metrics {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: monospace;
+      z-index: 1000;
+    }
+
+    /* 按需监控样式 */
+    .monitor-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+    }
+
+    .status-indicator::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #666;
+      animation: pulse 2s infinite;
+    }
+
+    .status-indicator.monitoring::before {
+      background: #28a745;
+    }
+
+    .status-indicator.idle::before {
+      background: #ffc107;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+
+    /* 监控高亮 */
+    .monitoring-active {
+      animation: monitoring-pulse 2s ease-in-out;
+      background: rgba(40, 167, 69, 0.05) !important;
+    }
+
+    @keyframes monitoring-pulse {
+      0% { background: rgba(40, 167, 69, 0.05); }
+      50% { background: rgba(40, 167, 69, 0.1); }
+      100% { background: rgba(40, 167, 69, 0.05); }
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+      .filter-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .filter-bar input {
+        min-width: auto;
+      }
+
+      .virtual-table th:nth-child(4),
+      .virtual-table td:nth-child(4) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h1 style="margin: 0;">邮件账户管理 - 高性能版</h1>
+        <div class="row" style="align-items: center; gap: 12px;">
+          <div class="monitor-status">
+            <span class="status-indicator idle" id="systemStatus">系统空闲</span>
+            <span class="status-text" id="systemStats">按需监控模式</span>
+          </div>
+          <button class="btn" onclick="togglePerformanceMetrics()" title="性能指标">
+            📈
+          </button>
+        </div>
+      </div>
+
+      <!-- 统计信息栏 -->
+      <div class="stats-bar">
+        <div class="stats-item">
+          <span>总账户:</span>
+          <span class="stats-value" id="totalAccounts">-</span>
+        </div>
+        <div class="stats-item">
+          <span>已授权:</span>
+          <span class="stats-value" id="authorizedAccounts">-</span>
+        </div>
+        <div class="stats-item">
+          <span>待授权:</span>
+          <span class="stats-value" id="pendingAccounts">-</span>
+        </div>
+        <div class="stats-item">
+          <span>当前显示:</span>
+          <span class="stats-value" id="visibleAccounts">-</span>
+        </div>
+        <div class="stats-item">
+          <span>活跃监控:</span>
+          <span class="stats-value" id="activeMonitors">0</span>
+        </div>
+      </div>
+
+      <!-- 搜索过滤栏 -->
+      <div class="filter-bar">
+        <input type="text" id="searchInput" placeholder="搜索邮箱..." />
+        <select id="statusFilter">
+          <option value="">所有状态</option>
+          <option value="authorized">已授权</option>
+          <option value="pending">待授权</option>
+        </select>
+        <select id="sortBy">
+          <option value="last_active_at">最后活跃时间</option>
+          <option value="email">邮箱地址</option>
+          <option value="created_at">创建时间</option>
+          <option value="total_codes">验证码数量</option>
+        </select>
+        <select id="sortOrder">
+          <option value="desc">降序</option>
+          <option value="asc">升序</option>
+        </select>
+        <button class="btn primary" onclick="applyFilters()">应用过滤</button>
+        <a href="/import" class="btn" style="background: var(--primary-color, #007bff); color: white; border: none; text-decoration: none; height: 36px; display: inline-flex; align-items: center; justify-content: center;">导入账户</a>
+      </div>
+    </div>
+
+    <!-- 虚拟滚动表格 -->
+    <div class="card">
+      <div class="virtual-scroll-container" id="virtualScrollContainer">
+        <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+          <div class="loading-spinner"></div>
+        </div>
+
+        <div class="virtual-scroll-content" id="virtualScrollContent">
+          <div class="virtual-scroll-spacer" id="scrollSpacer"></div>
+          <div class="virtual-scroll-items" id="scrollItems">
+            <!-- 表头 -->
+            <table class="virtual-table">
+              <thead>
+                <tr>
+                  <th>
+                    <input type="checkbox" id="selectAll" onchange="toggleAll(this)">
+                  </th>
+                  <th onclick="changeSort('email')">邮箱 ↕</th>
+                  <th onclick="changeSort('status')">状态 ↕</th>
+                  <th onclick="changeSort('last_active_at')">活跃时间 ↕</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+            </table>
+
+            <!-- 动态内容容器 -->
+            <div id="dynamicContent"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button class="btn" onclick="bulkCopy('email')">复制选中邮箱</button>
+        <button class="btn" onclick="bulkCopy('code')">复制选中验证码</button>
+        <button class="btn" onclick="exportData()">导出数据</button>
+        <span class="muted" style="margin-left: auto;">
+          渲染时间: <span id="renderTime">0ms</span> |
+          内存使用: <span id="memoryUsage">0MB</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div id="notification" class="notification"></div>
+  <div class="performance-metrics" id="performanceMetrics" style="display: none;">
+    <div>FPS: <span id="fps">60</span></div>
+    <div>渲染行数: <span id="renderedRows">0</span></div>
+    <div>总行数: <span id="totalRows">0</span></div>
+    <div>滚动位置: <span id="scrollPosition">0</span></div>
+  </div>
+
+  <script>
+    // 虚拟滚动实现
+    class VirtualScroll {
+      constructor(options) {
+        this.container = options.container;
+        this.content = options.content;
+        this.spacer = options.spacer;
+        this.items = options.items;
+        this.itemHeight = options.itemHeight || 60;
+        this.bufferSize = options.bufferSize || 10;
+        this.visibleItems = [];
+        this.allItems = [];
+        this.filteredItems = [];
+        this.isLoading = false;
+
+        // 性能监控
+        this.lastRenderTime = 0;
+        this.renderCount = 0;
+        this.fps = 60;
+        this.lastFrameTime = performance.now();
+
+        this.init();
+      }
+
+      init() {
+        this.setupScrollListener();
+        this.setupResizeListener();
+        this.startFPSMonitoring();
+      }
+
+      // 设置数据
+      setData(items) {
+        this.allItems = items;
+        this.filteredItems = [...items];
+        this.updateSpacer();
+        this.render();
+      }
+
+      // 过滤数据
+      filterData(filters) {
+        const startTime = performance.now();
+
+        this.filteredItems = this.allItems.filter(item => {
+          if (filters.email && !item.email.toLowerCase().includes(filters.email.toLowerCase())) {
+            return false;
+          }
+          if (filters.status && item.status !== filters.status) {
+            return false;
+          }
+          return true;
+        });
+
+        // 排序
+        if (filters.sortBy) {
+          this.filteredItems.sort((a, b) => {
+            let av = a[filters.sortBy] || '';
+            let bv = b[filters.sortBy] || '';
+
+            // 日期字段特殊处理
+            if (['last_active_at', 'created_at'].includes(filters.sortBy)) {
+              av = av ? new Date(av).getTime() : 0;
+              bv = bv ? new Date(bv).getTime() : 0;
+            }
+
+            if (av === bv) return 0;
+            return filters.sortOrder === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+          });
+        }
+
+        this.updateSpacer();
+        this.render();
+
+        const endTime = performance.now();
+        console.log(`[VirtualScroll] 过滤耗时: ${(endTime - startTime).toFixed(2)}ms, 结果: ${this.filteredItems.length} 条`);
+      }
+
+      // 更新占位空间高度
+      updateSpacer() {
+        const totalHeight = this.filteredItems.length * this.itemHeight;
+        this.spacer.style.height = `${totalHeight}px`;
+
+        // 更新统计信息
+        document.getElementById('totalRows').textContent = this.filteredItems.length;
+      }
+
+      // 设置滚动监听
+      setupScrollListener() {
+        this.content.addEventListener('scroll', () => {
+          this.handleScroll();
+        });
+      }
+
+      // 设置窗口大小监听
+      setupResizeListener() {
+        window.addEventListener('resize', () => {
+          this.render();
+        });
+      }
+
+      // 处理滚动
+      handleScroll() {
+        if (this.isLoading) return;
+
+        requestAnimationFrame(() => {
+          this.render();
+        });
+      }
+
+      // 渲染可见项目
+      render() {
+        const startTime = performance.now();
+
+        const containerHeight = this.container.clientHeight;
+        const scrollTop = this.content.scrollTop;
+
+        // 计算可见范围
+        const startIndex = Math.max(0, Math.floor(scrollTop / this.itemHeight) - this.bufferSize);
+        const endIndex = Math.min(
+          this.filteredItems.length - 1,
+          Math.ceil((scrollTop + containerHeight) / this.itemHeight) + this.bufferSize
+        );
+
+        // 检查是否需要重新渲染
+        if (this.visibleItems.length > 0) {
+          const firstVisibleIndex = this.visibleItems[0].index;
+          const lastVisibleIndex = this.visibleItems[this.visibleItems.length - 1].index;
+
+          if (startIndex >= firstVisibleIndex - this.bufferSize/2 &&
+              endIndex <= lastVisibleIndex + this.bufferSize/2) {
+            // 在缓冲区内，不需要重新渲染
+            return;
+          }
+        }
+
+        // 创建可见项目
+        const newVisibleItems = [];
+        for (let i = startIndex; i <= endIndex; i++) {
+          const item = this.filteredItems[i];
+          if (item) {
+            newVisibleItems.push({
+              ...item,
+              index: i,
+              top: i * this.itemHeight
+            });
+          }
+        }
+
+        // 更新DOM
+        this.renderItems(newVisibleItems);
+        this.visibleItems = newVisibleItems;
+
+        // 更新性能指标
+        const endTime = performance.now();
+        this.lastRenderTime = endTime - startTime;
+        this.renderCount++;
+
+        document.getElementById('renderTime').textContent = `${this.lastRenderTime.toFixed(1)}ms`;
+        document.getElementById('renderedRows').textContent = newVisibleItems.length;
+        document.getElementById('scrollPosition').textContent = Math.round(scrollTop);
+        document.getElementById('visibleAccounts').textContent = newVisibleItems.length;
+
+        if (this.renderCount % 60 === 0) {
+          console.log(`[VirtualScroll] 渲染性能: ${this.lastRenderTime.toFixed(2)}ms, 行数: ${newVisibleItems.length}`);
+        }
+      }
+
+      // 渲染项目到DOM
+      renderItems(items) {
+        const container = document.getElementById('dynamicContent');
+        const fragment = document.createDocumentFragment();
+
+        // 清空现有内容
+        container.innerHTML = '';
+
+        items.forEach(item => {
+          const row = this.createAccountRow(item);
+          fragment.appendChild(row);
+        });
+
+        container.appendChild(fragment);
+      }
+
+      // 创建账户行
+      createAccountRow(item) {
+        const row = document.createElement('div');
+        row.className = 'account-row';
+        row.style.cssText = `
+          position: absolute;
+          top: ${item.top}px;
+          left: 0;
+          right: 0;
+          height: ${this.itemHeight}px;
+          display: flex;
+          align-items: center;
+          padding: 0 12px;
+          border-bottom: 1px solid #eee;
+          background: white;
+          ${item.monitoringActive ? 'background: rgba(40, 167, 69, 0.05);' : ''}
+        `;
+
+        row.dataset.accountId = item.id;
+        row.dataset.email = item.email;
+
+        row.innerHTML = `
+          <div style="width: 40px;">
+            <input type="checkbox" class="rowchk"
+                   data-email="${item.email}"
+                   data-code="${item.latestCode ? item.latestCode.code : ''}">
+          </div>
+          <div style="width: 300px; padding: 0 12px; overflow: hidden;">
+            <div style="font-weight: 500; color: #007bff; cursor: pointer;"
+                 onclick="copyText('${item.email}')" title="点击复制邮箱">
+              ${item.email}
+            </div>
+            <div class="muted" style="font-size: 11px;">ClientID: ${item.client_id}</div>
+            ${item.latestCode ? `
+              <div style="margin-top: 4px;">
+                <span style="color: #28a745; font-weight: bold; cursor: pointer; padding: 2px 6px; border-radius: 4px; background: rgba(40, 167, 69, 0.05);"
+                      onclick="copyText('${item.latestCode.code}')" title="点击复制验证码">
+                  ${item.latestCode.code}
+                </span>
+                <span style="color: #999; font-size: 11px; margin-left: 4px;">
+                  (${new Date(item.latestCode.received_at).toLocaleString()})
+                </span>
+              </div>
+            ` : ''}
+          </div>
+          <div style="width: 100px;">
+            <span class="pill status-${item.status}">
+              ${item.status === 'authorized' ? '已授权' : '待授权'}
+            </span>
+          </div>
+          <div style="width: 150px; color: #666; font-size: 13px;">
+            ${item.last_active_at ? new Date(item.last_active_at).toLocaleString() : '—'}
+          </div>
+          <div style="width: 200px;">
+            <div style="display: flex; gap: 4px;">
+              <button class="btn primary" onclick="pickup(${item.id}, this)" style="padding: 4px 8px; font-size: 12px;">
+                取件
+              </button>
+              <button class="btn" onclick="copyText('${item.email}')" title="复制邮箱" style="padding: 4px 8px; font-size: 12px;">
+                复制邮箱
+              </button>
+              ${item.latestCode ? `
+                <button class="btn" onclick="copyText('${item.latestCode.code}')" title="复制验证码" style="padding: 4px 8px; font-size: 12px;">
+                  复制验证码
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+
+        return row;
+      }
+
+      // FPS监控
+      startFPSMonitoring() {
+        const updateFPS = () => {
+          const now = performance.now();
+          const delta = now - this.lastFrameTime;
+          this.fps = Math.round(1000 / delta);
+          this.lastFrameTime = now;
+
+          document.getElementById('fps').textContent = this.fps;
+
+          requestAnimationFrame(updateFPS);
+        };
+        requestAnimationFrame(updateFPS);
+      }
+
+      // 滚动到指定项目
+      scrollToItem(index) {
+        const scrollTop = index * this.itemHeight;
+        this.content.scrollTop = scrollTop;
+      }
+
+      // 获取可见项目
+      getVisibleItems() {
+        return this.visibleItems;
+      }
+
+      // 刷新数据
+      refresh() {
+        this.render();
+      }
+
+      // 销毁
+      destroy() {
+        this.content.removeEventListener('scroll', this.handleScroll);
+        window.removeEventListener('resize', this.render);
+      }
+    }
+
+    // 数据管理器
+    class DataManager {
+      constructor() {
+        this.cache = new Map();
+        this.cacheTimeout = 30000; // 30秒缓存
+        this.pageSize = 100; // 每次加载100条
+      }
+
+      async loadAccounts(page = 1, filters = {}) {
+        const cacheKey = `accounts_${page}_${JSON.stringify(filters)}`;
+        const cached = this.cache.get(cacheKey);
+
+        if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+          return cached.data;
+        }
+
+        this.showLoading(true);
+
+        try {
+          const params = new URLSearchParams({
+            page,
+            size: this.pageSize,
+            sort: filters.sortBy || 'last_active_at',
+            order: filters.sortOrder || 'desc',
+            q: filters.email || ''
+          });
+
+          const response = await fetch(`/api/accounts/paged?${params}`);
+          const data = await response.json();
+
+          // 缓存结果
+          this.cache.set(cacheKey, {
+            data,
+            timestamp: Date.now()
+          });
+
+          // 更新统计信息
+          this.updateStats(data);
+
+          return data;
+        } catch (error) {
+          console.error('[DataManager] 加载数据失败:', error);
+          throw error;
+        } finally {
+          this.showLoading(false);
+        }
+      }
+
+      updateStats(data) {
+        document.getElementById('totalAccounts').textContent = data.total || 0;
+        document.getElementById('authorizedAccounts').textContent = data.authorized || 0;
+        document.getElementById('pendingAccounts').textContent = data.pending || 0;
+
+        // 更新内存使用情况
+        if (performance.memory) {
+          const memoryMB = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1);
+          document.getElementById('memoryUsage').textContent = `${memoryMB}MB`;
+        }
+      }
+
+      showLoading(show) {
+        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+      }
+
+      clearCache() {
+        this.cache.clear();
+      }
+    }
+
+    // 按需监控客户端（简化版）
+    class OnDemandMonitorClient {
+      constructor() {
+        this.activeMonitors = new Map();
+        this.eventSources = new Map();
+      }
+
+      async startAccountMonitor(accountId, accountEmail) {
+        try {
+          const response = await fetch(`/accounts/${accountId}/pickup`, {
+            method: 'POST'
+          });
+
+          const result = await response.json();
+          if (result.ok) {
+            this.activeMonitors.set(accountId, {
+              accountId,
+              email: accountEmail,
+              sessionId: result.sessionId,
+              startTime: Date.now(),
+              type: 'pickup'
+            });
+
+            this.updateMonitorPanel();
+            this.highlightAccountRow(accountId);
+
+            showNotification(`开始监控 ${accountEmail}`, 'info');
+          }
+        } catch (error) {
+          console.error('[Monitor] 启动监控失败:', error);
+          showNotification('启动监控失败', 'error');
+        }
+      }
+
+      async startEmailMonitor(email) {
+        try {
+          const response = await fetch('/api/start-email-monitor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          });
+
+          const result = await response.json();
+          if (result.ok) {
+            showNotification(`开始监控 ${email}`, 'info');
+          }
+        } catch (error) {
+          console.error('[Monitor] 启动邮箱监控失败:', error);
+          showNotification('启动监控失败', 'error');
+        }
+      }
+
+      updateMonitorPanel() {
+        const activeCount = this.activeMonitors.size;
+        document.getElementById('activeMonitors').textContent = activeCount;
+
+        const statusElement = document.getElementById('systemStatus');
+        if (activeCount === 0) {
+          statusElement.textContent = '系统空闲';
+          statusElement.className = 'status-indicator idle';
+        } else {
+          statusElement.textContent = `监控中 (${activeCount})`;
+          statusElement.className = 'status-indicator monitoring';
+        }
+      }
+
+      highlightAccountRow(accountId) {
+        const row = document.querySelector(`[data-account-id="${accountId}"]`);
+        if (row) {
+          row.classList.add('monitoring-active');
+        }
+      }
+
+      stopMonitor(accountId) {
+        this.activeMonitors.delete(accountId);
+
+        const row = document.querySelector(`[data-account-id="${accountId}"]`);
+        if (row) {
+          row.classList.remove('monitoring-active');
+        }
+
+        this.updateMonitorPanel();
+      }
+    }
+
+    // 全局变量
+    let virtualScroll;
+    let dataManager;
+    let monitorClient;
+    let currentFilters = {};
+
+    // 初始化
+    async function init() {
+      virtualScroll = new VirtualScroll({
+        container: document.getElementById('virtualScrollContainer'),
+        content: document.getElementById('virtualScrollContent'),
+        spacer: document.getElementById('scrollSpacer'),
+        items: document.getElementById('scrollItems'),
+        itemHeight: 60,
+        bufferSize: 10
+      });
+
+      dataManager = new DataManager();
+      monitorClient = new OnDemandMonitorClient();
+
+      // 加载初始数据
+      await loadInitialData();
+
+      // 设置事件监听
+      setupEventListeners();
+
+      console.log('[App] 高性能界面初始化完成');
+    }
+
+    // 加载初始数据
+    async function loadInitialData() {
+      try {
+        const data = await dataManager.loadAccounts(1, currentFilters);
+        virtualScroll.setData(data.accounts || []);
+      } catch (error) {
+        console.error('[App] 加载初始数据失败:', error);
+        showNotification('加载数据失败', 'error');
+      }
+    }
+
+    // 设置事件监听
+    function setupEventListeners() {
+      // 搜索输入
+      let searchTimeout;
+      document.getElementById('searchInput').addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+          currentFilters.email = e.target.value;
+          applyFilters();
+        }, 300);
+      });
+
+      // 状态过滤
+      document.getElementById('statusFilter').addEventListener('change', (e) => {
+        currentFilters.status = e.target.value;
+        applyFilters();
+      });
+
+      // 排序
+      document.getElementById('sortBy').addEventListener('change', (e) => {
+        currentFilters.sortBy = e.target.value;
+        applyFilters();
+      });
+
+      document.getElementById('sortOrder').addEventListener('change', (e) => {
+        currentFilters.sortOrder = e.target.value;
+        applyFilters();
+      });
+
+      // 键盘快捷键
+      document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          switch (e.key) {
+            case 'f':
+              e.preventDefault();
+              document.getElementById('searchInput').focus();
+              break;
+            case 'a':
+              e.preventDefault();
+              selectAll();
+              break;
+          }
+        }
+      });
+    }
+
+    // 应用过滤
+    async function applyFilters() {
+      if (!virtualScroll) return;
+
+      // 如果有大量数据，从服务器获取过滤后的结果
+      if (virtualScroll.allItems.length > 1000) {
+        try {
+          const data = await dataManager.loadAccounts(1, currentFilters);
+          virtualScroll.setData(data.accounts || []);
+        } catch (error) {
+          console.error('[App] 应用过滤失败:', error);
+        }
+      } else {
+        // 本地过滤
+        virtualScroll.filterData(currentFilters);
+      }
+    }
+
+    // 改变排序
+    function changeSort(field) {
+      const currentSort = currentFilters.sortBy;
+      const currentOrder = currentFilters.sortOrder;
+
+      currentFilters.sortBy = field;
+      currentFilters.sortOrder = (currentSort === field && currentOrder === 'desc') ? 'asc' : 'desc';
+
+      // 更新UI
+      document.getElementById('sortBy').value = field;
+      document.getElementById('sortOrder').value = currentFilters.sortOrder;
+
+      applyFilters();
+    }
+
+    // 显示通知
+    function showNotification(message, type = 'success') {
+      const notification = document.getElementById('notification');
+      notification.textContent = message;
+      notification.className = `notification ${type} show`;
+
+      setTimeout(() => {
+        notification.classList.remove('show');
+      }, 3000);
+    }
+
+    // 复制文本
+    function copyText(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        showNotification('已复制到剪贴板');
+
+        // 如果复制的是邮箱，启动监控
+        if (text && text.includes('@')) {
+          monitorClient.startEmailMonitor(text);
+        }
+      }).catch(() => {
+        showNotification('复制失败', 'error');
+      });
+    }
+
+    // 取件按钮
+    async function pickup(accountId, btn) {
+      btn.disabled = true;
+      btn.textContent = '取件中...';
+
+      try {
+        const accountRow = document.querySelector(`[data-account-id="${accountId}"]`);
+        const accountEmail = accountRow ? accountRow.dataset.email : '未知邮箱';
+
+        await monitorClient.startAccountMonitor(accountId, accountEmail);
+
+        // 立即检查一次邮件
+        const response = await fetch(`/accounts/${accountId}/check-now`, {
+          method: 'POST'
+        });
+
+        const result = await response.json();
+        if (result.ok && result.code) {
+          showNotification(`发现验证码: ${result.code}`, 'success');
+          setTimeout(() => {
+            virtualScroll.refresh();
+          }, 1500);
+        }
+
+      } catch (error) {
+        console.error('[Pickup] 取件失败:', error);
+        showNotification('取件失败', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '取件';
+      }
+    }
+
+    // 全选功能
+    function selectAll() {
+      const selectAllCheckbox = document.getElementById('selectAll');
+      const checkboxes = document.querySelectorAll('.rowchk');
+      checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+    }
+
+    function toggleAll(checkbox) {
+      const checkboxes = document.querySelectorAll('.rowchk');
+      checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    }
+
+    // 批量复制
+    function bulkCopy(field) {
+      const selected = document.querySelectorAll('.rowchk:checked');
+      const values = Array.from(selected).map(cb => cb.dataset[field]).filter(Boolean);
+
+      if (values.length === 0) {
+        showNotification('请选择要复制的内容', 'error');
+        return;
+      }
+
+      copyText(values.join('\n'));
+    }
+
+    // 导出数据
+    function exportData() {
+      const visibleItems = virtualScroll.getVisibleItems();
+      const csvContent = convertToCSV(visibleItems);
+      downloadCSV(csvContent, 'accounts_export.csv');
+      showNotification('数据导出成功', 'success');
+    }
+
+    function convertToCSV(items) {
+      const headers = ['邮箱', '状态', '最后活跃时间', '验证码', '验证码时间'];
+      const rows = items.map(item => [
+        item.email,
+        item.status === 'authorized' ? '已授权' : '待授权',
+        item.last_active_at ? new Date(item.last_active_at).toLocaleString() : '',
+        item.latestCode ? item.latestCode.code : '',
+        item.latestCode ? new Date(item.latestCode.received_at).toLocaleString() : ''
+      ]);
+
+      return [headers, ...rows].map(row => row.join(',')).join('\n');
+    }
+
+    function downloadCSV(content, filename) {
+      const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    // 切换性能指标显示
+    function togglePerformanceMetrics() {
+      const metrics = document.getElementById('performanceMetrics');
+      metrics.style.display = metrics.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // 页面加载完成后初始化
+    window.addEventListener('DOMContentLoaded', init);
+
+    // 页面卸载时清理
+    window.addEventListener('beforeunload', () => {
+      if (virtualScroll) {
+        virtualScroll.destroy();
+      }
+    });
+  </script>
+</body>
+</html>

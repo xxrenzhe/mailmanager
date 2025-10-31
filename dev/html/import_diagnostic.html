@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>导入诊断工具</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        textarea { width: 100%; height: 200px; margin: 10px 0; }
+        button { padding: 10px 20px; background: #007cba; color: white; border: none; cursor: pointer; }
+        .result { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffe6e6; color: #cc0000; }
+        .success { background: #e6ffe6; color: #008800; }
+        .debug { background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <h1>邮箱批量导入诊断工具</h1>
+
+    <div>
+        <h3>步骤1: 输入测试数据</h3>
+        <p>请输入您要导入的邮箱数据，每行一个，格式为：邮箱----密码----client_id----refresh_token</p>
+        <textarea id="testInput" placeholder="RuthMoorekx@outlook.com----Ofzmbis1------------------------------------------------------------9e5f94bc-e8a4-4e73-b8be-63364c29d753----M.C552_BAY.0.U.-Cg1AvNkQOKRWWkdxOkQq!!HlQamoacgw3a*d25kPBSBatxb26406phBl!PzqIsXvudBOKZ2!wfweyMmmcEr8WBpuN*w4ZxJj5bjdOhPCwzBQOWhpaBEewJgl3uADdidXnz8ZhaGQ5RXxK!w07zsUoZaMJbBKrwCZa0VE7y0wJ0*qW!YbaAYcSYLe0abtOE*EXkECVu!0O7pUXZHcPRwbQ9lOjU*AnQhsikjVNdxtdnEULRcFQCx7zGqL0!5!O2ryNyiJK4cYp248l71z7eudbleGtuAOF7XPSefzY2Tney6twKJjxTCbgU0548r4vzz1!213wxvoE4hxaiENcEnQ2T4GFVepkU7EDz0FKi5CDygNjVSbGYuvyfXANYDqtkrIgg$$"></textarea>
+        <button onclick="runDiagnostic()">运行诊断</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        // 解析函数（与主应用相同）
+        function parseImportLine(line) {
+            console.log(`[Parse Debug] 解析行:`, line);
+
+            // 预处理：移除行首行尾空白
+            line = line.trim();
+            if (!line) {
+                console.warn(`[Parse] 空行，跳过`);
+                return null;
+            }
+
+            // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
+            let parts = line.split('----');
+            console.log(`[Parse Debug] 第一次分割结果:`, parts, `字段数: ${parts.length}`);
+
+            if (parts.length !== 4) {
+                // 如果不是4个字段，尝试智能重构
+                const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+                const uuidMatch = line.match(uuidRegex);
+                console.log(`[Parse Debug] UUID匹配结果:`, uuidMatch);
+
+                if (uuidMatch) {
+                    const uuidIndex = line.indexOf(uuidMatch[0]);
+                    const beforeUuid = line.substring(0, uuidIndex).trim();
+                    const afterUuid = line.substring(uuidIndex + uuidMatch[0].length).trim();
+
+                    const beforeParts = beforeUuid.split(/-+/);
+                    if (beforeParts.length >= 2) {
+                        parts = [
+                            beforeParts[0],
+                            beforeParts[1],
+                            uuidMatch[0],
+                            afterUuid.replace(/^-+/, '')
+                        ];
+                        console.log(`[Parse Debug] 智能重构结果:`, parts);
+                    }
+                }
+            }
+
+            if (parts.length < 4) {
+                console.warn(`[Parse] 无效数据格式，期望4个字段，实际${parts.length}个:`, line);
+                console.warn(`[Parse] 字段详情:`, parts.map((p, i) => `字段${i+1}: "${p}"`));
+                return null;
+            }
+
+            const [email, password, client_id, refresh_token_enc] = parts;
+
+            // 验证每个字段
+            if (!email || !email.includes('@')) {
+                console.warn(`[Parse] 无效的邮箱地址: "${email}"`);
+                return null;
+            }
+
+            if (!client_id || client_id.length < 10) {
+                console.warn(`[Parse] 无效的client_id: "${client_id}"`);
+                return null;
+            }
+
+            if (!refresh_token_enc || refresh_token_enc.length < 10) {
+                console.warn(`[Parse] 无效的refresh_token: "${refresh_token_enc?.substring(0, 20)}..."`);
+                return null;
+            }
+
+            const result = {
+                email: email.trim(),
+                password: password ? password.trim() : '',
+                client_id: client_id.trim(),
+                refresh_token: refresh_token_enc.trim()
+            };
+
+            console.log(`[Parse Debug] 最终解析结果:`, {
+                email: result.email,
+                hasClientId: !!result.client_id,
+                clientIdLength: result.client_id.length,
+                hasRefreshToken: !!result.refresh_token,
+                refreshTokenLength: result.refresh_token.length
+            });
+
+            return result;
+        }
+
+        function runDiagnostic() {
+            const input = document.getElementById('testInput').value;
+            const results = document.getElementById('results');
+            results.innerHTML = '';
+
+            if (!input.trim()) {
+                results.innerHTML = '<div class="result error">请输入测试数据</div>';
+                return;
+            }
+
+            // 1. 测试原始数据
+            results.innerHTML += '<div class="result debug"><h3>1. 原始数据分析</h3>';
+            const lines = input.split('\n').filter(line => line.trim());
+            results.innerHTML += `<p>检测到 ${lines.length} 行数据</p>`;
+
+            let validCount = 0;
+            let invalidCount = 0;
+            const validAccounts = [];
+
+            // 2. 逐行解析测试
+            results.innerHTML += '<h3>2. 逐行解析测试</h3>';
+
+            lines.forEach((line, index) => {
+                const lineResult = document.createElement('div');
+                lineResult.className = 'result';
+
+                try {
+                    const parsed = parseImportLine(line);
+                    if (parsed) {
+                        validCount++;
+                        validAccounts.push(parsed);
+                        lineResult.className += ' success';
+                        lineResult.innerHTML = `
+                            <h4>✅ 行 ${index + 1}: ${parsed.email}</h4>
+                            <p><strong>邮箱:</strong> ${parsed.email}</p>
+                            <p><strong>Client ID:</strong> ${parsed.client_id.substring(0, 8)}... (长度: ${parsed.client_id.length})</p>
+                            <p><strong>Refresh Token:</strong> ${parsed.refresh_token.substring(0, 20)}... (长度: ${parsed.refresh_token.length})</p>
+                        `;
+                    } else {
+                        invalidCount++;
+                        lineResult.className += ' error';
+                        lineResult.innerHTML = `<h4>❌ 行 ${index + 1}: 解析失败</h4><p>原始数据: ${line.substring(0, 100)}...</p>`;
+                    }
+                } catch (error) {
+                    invalidCount++;
+                    lineResult.className += ' error';
+                    lineResult.innerHTML = `<h4>❌ 行 ${index + 1}: 解析错误</h4><p>错误: ${error.message}</p>`;
+                }
+
+                results.appendChild(lineResult);
+            });
+
+            // 3. 总结
+            const summary = document.createElement('div');
+            summary.className = 'result debug';
+            summary.innerHTML = `
+                <h3>3. 诊断总结</h3>
+                <p><strong>总行数:</strong> ${lines.length}</p>
+                <p><strong>有效账户:</strong> ${validCount}</p>
+                <p><strong>无效账户:</strong> ${invalidCount}</p>
+                ${validCount > 0 ? '<p class="success">✅ 数据格式正确，可以在主应用中导入</p>' : '<p class="error">❌ 没有有效的账户数据，请检查数据格式</p>'}
+            `;
+            results.appendChild(summary);
+
+            // 4. 如果有有效数据，提供复制功能
+            if (validCount > 0) {
+                const copySection = document.createElement('div');
+                copySection.className = 'result debug';
+                copySection.innerHTML = `
+                    <h3>4. 测试建议</h3>
+                    <p>数据格式正确！现在可以：</p>
+                    <ol>
+                        <li>复制原始数据到主应用的导入功能</li>
+                        <li>确保代理服务器运行在 http://localhost:3001</li>
+                        <li>在浏览器控制台中查看详细的调试信息</li>
+                    </ol>
+                    <button onclick="window.open('simple-mail-manager.html', '_blank')">打开主应用</button>
+                `;
+                results.appendChild(copySection);
+            }
+
+            // 5. 常见问题排查
+            const troubleshooting = document.createElement('div');
+            troubleshooting.className = 'result debug';
+            troubleshooting.innerHTML = `
+                <h3>5. 常见问题排查</h3>
+                <ul>
+                    <li><strong>字段数量不对:</strong> 确保每行有4个字段，用----分隔</li>
+                    <li><strong>邮箱格式错误:</strong> 确保邮箱包含@符号</li>
+                    <li><strong>Client ID太短:</strong> 确保Client ID是完整的UUID格式</li>
+                    <li><strong>Refresh Token太短:</strong> 确保Refresh Token没有被截断</li>
+                    <li><strong>特殊字符问题:</strong> 系统已测试支持所有特殊字符</li>
+                </ul>
+            `;
+            results.appendChild(troubleshooting);
+        }
+    </script>
+</body>
+</html>
