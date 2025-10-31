@@ -670,6 +670,10 @@
                         this.handleBulkImportProgress(data);
                         break;
 
+                    case 'import_progress':
+                        this.handleImportProgress(data);
+                        break;
+
                     default:
                         console.log(`[SSE] 未知事件类型: ${data.type}`);
                 }
@@ -776,6 +780,18 @@
             handleBulkImportProgress(data) {
                 if (data.message) {
                     console.log(`[Import] ${data.message}`);
+                }
+            }
+
+            // 处理异步导入进度事件
+            handleImportProgress(data) {
+                if (data.message) {
+                    console.log(`[异步导入] ${data.message}`);
+                }
+                // 更新进度条（如果有的话）
+                if (data.processed !== undefined && data.total) {
+                    const percentage = Math.round((data.processed / data.total) * 100);
+                    console.log(`[异步导入] 进度: ${percentage}% (${data.processed}/${data.total})`);
                 }
             }
 
@@ -2399,7 +2415,7 @@
                     // 获取邮件（限制为最近3封，提高速度）
                     const emails = await this.fetchRecentEmailsFast(account);
                     if (emails.length > 0) {
-                        this.extractAndStoreCodes(account.id, emails);
+                        await this.extractVerificationCodes(emails, account.id);
                         this.updateAccountStatus(account.id, 'authorized');
                     } else {
                         this.updateAccountStatus(account.id, 'authorized'); // 无邮件也是成功
