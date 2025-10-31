@@ -33,8 +33,8 @@ COPY --chown=mailmanager:nodejs public/ ./public/
 COPY --chown=mailmanager:nodejs server/ ./server/
 
 # 创建必要的目录并设置权限
-RUN mkdir -p /app/data /app/logs /app/etc && \
-    chown -R mailmanager:nodejs /app/data /app/logs
+RUN mkdir -p /app/data /app/etc && \
+    chown -R mailmanager:nodejs /app/data
 
 # 创建 nginx 配置
 RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
@@ -98,8 +98,10 @@ user=root
 
 [program:nginx]
 command=nginx -g "daemon off;"
-stdout_logfile=/var/log/nginx/supervisor.log
-stderr_logfile=/var/log/nginx/supervisor.err
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 autorestart=true
 priority=10
 
@@ -107,15 +109,19 @@ priority=10
 command=node /app/proxy-server.js
 directory=/app
 user=mailmanager
-stdout_logfile=/app/logs/mailmanager.log
-stderr_logfile=/app/logs/mailmanager.err
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 autorestart=true
 priority=20
 
 [program:health-check]
 command=/bin/sh -c "while true; do sleep 30; curl -f http://localhost/health || exit 1; done"
-stdout_logfile=/app/logs/health-check.log
-stderr_logfile=/app/logs/health-check.err
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 autorestart=true
 priority=30
 EOF
