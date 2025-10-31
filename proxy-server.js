@@ -732,97 +732,150 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
             const batch = accounts.slice(i, i + batchSize);
 
             const batchPromises = batch.map(async (account) => {
-                try {
-                    const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: new URLSearchParams({
-                            client_id: account.client_id,
-                            refresh_token: account.refresh_token,
-                            grant_type: 'refresh_token',
-                            scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All'
-                        })
-                    });
+                let retryCount = 0;
+                const maxRetries = 3;
+                const retryDelay = 2000; // 2秒重试间隔
 
-                    if (!response.ok) {
+                while (retryCount < maxRetries) {
+                    try {
+                        console.log(`[批量验证] 尝试验证账户 ${account.email} (尝试 ${retryCount + 1}/${maxRetries})`);
+
+                        const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: new URLSearchParams({
+                                client_id: account.client_id,
+                                refresh_token: account.refresh_token,
+                                grant_type: 'refresh_token',
+                                scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All'
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Token刷新成功，继续处理
+                            const tokenData = await response.json();
+
+                            // 获取最近3封邮件进行验证
+                            const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=3&$orderby=ReceivedDateTime desc', {
+                                headers: {
+                                    'Authorization': `Bearer ${tokenData.access_token}`,
+                                    'Accept': 'application/json'
+                                }
+                            });
+
+                            if (emailResponse.ok) {
+                                const emails = await emailResponse.json();
+                                const verificationCodes = await extractVerificationCodesAdvanced(emails.value, account.id, 'auto');
+
+                                return {
+                                    account_id: account.id,
+                                    email: account.email,
+                                    success: true,
+                                    status: 'authorized',
+                                    access_token: tokenData.access_token,
+                                    expires_in: tokenData.expires_in,
+                                    verification_codes: verificationCodes,
+                                    message: '验证成功'
+                                };
+                            } else {
+                                return {
+                                    account_id: account.id,
+                                    email: account.email,
+                                    success: true,
+                                    status: 'authorized',
+                                    access_token: tokenData.access_token,
+                                    expires_in: tokenData.expires_in,
+                                    verification_codes: [],
+                                    message: 'Token刷新成功，但邮件获取失败'
+                                };
+                            }
+                        } else {
+                            // Token刷新失败，分析错误类型
+                            let status = 'reauth_needed';
+                            let message = 'Token验证失败';
+                            let shouldRetry = false;
+
+                            try {
+                                const errorData = await response.json();
+                                console.log(`[批量验证] 账户 ${account.email} Token刷新失败:`, errorData);
+
+                                // 根据错误类型决定是否重试
+                                if (errorData.error === 'invalid_grant') {
+                                    message = 'Refresh Token已过期，需要手动重新授权';
+                                    status = 'expired_refresh_token';
+                                    shouldRetry = false; // 完全过期，不重试
+                                } else if (errorData.error === 'invalid_client') {
+                                    message = 'Client ID配置错误';
+                                    status = 'invalid_client_id';
+                                    shouldRetry = false; // 配置错误，不重试
+                                } else if (errorData.error === 'temporarily_unavailable' || response.status === 429) {
+                                    message = 'Microsoft服务暂时不可用';
+                                    status = 'service_unavailable';
+                                    shouldRetry = true; // 服务问题，可以重试
+                                } else if (errorData.error === 'internal_server_error') {
+                                    message = 'Microsoft内部服务器错误';
+                                    status = 'server_error';
+                                    shouldRetry = true; // 服务器错误，可以重试
+                                } else {
+                                    message = `Token刷新失败: ${errorData.error_description || errorData.error}`;
+                                    status = 'unknown_error';
+                                    shouldRetry = true; // 未知错误，可以重试
+                                }
+                            } catch (e) {
+                                message = `HTTP ${response.status}: Token刷新失败`;
+                                status = 'network_error';
+                                shouldRetry = response.status >= 500 || response.status === 429; // 服务器错误时重试
+                            }
+
+                            if (shouldRetry && retryCount < maxRetries - 1) {
+                                retryCount++;
+                                console.log(`[批量验证] 账户 ${account.email} 将在 ${retryDelay/1000}秒后重试 (${retryCount}/${maxRetries})`);
+                                await new Promise(resolve => setTimeout(resolve, retryDelay));
+                                continue; // 继续重试
+                            }
+
+                            // 不重试或重试次数用完，返回失败结果
+                            return {
+                                account_id: account.id,
+                                email: account.email,
+                                success: false,
+                                status: status,
+                                message: message,
+                                retry_attempts: retryCount + 1
+                            };
+                        }
+                    } catch (error) {
+                        console.error(`[批量验证] 账户 ${account.email} 验证异常:`, error.message);
+
+                        if (retryCount < maxRetries - 1) {
+                            retryCount++;
+                            console.log(`[批量验证] 账户 ${account.email} 网络异常，将在 ${retryDelay/1000}秒后重试 (${retryCount}/${maxRetries})`);
+                            await new Promise(resolve => setTimeout(resolve, retryDelay));
+                            continue; // 继续重试
+                        }
+
                         return {
                             account_id: account.id,
                             email: account.email,
                             success: false,
-                            status: 'reauth_needed',
-                            message: 'Token验证失败'
+                            status: 'network_error',
+                            message: '网络连接失败',
+                            retry_attempts: retryCount + 1
                         };
                     }
-
-                    const tokenData = await response.json();
-
-                    // 获取最近3���邮件
-                    const emailResponse = await fetch('https://outlook.office.com/api/v2.0/me/messages?$top=3&$orderby=ReceivedDateTime desc', {
-                        headers: {
-                            'Authorization': `Bearer ${tokenData.access_token}`,
-                            'Accept': 'application/json'
-                        }
-                    });
-
-                    let emails = [];
-                    let verificationCodes = [];
-
-                    if (emailResponse.ok) {
-                        const emailData = await emailResponse.json();
-                        emails = emailData.value || [];
-
-                        // 提取验证码
-                        if (emails.length > 0) {
-                            const extractResults = extractVerificationCodesAdvanced(emails);
-                            verificationCodes = extractResults.map(r => ({
-                                code: r.code,
-                                sender: r.sender,
-                                received_at: r.received_at,
-                                score: r.score || 1.0
-                            }));
-
-                            // 发送验证码发现事件
-                            verificationCodes.forEach(result => {
-                                eventEmitter.emit(`verification_code_found_${sessionId || 'default'}`, {
-                                    type: 'verification_code_found',
-                                    sessionId: sessionId || 'default',
-                                    account_id: account.id,
-                                    code: result.code,
-                                    sender: result.sender,
-                                    received_at: result.received_at,
-                                    score: result.score,
-                                    timestamp: new Date().toISOString()
-                                });
-                            });
-                        }
-                    }
-
-                    return {
-                        account_id: account.id,
-                        email: account.email,
-                        success: true,
-                        status: 'authorized',
-                        message: `验证成功，找到 ${emails.length} 封邮件`,
-                        emails_count: emails.length,
-                        verification_codes: verificationCodes,
-                        access_token: tokenData.access_token,
-                        refresh_token: tokenData.refresh_token
-                    };
-
-                } catch (error) {
-                    console.error(`[批量验证] 账户 ${account.email} 验证失败:`, error);
-                    return {
-                        account_id: account.id,
-                        email: account.email,
-                        success: false,
-                        status: 'error',
-                        message: '验证过程出错'
-                    };
                 }
             });
 
             const batchResults = await Promise.allSettled(batchPromises);
-            results.push(...batchResults);
+
+            // 处理批次结果
+            batchResults.forEach(promiseResult => {
+                if (promiseResult.status === 'fulfilled') {
+                    results.push(promiseResult.value);
+                } else {
+                    console.error(`[批量验证] 批次处理异常:`, promiseResult.reason);
+                }
+            });
 
             // 批次间短暂延迟，避免API限制
             if (i + batchSize < accounts.length) {
@@ -844,6 +897,43 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
         res.status(500).json({
             success: false,
             error: '批量验证过程出错'
+        });
+    }
+});
+
+// Microsoft OAuth 重新授权URL生成
+app.post('/api/accounts/reauth-url', async (req, res) => {
+    const { client_id, redirect_uri } = req.body;
+
+    if (!client_id) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少client_id参数'
+        });
+    }
+
+    try {
+        console.log(`[重新授权] 生成重新授权URL，client_id: ${client_id.substring(0, 8)}...`);
+
+        // 构建OAuth授权URL
+        const authUrl = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
+        authUrl.searchParams.set('client_id', client_id);
+        authUrl.searchParams.set('response_type', 'code');
+        authUrl.searchParams.set('redirect_uri', redirect_uri || 'http://localhost:3001/auth/callback');
+        authUrl.searchParams.set('scope', 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access');
+        authUrl.searchParams.set('response_mode', 'query');
+
+        res.json({
+            success: true,
+            auth_url: authUrl.toString(),
+            message: '请使用此URL重新授权Microsoft账户'
+        });
+
+    } catch (error) {
+        console.error('[重新授权] 生成授权URL失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '生成授权URL失败'
         });
     }
 });
