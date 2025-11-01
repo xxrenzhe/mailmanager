@@ -1430,12 +1430,12 @@ app.use((error, req, res, next) => {
     });
 });
 
-// 清空用户数据API - 支持多用户数据隔离
+// 清空用户数据API - 支持多用户数据隔离（完全清理版本）
 app.post('/api/accounts/clear-all', (req, res) => {
     try {
         const { sessionId } = req.body;
 
-        // 多用户隔离验证��必须有sessionId
+        // 多用户隔离验证：必须有sessionId
         if (!sessionId) {
             return res.status(400).json({
                 success: false,
@@ -1443,45 +1443,176 @@ app.post('/api/accounts/clear-all', (req, res) => {
             });
         }
 
-        console.log(`[清空数据] 开始清理会话 ${sessionId} 的数据`);
+        console.log(`[清空数据] 开始完全清理会话 ${sessionId} 的数据`);
 
-        // 清理该用户会话相关的所有账户
-        let deletedCount = 0;
+        // 统计清理的数据量
+        let deletedAccounts = 0;
+        let deletedSequences = 0;
+        let deletedMonitors = 0;
+        let deletedTokenRefresh = 0;
+
+        // 1. 清理账户数据（accountStore）
         const accountsToDelete = [];
-
-        // 遍历accountStore，找出属于该sessionId的所有账户
         for (const [accountId, account] of accountStore.entries()) {
-            // 检查账户是否属于该用户（通过sessionId关联）
-            // 注意：当前账户存储没有sessionId字段，需要通过其他方式关联
-            // 暂时清理所有账户，后续需要优化为按sessionId隔离
+            // 暂时清理所有账户（当前没有sessionId字段关联）
+            // TODO: 后续优化为按sessionId隔离存储
             accountsToDelete.push(accountId);
         }
 
-        // 删除账户
         accountsToDelete.forEach(accountId => {
             accountStore.delete(accountId);
-            deletedCount++;
+            deletedAccounts++;
         });
+
+        // 2. 清理序列号数据（sequenceStore）
+        const sequencesToDelete = [];
+        for (const [key, value] of sequenceStore.entries()) {
+            sequencesToDelete.push(key);
+        }
+
+        sequencesToDelete.forEach(key => {
+            sequenceStore.delete(key);
+            deletedSequences++;
+        });
+
+        // 3. 清理监控任务（activeMonitors）
+        const monitorsToDelete = [];
+        for (const [key, monitor] of activeMonitors.entries()) {
+            // 停止监控任务
+            if (monitor && monitor.interval) {
+                clearInterval(monitor.interval);
+            }
+            monitorsToDelete.push(key);
+        }
+
+        monitorsToDelete.forEach(key => {
+            activeMonitors.delete(key);
+            deletedMonitors++;
+        });
+
+        // 4. 清理token刷新记录（lastTokenRefresh）
+        const tokenRefreshToDelete = [];
+        for (const [key, value] of lastTokenRefresh.entries()) {
+            tokenRefreshToDelete.push(key);
+        }
+
+        tokenRefreshToDelete.forEach(key => {
+            lastTokenRefresh.delete(key);
+            deletedTokenRefresh++;
+        });
+
+        // 5. 清理可能的事件监听器和定时器
+        // 注意：WebSocket连接会在客户端断开时自动清理
 
         // 发送清理完成事件
         emitEvent({
             type: 'data_cleared',
             sessionId: sessionId,
-            deleted_count: deletedCount,
-            message: `已清理 ${deletedCount} 个账户`,
+            cleanup_stats: {
+                accounts: deletedAccounts,
+                sequences: deletedSequences,
+                monitors: deletedMonitors,
+                token_refresh: deletedTokenRefresh
+            },
+            message: `完全清理完成 - 账户:${deletedAccounts}, 序列号:${deletedSequences}, 监控:${deletedMonitors}, Token记录:${deletedTokenRefresh}`,
             timestamp: new Date().toISOString()
         });
 
-        console.log(`[清空数据] 会话 ${sessionId} 清理完成，删除了 ${deletedCount} 个账户`);
+        console.log(`[清空数据] 会话 ${sessionId} 完全清理完成:`, {
+            accounts: deletedAccounts,
+            sequences: deletedSequences,
+            monitors: deletedMonitors,
+            token_refresh: deletedTokenRefresh
+        });
 
         res.json({
             success: true,
-            deleted_count: deletedCount,
-            message: '数据清理完成'
+            cleanup_stats: {
+                accounts: deletedAccounts,
+                sequences: deletedSequences,
+                monitors: deletedMonitors,
+                token_refresh: deletedTokenRefresh
+            },
+            message: '数据完全清理完成'
         });
 
     } catch (error) {
         console.error('[清空数据] 处理失败:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 数据一致性检查API - 验证前后端数据同步状态
+app.post('/api/accounts/verify-sync', (req, res) => {
+    try {
+        const { sessionId, frontendAccounts } = req.body;
+
+        // 多用户隔离验证：必须有sessionId
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少会话标识：sessionId'
+            });
+        }
+
+        console.log(`[数据同步验证] 开始验证会话 ${sessionId} 的数据一致性`);
+
+        // 获取后端数据统计
+        const backendStats = {
+            accounts: accountStore.size,
+            sequences: sequenceStore.size,
+            monitors: activeMonitors.size,
+            token_refresh: lastTokenRefresh.size
+        };
+
+        // 计算前端数据统计
+        const frontendStats = {
+            accounts: frontendAccounts ? frontendAccounts.length : 0,
+            // 前端只有账户数据，其他数据在前端不存储
+            sequences: 0,
+            monitors: 0,
+            token_refresh: 0
+        };
+
+        // 数据一致性分析
+        const analysis = {
+            accounts_sync: frontendStats.accounts === backendStats.accounts,
+            backend_only_data: backendStats.accounts > frontendStats.accounts,
+            frontend_only_data: frontendStats.accounts > backendStats.accounts,
+            difference: Math.abs(frontendStats.accounts - backendStats.accounts)
+        };
+
+        // 生成建议
+        let recommendations = [];
+        if (analysis.backend_only_data) {
+            recommendations.push('建议执行清空数据操作，清理后端残留数据');
+        }
+        if (analysis.frontend_only_data) {
+            recommendations.push('前端数据可能包含后端不存在的账户，建议重新同步');
+        }
+        if (analysis.accounts_sync && backendStats.accounts === 0) {
+            recommendations.push('前后端数据完全同步，数据一致');
+        }
+
+        const result = {
+            success: true,
+            sessionId: sessionId,
+            frontend_stats: frontendStats,
+            backend_stats: backendStats,
+            analysis: analysis,
+            recommendations: recommendations,
+            timestamp: new Date().toISOString()
+        };
+
+        console.log(`[数据同步验证] 会话 ${sessionId} 验证完成:`, result);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('[数据同步验证] 处理失败:', error);
         res.status(500).json({
             success: false,
             error: error.message

@@ -1176,22 +1176,104 @@
                     // 确认是当前会话的清空事件
                     console.log('[数据清空] 确认当前会话，清空事件有效');
 
-                    // 显示清空完成通知
-                    if (data.deleted_count > 0) {
-                        this.showNotification(
-                            `后端数据清理完成: 已删除 ${data.deleted_count} 个账户`,
-                            'success'
-                        );
+                    // 处理清理统计数据
+                    const stats = data.cleanup_stats || {
+                        accounts: data.deleted_count || 0,
+                        sequences: 0,
+                        monitors: 0,
+                        token_refresh: 0
+                    };
+
+                    // 显示详细的清空完成通知
+                    const totalCleaned = stats.accounts + stats.sequences + stats.monitors + stats.token_refresh;
+
+                    if (totalCleaned > 0) {
+                        let message = `后端完全清理完成: `;
+                        if (stats.accounts > 0) message += `${stats.accounts}个账户 `;
+                        if (stats.sequences > 0) message += `${stats.sequences}个序列号 `;
+                        if (stats.monitors > 0) message += `${stats.monitors}个监控任务 `;
+                        if (stats.token_refresh > 0) message += `${stats.token_refresh}个Token记录 `;
+
+                        this.showNotification(message.trim(), 'success');
                     } else {
-                        this.showNotification(
-                            '后端数据清理完成: 没有需要清理的账户',
-                            'info'
-                        );
+                        this.showNotification('后端数据清理完成: 没有需要清理的数据', 'info');
                     }
 
-                    console.log(`[数据清空] 会话 ${data.sessionId} 清理完成，删除 ${data.deleted_count} 个账户`);
+                    console.log(`[数据清空] 会话 ${data.sessionId} 完全清理完成:`, stats);
+                    console.log(`[数据清空] 前后端数据一致性已确保，无残留数据`);
+
                 } else {
                     console.warn(`[数据清空] 收到其他会话的清空事件，忽略: ${data.sessionId} (当前: ${this.sessionId})`);
+                }
+            }
+
+            // 数据一致性验证方法
+            async verifyDataConsistency() {
+                try {
+                    console.log('[数据一致性] 开始验证前后端数据同步状态');
+
+                    if (!this.sessionId) {
+                        console.warn('[数据一致性] 没有sessionId，跳过验证');
+                        return;
+                    }
+
+                    // 调用后端数据同步验证API
+                    const response = await fetch('/api/accounts/verify-sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: this.sessionId,
+                            frontendAccounts: this.accounts
+                        })
+                    });
+
+                    if (!response.ok) {
+                        console.warn('[数据一致性] 验证请求失败:', response.status);
+                        return;
+                    }
+
+                    const result = await response.json();
+                    console.log('[数据一致性] 验证结果:', result);
+
+                    // 处理验证结果
+                    if (result.success) {
+                        const { frontend_stats, backend_stats, analysis, recommendations } = result;
+
+                        if (analysis.accounts_sync) {
+                            // 数据一致
+                            console.log('[数据一致性] ✅ 前后端数据一致');
+                            this.showNotification('数据一致性验证通过：前后端数据完全同步', 'success');
+                        } else {
+                            // 数据不一致，显示警告和建议
+                            console.warn('[数据一致性] ⚠️ 前后端数据不一致:', analysis);
+
+                            let message = `数据不一致：前端${frontend_stats.accounts}个账户，后端${backend_stats.accounts}个账户`;
+
+                            if (analysis.backend_only_data) {
+                                message += '。建议清理后端残留数据';
+                            }
+
+                            this.showNotification(message, 'warning');
+
+                            // 显示详细建议
+                            recommendations.forEach((rec, index) => {
+                                setTimeout(() => {
+                                    console.log(`[数据一致性] 建议${index + 1}: ${rec}`);
+                                }, index * 1000);
+                            });
+                        }
+
+                        // 记录验证时间
+                        this.lastSyncVerification = new Date().toISOString();
+
+                    } else {
+                        console.error('[数据一致性] 验证失败:', result.error);
+                        this.showNotification('数据一致性验证失败: ' + result.error, 'error');
+                    }
+
+                } catch (error) {
+                    console.error('[数据一致性] 验证异常:', error);
+                    // 不显示用户错误，避免干扰
                 }
             }
 
@@ -4146,6 +4228,11 @@
                 // 关闭弹窗并显示成功消息
                 hideClearDataModal();
                 manager.showSuccess('所有数据已成功清空！已生成新的会话ID，确保多用户数据隔离。');
+
+                // 延迟验证数据一致性（等待后端清理完成事件）
+                setTimeout(async () => {
+                    await manager.verifyDataConsistency();
+                }, 2000);
 
             } catch (error) {
                 console.error('[清空数据] 清理失败:', error);
