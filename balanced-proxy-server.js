@@ -246,13 +246,18 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
         // 智能时间过滤器处理
         if (sinceTime) {
             try {
-                const filterTime = new Date(sinceTime).toISOString();
-                // 使用OData标准格式，时间值需要用单引号包围
-                // 构造过滤器时进行正确的URL编码
-                const filterClause = `ReceivedDateTime gt '${filterTime}'`;
+                // Microsoft Outlook API需要特定格式的日期时间
+                // 转换为ISO格式并确保时区信息正确
+                const filterDate = new Date(sinceTime);
+                const filterTime = filterDate.toISOString();
+
+                // OData查询中日期时间需要使用datetime'YYYY-MM-DDTHH:mm:ssZ'格式
+                const odataDateTime = filterTime.replace(/[-:]?\d+.\d+Z$/, '').replace('Z', '');
+                const filterClause = `ReceivedDateTime gt ${odataDateTime}`;
                 const encodedFilter = encodeURIComponent(filterClause);
                 url += `&$filter=${encodedFilter}`;
                 console.log(`[时间过滤] 获取比 ${sinceTime} 更新的邮件`);
+                console.log(`[时间过滤] OData查询: ${filterClause}`);
             } catch (error) {
                 console.log(`[时间过滤] 时间格式错误，降级获取最近5封邮件: ${error.message}`);
                 // 降级到最近5封邮件
