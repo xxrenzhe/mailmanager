@@ -440,6 +440,12 @@ function startMonitoring(sessionId, account, duration = 60000) {
                                 received_at: email.ReceivedDateTime,
                                 timestamp: new Date().toISOString()
                             });
+
+                            // 发现验证码后自动停止监控
+                            console.log(`[监控] 发现验证码，停止监控: ${account.email}`);
+                            const monitorId = `${sessionId}_${account.id}`;
+                            stopMonitoring(monitorId, '已获取验证码');
+
                             break; // 只取第一个验证码
                         }
                     }
@@ -486,13 +492,13 @@ function startMonitoring(sessionId, account, duration = 60000) {
     }, duration);
 }
 
-function stopMonitoring(monitorId) {
+function stopMonitoring(monitorId, reason = '监控超时') {
     if (activeMonitors.has(monitorId)) {
         const monitor = activeMonitors.get(monitorId);
         clearInterval(monitor.interval);
         activeMonitors.delete(monitorId);
 
-        console.log(`[监控] 停止监控任务: ${monitorId}`);
+        console.log(`[监控] 停止监控任务: ${monitorId} (原因: ${reason})`);
 
         // 统一事件通知（SSE + WebSocket）
         emitEvent({
@@ -500,7 +506,7 @@ function stopMonitoring(monitorId) {
             sessionId: monitor.sessionId,
             account_id: monitor.account.id,
             email: monitor.account.email,
-            reason: '监控超时',
+            reason: reason,
             timestamp: new Date().toISOString()
         });
     }
