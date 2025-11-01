@@ -814,27 +814,28 @@ async function performMonitoringCheck(monitorId, email) {
         };
         eventEmitter.emit(`monitoring_event_${sessionId}`, progressEventData);
 
-        // KISS 优化：监控时只获取新邮件，使用最新邮件收件时间作为基准
+        // 🔧 修复：使用上一封邮件的绝对时间作为过滤基准
         if (accountInfo.access_token) {
-            // 获取最新邮件的收件时间作为过滤基准
+            // 获取最新邮件的收件时间作为绝对基准
             const latestEmailTime = getLatestEmailReceivedTime(accountInfo);
 
             // 构建邮件获取选项
             let fetchOptions = { onlyNew: true };
 
             if (latestEmailTime) {
-                // 如果有最新邮件时间，使用该时间作为过滤起点
+                // ✅ 使用上一封邮件的绝对时间作为过滤起点
+                // 这样可以获取所有比上一封邮件更新的邮件
                 fetchOptions.sinceTime = latestEmailTime;
-                console.log(`[监控检查] 账户 ${email} 使用最新邮件时间作为过滤基准: ${latestEmailTime}`);
+                console.log(`[监控检查] 账户 ${email} 使用上一封邮件时间作为绝对基准: ${latestEmailTime}`);
             } else if (accountInfo._just_reauthorized) {
                 // 如果刚刚重新授权成功，使用监控开始时间
-                fetchOptions.sinceTime = accountInfo.monitor_start_time || new Date(Date.now() - 15000).toISOString();
+                fetchOptions.sinceTime = accountInfo.monitor_start_time || new Date(Date.now() - 60000).toISOString();
                 console.log(`[监控检查] 账户 ${email} 刚重新授权，使用监控开始时间: ${fetchOptions.sinceTime}`);
             } else {
-                // 默认情况：使用15秒前的时间，确保获取到一些新邮件
-                const fallbackTime = new Date(Date.now() - 15000).toISOString();
+                // 默认情况：没有邮件历史时，使用1分钟前作为基准
+                const fallbackTime = new Date(Date.now() - 60000).toISOString();
                 fetchOptions.sinceTime = fallbackTime;
-                console.log(`[监控检查] 账户 ${email} 使用默认时间基准: ${fallbackTime}`);
+                console.log(`[监控检查] 账户 ${email} 无邮件历史，使用默认基准: ${fallbackTime}`);
             }
 
             const emailResult = await fetchNewEmails(accountId, accountInfo, sessionId, fetchOptions);
@@ -920,32 +921,34 @@ async function attemptTokenRefresh(accountInfo) {
     }
 }
 
-// 获取最新邮件的收件时间
+// 获取最新验证码邮件的收件时间
 function getLatestEmailReceivedTime(accountInfo) {
-    // 如果账户有邮件数据，找到最新邮件的收件时间
-    if (accountInfo.emails && accountInfo.emails.length > 0) {
-        // 按收件时间降序排列，获取最新的邮件
-        const sortedEmails = accountInfo.emails.sort((a, b) =>
-            new Date(b.received_at) - new Date(a.received_at)
-        );
-        const latestEmail = sortedEmails[0];
-        if (latestEmail && latestEmail.received_at) {
-            return new Date(latestEmail.received_at).toISOString();
-        }
-    }
-
-    // 如果账户有验证码记录，也可以从中推断最新邮件时间
+    // ✅ 优先使用验证码记录的时间，因为这是确认包含验证码的邮件
     if (accountInfo.codes && accountInfo.codes.length > 0) {
         const sortedCodes = accountInfo.codes.sort((a, b) =>
             new Date(b.received_at) - new Date(a.received_at)
         );
         const latestCode = sortedCodes[0];
         if (latestCode && latestCode.received_at) {
+            console.log(`[时间基准] 使用最新验证码邮件时间: ${latestCode.received_at} (验证码: ${latestCode.code})`);
             return new Date(latestCode.received_at).toISOString();
         }
     }
 
+    // 🔧 备选方案：如果没有验证码记录，则使用最新邮件时间
+    if (accountInfo.emails && accountInfo.emails.length > 0) {
+        const sortedEmails = accountInfo.emails.sort((a, b) =>
+            new Date(b.received_at) - new Date(a.received_at)
+        );
+        const latestEmail = sortedEmails[0];
+        if (latestEmail && latestEmail.received_at) {
+            console.log(`[时间基准] 备选方案：使用最新邮件时间: ${latestEmail.received_at} (无验证码记录)`);
+            return new Date(latestEmail.received_at).toISOString();
+        }
+    }
+
     // 如果都没有，返回null
+    console.log(`[时间基准] 无邮件或验证码历史，返回null`);
     return null;
 }
 
@@ -959,12 +962,15 @@ async function fetchNewEmails(accountId, accountInfo, sessionId, options = {}) {
 
         // 如果只获取新邮件，添加时间过滤条件
         if (onlyNew && sinceTime) {
+            // ✅ 优先使用明确的绝对时间参数
             const sinceISO = new Date(sinceTime).toISOString();
             query += `&$filter=ReceivedDateTime ge ${sinceISO}`;
+            console.log(`[邮件] 使用指定时间过滤: ${sinceISO}`);
         } else if (onlyNew && accountInfo.last_check) {
-            // 使用上次检查时间作为基准
+            // 备用方案：使用上次检查时间作为基准（也是绝对时间）
             const lastCheckISO = new Date(accountInfo.last_check).toISOString();
             query += `&$filter=ReceivedDateTime ge ${lastCheckISO}`;
+            console.log(`[邮件] 使用上次检查时间过滤: ${lastCheckISO}`);
         }
 
         const response = await fetch(`https://outlook.office.com/api/v2.0/me/messages?${query}`, {
