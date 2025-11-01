@@ -815,6 +815,18 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                 // 存储账户
                 accountStore.set(account.id, account);
 
+                // 立即通知前端账户已授权
+                console.log(`[批量导入] ✅ 授权成功，通知前端: ${email}`);
+                emitEvent({
+                    type: 'account_status_changed',
+                    sessionId: sessionId,
+                    account_id: account.id,
+                    email: account.email,
+                    status: 'authorized',
+                    message: '邮箱授权成功',
+                    timestamp: new Date().toISOString()
+                });
+
                 // 异步取件最新5封邮件并提取验证码
                 (async () => {
                     try {
@@ -863,15 +875,53 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                 }
                             }
 
-                            // 如果没有发现验证码
+                            // 确保账户状态更新（无论是否发现验证码）
+                            accountStore.set(account.id, account);
+
+                            // 如果没有发现验证码，发送取件完成事件
                             if (!account.codes || account.codes.length === 0) {
                                 console.log(`[批量导入] 未发现验证码: ${email}`);
+                                emitEvent({
+                                    type: 'emails_processed',
+                                    sessionId: sessionId,
+                                    account_id: account.id,
+                                    email: account.email,
+                                    status: 'authorized', // 保持已授权状态
+                                    message: '邮箱授权成功，未发现验证码',
+                                    processed_count: emails.length,
+                                    verification_codes_found: 0,
+                                    timestamp: new Date().toISOString()
+                                });
                             }
                         } else {
                             console.log(`[批量导入] 未获取到邮件: ${email}`);
+                            emitEvent({
+                                type: 'emails_processed',
+                                sessionId: sessionId,
+                                account_id: account.id,
+                                email: account.email,
+                                status: 'authorized', // 保持已授权状态
+                                message: '邮箱授权成功，未找到邮件',
+                                processed_count: 0,
+                                verification_codes_found: 0,
+                                timestamp: new Date().toISOString()
+                            });
                         }
                     } catch (error) {
                         console.error(`[批量导入] 异步取件失败: ${email}`, error.message);
+                        // 即使取件失败，账户状态仍然保持已授权
+                        emitEvent({
+                            type: 'emails_processed',
+                            sessionId: sessionId,
+                            account_id: account.id,
+                            email: account.email,
+                            status: 'authorized', // 保持已授权状态
+                            message: '邮箱授权成功，取件失败',
+                            error: error.message,
+                            processed_count: 0,
+                            verification_codes_found: 0,
+                            timestamp: new Date().toISOString()
+                        });
                     }
                 })();
 

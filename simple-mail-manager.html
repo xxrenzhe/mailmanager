@@ -736,6 +736,10 @@
                         this.handleImportProgress(data);
                         break;
 
+                    case 'emails_processed':
+                        this.handleEmailsProcessed(data);
+                        break;
+
                     default:
                         console.log(`[WebSocket] 未知事件类型: ${data.type}`);
                 }
@@ -840,6 +844,10 @@
 
                     case 'import_progress':
                         this.handleImportProgress(data);
+                        break;
+
+                    case 'emails_processed':
+                        this.handleEmailsProcessed(data);
                         break;
 
                     default:
@@ -989,6 +997,50 @@
                             this.autoFetchEmails(account.id);
                         }, 1000); // 延迟1秒确保状态更新完成
                     }
+                }
+            }
+
+            // 处理邮件处理完成事件（批量导入���）
+            handleEmailsProcessed(data) {
+                console.log('[邮件处理完成] 收到批量导入完成事件:', data);
+
+                if (data.account_id) {
+                    const account = this.accounts.find(acc => acc.id === data.account_id);
+                    if (account) {
+                        // 更新账户状态为已授权（无论是否找到验证码）
+                        account.status = 'authorized';
+                        account.updated_at = new Date().toISOString();
+
+                        // 如果有验证码数据，更新验证码信息
+                        if (data.verification_code) {
+                            account.verification_code = data.verification_code;
+                            account.verification_code_time = data.received_at || new Date().toISOString();
+                            account.verification_code_from = data.sender || 'Unknown';
+
+                            // 显示验证码通知
+                            this.showNotification(
+                                `${account.email}: 找到验证码 ${data.verification_code} (来自: ${data.sender || 'Unknown'})`,
+                                'success'
+                            );
+                        } else {
+                            // 显示处理完成通知（无验证码）
+                            this.showNotification(
+                                `${account.email}: 邮件处理完成，未找到验证码`,
+                                'info'
+                            );
+                        }
+
+                        // 保存数据并更新界面
+                        this.saveAccounts();
+                        this.render();
+                        this.updateStats();
+
+                        console.log(`[邮件处理完成] 账户 ${account.email} 状态已更新为: ${account.status}`);
+                    } else {
+                        console.warn(`[邮件处理完成] 未找到账户 ID: ${data.account_id}`);
+                    }
+                } else {
+                    console.warn(`[邮件处理完成] 事件数据缺少 account_id:`, data);
                 }
             }
 
