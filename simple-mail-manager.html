@@ -958,6 +958,70 @@
 
                     const message = statusMessages[data.new_status] || `账户状态更新为: ${data.new_status}`;
                     this.showNotification(`${account.email}: ${message}`, data.new_status === 'authorized' ? 'success' : 'warning');
+
+                    // 授权成功后自动触发取件和验证码提取
+                    if (data.status === 'authorized' || data.new_status === 'authorized') {
+                        console.log(`[自动取件] 账户 ${account.email} 授权成功，开始自动取件`);
+                        setTimeout(() => {
+                            this.autoFetchEmails(account.id);
+                        }, 1000); // 延迟1秒确保状态更新完成
+                    }
+                }
+            }
+
+            // 自动取件和验证码提取方法（授权成功后调用）
+            async autoFetchEmails(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) {
+                    console.error(`[自动取件] 账户不存在: ${accountId}`);
+                    return;
+                }
+
+                console.log(`[自动取件] 开始为账户 ${account.email} 自动取件`);
+
+                try {
+                    // 确保sessionId存在
+                    if (!this.sessionId) {
+                        const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                        if (savedSessionId) {
+                            this.sessionId = savedSessionId;
+                        } else {
+                            this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            localStorage.setItem('mail_manager_session_id', this.sessionId);
+                        }
+                    }
+
+                    const requestData = {
+                        account_id: accountId,
+                        email: account.email,
+                        client_id: account.client_id,
+                        refresh_token: account.refresh_token,
+                        access_token: account.access_token,
+                        current_status: account.status,
+                        session_id: this.sessionId
+                    };
+
+                    console.log(`[自动取件] 发送取件请求:`, requestData);
+
+                    const response = await fetch('/api/manual-fetch-emails', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestData)
+                    });
+
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.details || result.message || '自动取件失败');
+                    }
+
+                    console.log(`[自动取件] ${account.email} 取件请求已发送`);
+                    this.showNotification(`已自动启动 ${account.email} 的邮件收取...`, 'info');
+
+                } catch (error) {
+                    console.error(`[自动取件] ${account.email} 取件失败:`, error);
+                    this.showError(`自动取件失败: ${error.message}`);
                 }
             }
 
