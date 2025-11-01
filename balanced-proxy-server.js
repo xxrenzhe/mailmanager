@@ -916,8 +916,27 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                             // 确保账户状态更新（无论是否发现验证码）
                             accountStore.set(account.id, account);
 
-                            // 如果没有发现验证码，发送取件完成事件
-                            if (!account.codes || account.codes.length === 0) {
+                            // 发送取件完成事件（无论是否发现验证码）
+                            if (account.codes && account.codes.length > 0) {
+                                // 发现验证码的情况
+                                const code = account.codes[0];
+                                console.log(`[批量导入] 发送验证码处理完成事件: ${email}`);
+                                emitEvent({
+                                    type: 'emails_processed',
+                                    sessionId: sessionId,
+                                    account_id: account.id,
+                                    email: account.email,
+                                    status: 'authorized',
+                                    message: '邮箱授权成功，已发现验证码',
+                                    verification_code: code.code,
+                                    sender: code.sender,
+                                    received_at: code.received_at,
+                                    processed_count: emails.length,
+                                    verification_codes_found: 1,
+                                    timestamp: new Date().toISOString()
+                                });
+                            } else {
+                                // 未发现验证码的情况
                                 console.log(`[批量导入] 未发现验证码: ${email}`);
                                 emitEvent({
                                     type: 'emails_processed',
