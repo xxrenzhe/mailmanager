@@ -3283,6 +3283,10 @@
                     // 保存账户数据
                     this.saveAccounts();
 
+                    // 更新过滤账户列表以包含新导入的账户
+                    this.filteredAccounts = [...this.accounts];
+                    this.currentPage = 1; // 回到第一页显示新导入的账户
+
                     // 显示导入完成，快速刷新页面
                     updateProgress(emailsData.length, emailsData.length, `✅ 已导入 ${createdCount} 个邮箱，正在刷新页面...`);
 
@@ -3291,13 +3295,14 @@
                         // 关闭进度弹窗
                         hideProgressModal();
 
-                        // 刷新页面显示已导入的邮箱
+                        // 确保界面更新：重新渲染账户列表和统计信息
                         this.render();
+                        this.updateStats();
 
                         // 显示成功提示
                         this.showSuccess(`已成功导入 ${createdCount} 个邮箱，后端正在自动处理授权和验证码提取`);
 
-                        console.log(`[批量导入] 前端导入完成，后端继续处理授权和验证码提取`);
+                        console.log(`[批量导入] 前端导入完成，账户总数: ${this.accounts.length}，过滤账户数: ${this.filteredAccounts.length}`);
                     }, 1000);
 
                 } catch (error) {
