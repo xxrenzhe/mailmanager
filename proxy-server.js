@@ -638,25 +638,6 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
         // KISS修复：调用标准停止函数，确保事件格式正确
         stopMonitoringTask(monitorId, '1分钟监控超时');
 
-  
-    
-        console.log(`[监控] 1分钟监控结束: ${email}, 共检查 ${monitoringTask.checkCount + 1} 次`);
-
-        // 发送监控结束事件
-        const stopEventData = {
-            type: 'monitoring_ended',
-            account_id: account_id,
-            email: email,
-            action: 'auto_stop',
-            message: `${email} 的1分钟监控已结束`,
-            duration: 60000,
-            check_count: monitoringTask.checkCount + 1,
-            timestamp: new Date().toISOString()
-        };
-
-        // 发送给特定会话
-        eventEmitter.emit(`monitoring_event_${userSessionId}`, stopEventData);
-        console.log(`[SSE] 发送���控结束事件: ${stopEventData.message}`);
     }, 60000);
 
     monitoringTask.intervalId = monitoringInterval;
