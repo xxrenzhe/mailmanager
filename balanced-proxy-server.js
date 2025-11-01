@@ -615,7 +615,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
             refresh_token: refresh_token,
             access_token: latestAccessToken,
             current_status: finalStatus,
-            last_active_at: last_active_at || new Date().toISOString(),
+            last_active_at: new Date().toISOString(),
             codes: codes || [],
             emails: emails || [],
             latest_code_received_at: latest_code_received_at,
