@@ -142,7 +142,12 @@ const outlookProxy = createProxyMiddleware({
 // 1. Outlook API代理
 app.use('/api/outlook', outlookProxy);
 
-// 2. 健康检查
+// 2. 主页 - 服务HTML文件
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/simple-mail-manager.html');
+});
+
+// 3. 健康检查
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
