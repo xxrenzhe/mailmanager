@@ -1999,16 +1999,21 @@
                             bValue = b.email.toLowerCase();
                             break;
                         case 'code':
-                            aValue = a.codes[0]?.code || '';
-                            bValue = b.codes[0]?.code || '';
+                            // 🔧 修复：安全排序获取最新验证码
+                            aValue = this.getLatestCodeForSort(a)?.code || '';
+                            bValue = this.getLatestCodeForSort(b)?.code || '';
                             break;
                         case 'received_time':
-                            aValue = a.codes[0]?.received_at ? new Date(a.codes[0].received_at).getTime() : 0;
-                            bValue = b.codes[0]?.received_at ? new Date(b.codes[0].received_at).getTime() : 0;
+                            // 🔧 修复：安全排序获取最新验证码
+                            const aCode = this.getLatestCodeForSort(a);
+                            const bCode = this.getLatestCodeForSort(b);
+                            aValue = aCode?.received_at ? new Date(aCode.received_at).getTime() : 0;
+                            bValue = bCode?.received_at ? new Date(bCode.received_at).getTime() : 0;
                             break;
                         case 'sender':
-                            aValue = a.codes[0]?.sender || '';
-                            bValue = b.codes[0]?.sender || '';
+                            // 🔧 修复：安全排序获取最新验证码
+                            aValue = this.getLatestCodeForSort(a)?.sender || '';
+                            bValue = this.getLatestCodeForSort(b)?.sender || '';
                             break;
                         default:
                             return 0;
@@ -2062,7 +2067,16 @@
                 console.log(`[分页调试] 本页显示账户数: ${paginatedAccounts.length}`);
 
                 tbody.innerHTML = paginatedAccounts.map((account) => {
-                    const latestCode = account.codes[0];
+                    // 🔧 修复：安全排序获取最新验证码
+                    let latestCode = null;
+                    if (account.codes && account.codes.length > 0) {
+                        const sortedCodes = [...account.codes].sort((a, b) => {
+                            const timeA = new Date(a.received_at).getTime();
+                            const timeB = new Date(b.received_at).getTime();
+                            return timeB - timeA; // 降序，最新的在前
+                        });
+                        latestCode = sortedCodes[0];
+                    }
                     const statusIcon = this.getStatusIcon(account.status);
                     const statusClass = this.getStatusClass(account.status);
                     const statusText = this.getStatusText(account.status);
@@ -2312,6 +2326,21 @@
                 return `<span class="text-gray-700 text-base font-medium" title="${sender}">${displayName}</span>`;
             }
 
+            // 🔧 新增：安全排序辅助函数，获取真正最新的验证码
+            getLatestCodeForSort(account) {
+                if (!account.codes || account.codes.length === 0) {
+                    return null;
+                }
+
+                const sortedCodes = [...account.codes].sort((a, b) => {
+                    const timeA = new Date(a.received_at).getTime();
+                    const timeB = new Date(b.received_at).getTime();
+                    return timeB - timeA; // 降序，最新的在前
+                });
+
+                return sortedCodes[0];
+            }
+
             // 验证码显示逻辑 - 只显示纯数字验证码（参考accounts_simple.ejs）
             getVerificationCodeDisplay(account) {
                 console.log(`[验证码显示] 账户 ${account.email} 数据检查:`, {
@@ -2333,8 +2362,16 @@
                     return '<span class="text-gray-400 text-base">无</span>';
                 }
 
-                const latestCode = account.codes[0];
-                console.log(`[验证码显示] 账户 ${account.email} 最新验证码:`, latestCode);
+                // 🔧 修复：安全排序，确保显示真正最新的验证码
+                const sortedCodes = [...account.codes].sort((a, b) => {
+                    const timeA = new Date(a.received_at).getTime();
+                    const timeB = new Date(b.received_at).getTime();
+                    return timeB - timeA; // 降序，最新的在前
+                });
+
+                const latestCode = sortedCodes[0];
+                console.log(`[验证码显示] 账户 ${account.email} 排序后最新验证码:`, latestCode);
+                console.log(`[验证码显示] 账户 ${account.email} 验证码总数: ${account.codes.length}`);
 
                 // 验证码显示逻辑：只要是从最近5封邮件中提取的验证码就显示
                 // 这包括导入时自动获取的验证码和手动同步获取的验证码
@@ -2646,7 +2683,21 @@
                     return;
                 }
 
-                const latestCode = account.codes[0];
+                // 🔧 修复：安全排序获取最新验证码
+                let latestCode = null;
+                if (account.codes && account.codes.length > 0) {
+                    const sortedCodes = [...account.codes].sort((a, b) => {
+                        const timeA = new Date(a.received_at).getTime();
+                        const timeB = new Date(b.received_at).getTime();
+                        return timeB - timeA; // 降序，最新的在前
+                    });
+                    latestCode = sortedCodes[0];
+                }
+
+                if (!latestCode) {
+                    this.showNotification('没有可复制的验证码', 'error');
+                    return;
+                }
 
                 try {
                     await navigator.clipboard.writeText(latestCode.code);
