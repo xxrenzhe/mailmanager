@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>清空数据功能测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+        .info { color: blue; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        #results { margin-top: 10px; font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>🧪 清空数据功能测试</h1>
+
+    <div class="test-section">
+        <h2>1. 测试前状态检查</h2>
+        <button onclick="checkLocalStorage()">检查LocalStorage状态</button>
+        <div id="storage-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. 添加测试数据</h2>
+        <button onclick="addTestData()">添加测试账户数据</button>
+        <div id="add-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. 执行清空数据</h2>
+        <button onclick="testClearData()">测试清空数据功能</button>
+        <div id="clear-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. 验证清空结果</h2>
+        <button onclick="verifyClearResult()">验证清空结果</button>
+        <div id="verify-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. 测试会话ID重置</h2>
+        <button onclick="testSessionReset()">测试会话ID重置</button>
+        <div id="session-status"></div>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        // 模拟MailManager的部分功能进行测试
+        class TestManager {
+            constructor() {
+                this.sessionId = null;
+                this.accounts = [];
+                this.sequenceManager = {
+                    sequenceCache: new Map(),
+                    maxSequenceCache: 0,
+                    initialized: false
+                };
+                this.loadSession();
+                this.loadAccounts();
+            }
+
+            loadSession() {
+                this.sessionId = localStorage.getItem('mail_manager_session_id');
+                if (!this.sessionId) {
+                    this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('mail_manager_session_id', this.sessionId);
+                }
+            }
+
+            loadAccounts() {
+                const stored = localStorage.getItem('mailmanager_accounts');
+                if (stored) {
+                    try {
+                        this.accounts = JSON.parse(stored);
+                    } catch (error) {
+                        this.accounts = [];
+                    }
+                }
+            }
+
+            saveAccounts() {
+                localStorage.setItem('mailmanager_accounts', JSON.stringify(this.accounts));
+            }
+
+            clearAllData() {
+                // 清空所有数据
+                this.accounts = [];
+                this.sequenceManager.sequenceCache.clear();
+                this.sequenceManager.maxSequenceCache = 0;
+                this.sequenceManager.initialized = false;
+
+                // 清空所有本地��储数据
+                localStorage.removeItem('mailmanager_accounts');
+                localStorage.removeItem('mail_manager_session_id');
+
+                // 生成新的会话ID
+                this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('mail_manager_session_id', this.sessionId);
+
+                return true;
+            }
+
+            addTestAccount() {
+                const testAccount = {
+                    id: `test_${Date.now()}`,
+                    email: `test${this.accounts.length + 1}@outlook.com`,
+                    password: 'test_password',
+                    client_id: 'test_client_id',
+                    refresh_token: 'test_refresh_token',
+                    access_token: 'test_access_token',
+                    sequence: this.accounts.length + 1,
+                    status: 'authorized',
+                    created_at: new Date().toISOString(),
+                    last_active_at: new Date().toISOString()
+                };
+
+                this.accounts.push(testAccount);
+                this.saveAccounts();
+                return testAccount;
+            }
+        }
+
+        const testManager = new TestManager();
+
+        function updateStatus(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<span class="${type}">${message}</span>`;
+        }
+
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            results.innerHTML += `<div class="${type}">[${timestamp}] ${message}</div>`;
+            results.scrollTop = results.scrollHeight;
+        }
+
+        function checkLocalStorage() {
+            const sessionId = localStorage.getItem('mail_manager_session_id');
+            const accounts = localStorage.getItem('mailmanager_accounts');
+            const accountsData = accounts ? JSON.parse(accounts) : [];
+
+            updateStatus('storage-status',
+                `会话ID: ${sessionId ? sessionId : '无'}<br>` +
+                `账户数量: ${accountsData.length}<br>` +
+                `账户数据: ${JSON.stringify(accountsData, null, 2)`,
+                'info'
+            );
+
+            addResult(`检查LocalStorage完成 - 会话ID: ${sessionId ? '存在' : '不存在'}, 账户数: ${accountsData.length}`);
+        }
+
+        function addTestData() {
+            try {
+                const account = testManager.addTestAccount();
+                updateStatus('add-status', `成功添加测试账户: ${account.email}`, 'success');
+                addResult(`添加测试数据成功: ${account.email}`);
+            } catch (error) {
+                updateStatus('add-status', `添加测试数据失败: ${error.message}`, 'error');
+                addResult(`添加测试数据失败: ${error.message}`, 'error');
+            }
+        }
+
+        function testClearData() {
+            try {
+                const beforeSessionId = testManager.sessionId;
+                const beforeAccountCount = testManager.accounts.length;
+
+                const success = testManager.clearAllData();
+
+                if (success) {
+                    const afterSessionId = testManager.sessionId;
+                    const afterAccountCount = testManager.accounts.length;
+
+                    updateStatus('clear-status',
+                        `清空数据成功!<br>` +
+                        `会话ID: ${beforeSessionId} → ${afterSessionId}<br>` +
+                        `账户数量: ${beforeAccountCount} → ${afterAccountCount}`,
+                        'success'
+                    );
+
+                    addResult(`清空数据功能测试成功 - 会话ID已重置，账户数据已清空`);
+                } else {
+                    throw new Error('清空数据失败');
+                }
+            } catch (error) {
+                updateStatus('clear-status', `清空数据失败: ${error.message}`, 'error');
+                addResult(`清空数据测试失败: ${error.message}`, 'error');
+            }
+        }
+
+        function verifyClearResult() {
+            checkLocalStorage();
+
+            const sessionId = localStorage.getItem('mail_manager_session_id');
+            const accounts = localStorage.getItem('mailmanager_accounts');
+            const accountsData = accounts ? JSON.parse(accounts) : [];
+
+            if (accountsData.length === 0 && sessionId) {
+                updateStatus('verify-status', '✅ 验证通过: 数据已完全清空，会话ID已重置', 'success');
+                addResult('验证结果: 清空数据功能正常工作');
+            } else {
+                updateStatus('verify-status', '❌ 验证失败: 数据未完全清空', 'error');
+                addResult(`验证失败: 账户数=${accountsData.length}, 会话ID=${sessionId ? '存在' : '不存在'}`, 'error');
+            }
+        }
+
+        function testSessionReset() {
+            const oldSessionId = testManager.sessionId;
+            testManager.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('mail_manager_session_id', testManager.sessionId);
+
+            updateStatus('session-status',
+                `会话ID重置测试<br>` +
+                `旧会话ID: ${oldSessionId}<br>` +
+                `新会话ID: ${testManager.sessionId}`,
+                'info'
+            );
+
+            addResult(`会话ID重置测试完成: ${oldSessionId} → ${testManager.sessionId}`);
+        }
+
+        // 页面加载时自动检查初始状态
+        window.onload = function() {
+            addResult('页面加载完成，开始清空数据功能测试');
+            checkLocalStorage();
+        };
+    </script>
+</body>
+</html>

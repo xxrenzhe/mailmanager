@@ -760,246 +760,267 @@ app.post('/api/accounts/batch-import', async (req, res) => {
             });
         }
 
+        req.startTime = Date.now(); // 记录开始时间
+        console.log(`[高并发批量导入] 开始高并发处理 ${emails.length} 个邮箱`);
+
+        // 高并发控制配置 - 每批并发处理15个邮箱以提升性能 (用户反馈10并发不够，提升到15)
+        const AUTH_BATCH_SIZE = 15;
+
         const results = [];
         let successCount = 0;
         let errorCount = 0;
 
-        for (const emailData of emails) {
-            try {
-                const { email, password, client_id, refresh_token } = emailData;
+        // 分批高并发处理邮箱授权
+        for (let i = 0; i < emails.length; i += AUTH_BATCH_SIZE) {
+            const batch = emails.slice(i, i + AUTH_BATCH_SIZE);
+            console.log(`[高并发批量导入] 处理批次 ${Math.floor(i / AUTH_BATCH_SIZE) + 1}/${Math.ceil(emails.length / AUTH_BATCH_SIZE)} (${batch.length} 个邮箱)`);
 
-                if (!email || !password || !client_id || !refresh_token) {
-                    results.push({
-                        success: false,
-                        email: email || 'unknown',
-                        error: '缺少必需参数'
-                    });
-                    errorCount++;
-                    continue;
-                }
-
-                // 验证授权凭证
-                console.log(`[批量导入] 验证授权: ${email}`);
-                let tokenResult;
+            // 高并发处理当前批次的邮箱授权
+            const authPromises = batch.map(async (emailData) => {
                 try {
-                    tokenResult = await refreshAccessToken(client_id, refresh_token, false, true);
-                    console.log(`[批量导入] ✅ 授权验证成功: ${email}`);
-                } catch (error) {
-                    console.error(`[批量导入] ❌ 授权验证失败: ${email}`, error.message);
+                    const { email, password, client_id, refresh_token } = emailData;
 
-                    // 为失败的账户也创建记录，标记为failed状态
-                    const failedAccount = {
+                    // 基本验证
+                    if (!email || !password || !client_id || !refresh_token) {
+                        return {
+                            success: false,
+                            email: email || 'unknown',
+                            error: '邮箱数据不完整'
+                        };
+                    }
+
+                    // 验证授权凭证
+                    console.log(`[高并发批量导入] 验证授权: ${email}`);
+                    let tokenResult;
+                    try {
+                        tokenResult = await refreshAccessToken(client_id, refresh_token, false, true);
+                        console.log(`[高并发批量导入] ✅ 授权验证成功: ${email}`);
+                    } catch (error) {
+                        console.error(`[高并发批量导入] ❌ 授权验证失败: ${email}`, error.message);
+
+                        // 为失败的账户创建记录
+                        const failedAccount = {
+                            id: `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                            email: email,
+                            password: password,
+                            client_id: client_id,
+                            refresh_token: refresh_token,
+                            access_token: null,
+                            sequence: assignSequence(email),
+                            status: 'failed',
+                            created_at: new Date().toISOString(),
+                            last_active_at: new Date().toISOString(),
+                            error: error.message
+                        };
+
+                        // 发送失败事件
+                        emitEvent({
+                            type: 'emails_processed',
+                            sessionId: sessionId,
+                            account_id: failedAccount.id,
+                            email: email,
+                            status: 'failed',
+                            message: `授权验证失败: ${error.message}`,
+                            error: error.message,
+                            processed_count: 0,
+                            verification_codes_found: 0,
+                            timestamp: new Date().toISOString()
+                        });
+
+                        return {
+                            success: false,
+                            email: email,
+                            error: `授权验证失败: ${error.message}`,
+                            account_id: failedAccount.id,
+                            status: 'failed'
+                        };
+                    }
+
+                    // 分配序列号
+                    const sequence = assignSequence(email);
+
+                    // 创建账户
+                    const account = {
                         id: `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         email: email,
                         password: password,
                         client_id: client_id,
-                        refresh_token: refresh_token,
-                        access_token: null, // 失败时没有access_token
-                        sequence: assignSequence(email),
-                        status: 'failed', // 标记为失败状态
+                        refresh_token: tokenResult.refresh_token || refresh_token,
+                        access_token: tokenResult.access_token,
+                        sequence: sequence,
+                        status: 'authorized',
                         created_at: new Date().toISOString(),
-                        last_active_at: new Date().toISOString(),
-                        error: error.message
+                        last_active_at: new Date().toISOString()
                     };
 
-                    results.push({
-                        success: false,
-                        email: email,
-                        error: `授权验证失败: ${error.message}`,
-                        account_id: failedAccount.id
+                    // 存储账户
+                    accountStore.set(account.id, account);
+
+                    // 立即通知前端账户已授权
+                    console.log(`[高并发批量导入] ✅ 授权成功，通知前端: ${email}`);
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: sessionId,
+                        account_id: account.id,
+                        email: account.email,
+                        status: 'authorized',
+                        message: '邮箱授权成功',
+                        timestamp: new Date().toISOString()
                     });
-                    errorCount++;
 
-                    // 为失败的账户也发送emails_processed事件，让前端知道处理已完成
-                    const processedEvent = {
-                        type: 'emails_processed',
-                        data: {
-                            account_id: failedAccount.id,
-                            email: email,
-                            status: 'failed',
-                            error: error.message,
-                            verification_code: null,
-                            sender: null,
-                            received_at: new Date().toISOString(),
-                            session_id: sessionId
-                        }
-                    };
+                    // 高并发异步取件最新邮件并提取验证码
+                    (async () => {
+                        try {
+                            console.log(`[高并发批量导入] 开始高并发取件: ${email}`);
 
-                    // 通过emitEvent发送事件（WebSocket + SSE）
-                    emitEvent(processedEvent);
+                            // 高并发获取最新5封邮件
+                            const emails = await fetchEmails(account, tokenResult.access_token);
 
-                    console.log(`[批量导入] 已发送失败邮箱处理事件: ${email} (状态: failed)`);
-                    continue;
-                }
+                            if (emails && emails.length > 0) {
+                                console.log(`[高并发批量导入] 获取到 ${emails.length} 封邮件: ${email}`);
 
-                // 分配序列号
-                const sequence = assignSequence(email);
+                                // 提取验证码
+                                for (const emailItem of emails) {
+                                    const code = extractVerificationCode(emailItem.Subject, emailItem.Body.Content);
+                                    if (code) {
+                                        const receivedTime = new Date(emailItem.ReceivedDateTime).toISOString();
+                                        const senderEmail = extractSenderEmail(emailItem);
 
-                // 创建账户
-                const account = {
-                    id: `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                    email: email,
-                    password: password,
-                    client_id: client_id,
-                    refresh_token: tokenResult.refresh_token || refresh_token, // 使用新的refresh_token
-                    access_token: tokenResult.access_token, // 存储access_token
-                    sequence: sequence,
-                    status: 'authorized', // 直接设置为已授权
-                    created_at: new Date().toISOString(),
-                    last_active_at: new Date().toISOString()
-                };
+                                        account.codes = [{
+                                            code: code,
+                                            received_at: receivedTime,
+                                            sender: senderEmail,
+                                            subject: emailItem.Subject || "高并发批量导入验证码"
+                                        }];
+                                        account.latest_code_received_at = receivedTime;
+                                        accountStore.set(account.id, account);
 
-                // 存储账户
-                accountStore.set(account.id, account);
+                                        console.log(`[高并发批量导入] ✅ 发现验证码: ${code} (发件人: ${senderEmail})`);
 
-                // 立即通知前端账户已授权
-                console.log(`[批量导入] ✅ 授权成功，通知前端: ${email}`);
-                emitEvent({
-                    type: 'account_status_changed',
-                    sessionId: sessionId,
-                    account_id: account.id,
-                    email: account.email,
-                    status: 'authorized',
-                    message: '邮箱授权成功',
-                    timestamp: new Date().toISOString()
-                });
+                                        // 发送验证码发现事件
+                                        emitEvent({
+                                            type: 'verification_code_found',
+                                            sessionId: sessionId,
+                                            account_id: account.id,
+                                            email: account.email,
+                                            code: code,
+                                            sender: senderEmail,
+                                            subject: emailItem.Subject || "高并发批量导入验证码",
+                                            received_at: receivedTime,
+                                            timestamp: new Date().toISOString(),
+                                            batch_import: true
+                                        });
+                                        break;
+                                    }
+                                }
 
-                // 异步取件最新5封邮件并提取验证码
-                (async () => {
-                    try {
-                        console.log(`[批量导入] 开始异步取件: ${email}`);
+                                accountStore.set(account.id, account);
 
-                        // 获取最新5���邮件（简化策略）
-                        const emails = await fetchEmails(account, tokenResult.access_token);
-
-                        if (emails && emails.length > 0) {
-                            console.log(`[批量导入] 获取到 ${emails.length} 封邮件: ${email}`);
-
-                            // 提取验证码（邮件已按时间降序排列，返回第一个发现的验证码）
-                            for (const emailItem of emails) {
-                                const code = extractVerificationCode(emailItem.Subject, emailItem.Body.Content);
-                                if (code) {
-                                    const receivedTime = new Date(emailItem.ReceivedDateTime).toISOString();
-
-                                    // 安全提取发件人信息
-                                    const senderEmail = extractSenderEmail(emailItem);
-
-                                    account.codes = [{
-                                        code: code,
-                                        received_at: receivedTime,
-                                        sender: senderEmail,  // 使用智能提取的发件人
-                                        subject: emailItem.Subject || "批量导入验证码"
-                                    }];
-                                    account.latest_code_received_at = receivedTime;
-                                    accountStore.set(account.id, account);
-
-                                    console.log(`[批量导入] ✅ 发现验证码: ${code} (发件人: ${senderEmail}, 时间: ${receivedTime})`);
-
-                                    // 批量导入使用sessionId进行精确路由通知
+                                // 发送取件完成事件
+                                if (account.codes && account.codes.length > 0) {
+                                    const code = account.codes[0];
                                     emitEvent({
-                                        type: 'verification_code_found',
-                                        sessionId: sessionId, // 使用sessionId进行精确路由
+                                        type: 'emails_processed',
+                                        sessionId: sessionId,
                                         account_id: account.id,
                                         email: account.email,
-                                        code: code,
-                                        sender: senderEmail,
-                                        subject: emailItem.Subject || "批量导入验证码",
-                                        received_at: receivedTime,
-                                        timestamp: new Date().toISOString(),
-                                        batch_import: true // 标识这是批量导入的验证码
+                                        status: 'authorized',
+                                        message: '邮箱授权成功，已发现验证码',
+                                        verification_code: code.code,
+                                        sender: code.sender,
+                                        received_at: code.received_at,
+                                        processed_count: emails.length,
+                                        verification_codes_found: 1,
+                                        timestamp: new Date().toISOString()
                                     });
-                                    break; // 找到第一个验证码后就停止，因为邮件是按时间降序排列的
+                                } else {
+                                    emitEvent({
+                                        type: 'emails_processed',
+                                        sessionId: sessionId,
+                                        account_id: account.id,
+                                        email: account.email,
+                                        status: 'authorized',
+                                        message: '邮箱授权成功，未发现验证码',
+                                        processed_count: emails.length,
+                                        verification_codes_found: 0,
+                                        timestamp: new Date().toISOString()
+                                    });
                                 }
-                            }
-
-                            // 确保账户状态更新（无论是否发现验证码）
-                            accountStore.set(account.id, account);
-
-                            // 发送取件完成事件（无论是否发现验证码）
-                            if (account.codes && account.codes.length > 0) {
-                                // 发现验证码的情况
-                                const code = account.codes[0];
-                                console.log(`[批量导入] 发送验证码处理完成事件: ${email}`);
+                            } else {
                                 emitEvent({
                                     type: 'emails_processed',
                                     sessionId: sessionId,
                                     account_id: account.id,
                                     email: account.email,
                                     status: 'authorized',
-                                    message: '邮箱授权成功，已发现验证码',
-                                    verification_code: code.code,
-                                    sender: code.sender,
-                                    received_at: code.received_at,
-                                    processed_count: emails.length,
-                                    verification_codes_found: 1,
-                                    timestamp: new Date().toISOString()
-                                });
-                            } else {
-                                // 未发现验证码的情况
-                                console.log(`[批量导入] 未发现验证码: ${email}`);
-                                emitEvent({
-                                    type: 'emails_processed',
-                                    sessionId: sessionId,
-                                    account_id: account.id,
-                                    email: account.email,
-                                    status: 'authorized', // 保持已授权状态
-                                    message: '邮箱授权成功，未发现验证码',
-                                    processed_count: emails.length,
+                                    message: '邮箱授权成功，未找到邮件',
+                                    processed_count: 0,
                                     verification_codes_found: 0,
                                     timestamp: new Date().toISOString()
                                 });
                             }
-                        } else {
-                            console.log(`[批量导入] 未获取到邮件: ${email}`);
+                        } catch (error) {
+                            console.error(`[高并发批量导入] 取件失败: ${email}`, error.message);
                             emitEvent({
                                 type: 'emails_processed',
                                 sessionId: sessionId,
                                 account_id: account.id,
                                 email: account.email,
-                                status: 'authorized', // 保持已授权状态
-                                message: '邮箱授权成功，未找到邮件',
+                                status: 'authorized',
+                                message: '邮箱授权成功，取件失败',
+                                error: error.message,
                                 processed_count: 0,
                                 verification_codes_found: 0,
                                 timestamp: new Date().toISOString()
                             });
                         }
-                    } catch (error) {
-                        console.error(`[批量导入] 异步取件失败: ${email}`, error.message);
-                        // 即使取件失败，账户状态仍然保持已授权
-                        emitEvent({
-                            type: 'emails_processed',
-                            sessionId: sessionId,
-                            account_id: account.id,
-                            email: account.email,
-                            status: 'authorized', // 保持已授权状态
-                            message: '邮箱授权成功，取件失败',
-                            error: error.message,
-                            processed_count: 0,
-                            verification_codes_found: 0,
-                            timestamp: new Date().toISOString()
-                        });
+                    })();
+
+                    return {
+                        success: true,
+                        email: email,
+                        sequence: sequence,
+                        account_id: account.id,
+                        status: 'authorized'
+                    };
+
+                } catch (error) {
+                    console.error(`[高并发批量导入] 处理失败: ${emailData.email}`, error);
+                    return {
+                        success: false,
+                        email: emailData.email || 'unknown',
+                        error: error.message
+                    };
+                }
+            });
+
+            // 等待当前批次完成
+            const batchResults = await Promise.allSettled(authPromises);
+
+            // 统计结果
+            batchResults.forEach((result) => {
+                if (result.status === 'fulfilled') {
+                    results.push(result.value);
+                    if (result.value.success) {
+                        successCount++;
+                    } else {
+                        errorCount++;
                     }
-                })();
+                } else {
+                    console.error(`[高并发批量导入] 批次处理异常:`, result.reason);
+                    results.push({
+                        success: false,
+                        email: 'unknown',
+                        error: result.reason.message
+                    });
+                    errorCount++;
+                }
+            });
 
-                results.push({
-                    success: true,
-                    email: email,
-                    sequence: sequence,
-                    account_id: account.id,
-                    status: 'authorized'
-                });
-
-                successCount++;
-                console.log(`[批量导入] 成功导入: ${email} -> 序列号: ${sequence}`);
-
-            } catch (error) {
-                console.error(`[批量导入] 失败: ${emailData.email}`, error);
-                results.push({
-                    success: false,
-                    email: emailData.email || 'unknown',
-                    error: error.message
-                });
-                errorCount++;
+            // 批次间短暂延迟，避免过快触发API限制
+            if (i + AUTH_BATCH_SIZE < emails.length) {
+                console.log(`[高并发批量导入] 批次完成，等待500ms后处理下一批次...`);
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
         }
 
@@ -1008,12 +1029,14 @@ app.post('/api/accounts/batch-import', async (req, res) => {
             stats: {
                 total: emails.length,
                 successful: successCount,
-                failed: errorCount
+                failed: errorCount,
+                batch_size: AUTH_BATCH_SIZE,
+                concurrency_optimization: true
             },
             results
         });
 
-        console.log(`[批量导入] 完成统计: ${successCount}/${emails.length} 成功`);
+        console.log(`[高并发批量���入] 完成统计: ${successCount}/${emails.length} 成功, 耗时: ${Date.now() - req.startTime}ms`);
 
     } catch (error) {
         console.error('[批量导入] 处理失败:', error);

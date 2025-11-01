@@ -137,6 +137,10 @@
                 <div class="stat-label">待授权</div>
             </div>
             <div class="stat-item">
+                <div class="stat-number text-red-600" id="failedCount">0</div>
+                <div class="stat-label">失败</div>
+            </div>
+            <div class="stat-item">
                 <div class="stat-number text-purple-600" id="monitoringCount">0</div>
                 <div class="stat-label">监控中</div>
             </div>
@@ -2288,12 +2292,17 @@
                 const total = this.accounts.length;
                 const authorized = this.accounts.filter(acc => acc.status === 'authorized').length;
                 const pending = this.accounts.filter(acc => acc.status === 'pending').length;
+                const failed = this.accounts.filter(acc => acc.status === 'failed').length;
                 const monitoring = this.accounts.filter(acc => acc.is_monitoring).length;
 
                 document.getElementById('totalAccounts').textContent = total;
                 document.getElementById('authorizedCount').textContent = authorized;
                 document.getElementById('pendingCount').textContent = pending;
+                document.getElementById('failedCount').textContent = failed;
                 document.getElementById('monitoringCount').textContent = monitoring;
+
+                // 在控制台输出详细统计信息用于调试
+                console.log(`[统计更新] 总账户: ${total}, 已授权: ${authorized}, 待授权: ${pending}, 失败: ${failed}, 监控中: ${monitoring}`);
             }
 
             // 工具方法
@@ -2301,6 +2310,7 @@
                 const classes = {
                     'authorized': 'text-green-600',
                     'pending': 'text-yellow-600',
+                    'failed': 'text-red-600',
                     'reauth_needed': 'text-red-600'
                 };
                 return classes[status] || 'text-gray-600';
@@ -2310,6 +2320,7 @@
                 const icons = {
                     'authorized': 'fas fa-check-circle',
                     'pending': 'fas fa-clock',
+                    'failed': 'fas fa-times-circle',
                     'reauth_needed': 'fas fa-exclamation-triangle'
                 };
                 return icons[status] || 'fas fa-question-circle';
@@ -2319,6 +2330,7 @@
                 const texts = {
                     'authorized': '已授权',
                     'pending': '待授权',
+                    'failed': '授权失败',
                     'reauth_needed': '需重新授权'
                 };
                 return texts[status] || '未知';
@@ -3927,9 +3939,20 @@
             // 清空所有数据
             manager.accounts = [];
             manager.filteredAccounts = [];
+            manager.sequenceManager.sequenceCache.clear();
+            manager.sequenceManager.maxSequenceCache = 0;
+            manager.sequenceManager.initialized = false;
 
-            // 清空本地存储
+            // 清空所有本地存储数据
             localStorage.removeItem('mailmanager_accounts');
+            localStorage.removeItem('mail_manager_session_id');
+
+            // 生成新的会话ID
+            manager.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('mail_manager_session_id', manager.sessionId);
+
+            // 重新初始化WebSocket连接
+            manager.initializeWebSocket();
 
             // 刷新界面
             manager.render();
@@ -3937,7 +3960,7 @@
 
             // 关闭弹窗并显示成功消息
             hideClearDataModal();
-            manager.showSuccess('所有数据已成功清空！');
+            manager.showSuccess('所有数据已成功清空！已生成新的会话ID。');
         }
 
         function toggleAccountSelection(accountId, isChecked) {
