@@ -266,13 +266,10 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
 
         console.log(`[调试] 完整URL: ${url}`);
 
-        // 对整个path进行URL编码，解决特殊字符问题
-        const encodedPath = encodeURI(url);
-
         const options = {
             hostname: 'outlook.office.com',
             port: 443,
-            path: encodedPath,
+            path: url,  // 直接使用构造好的URL，不再进行额外编码
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -635,7 +632,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
             codes: codes || [],
             emails: emails || [],
             latest_code_received_at: latest_code_received_at,
-            last_check_time: timeFilter  // 使用计算好的时间过滤基准
+            last_check_time: timeFilter  // 保持向后兼容，同时设置latest_code_received_at
         };
 
         console.log(`[监控检查] 账户 ${email} 将获取比 ${timeFilter} 更新的邮件`);
