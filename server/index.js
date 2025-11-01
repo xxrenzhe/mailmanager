@@ -189,7 +189,7 @@ function sendSSEEvent(type, data) {
 // 主页 - 使用简单前端
 app.get('/', async (req, res) => {
     try {
-        res.render('accounts_simple');
+        res.sendFile(path.join(__dirname, '../simple-mail-manager.html'));
     } catch (error) {
         ErrorHandler.logError(error, '主页渲染');
         res.status(500).send('页面加载失败');
