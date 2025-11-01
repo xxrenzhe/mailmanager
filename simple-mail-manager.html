@@ -961,8 +961,10 @@
 
             // 处理账户状态变化事件
             handleAccountStatusChanged(data) {
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                let account = this.accounts.find(acc => acc.id === data.account_id);
+
                 if (account) {
+                    // 更新现有账户
                     account.status = data.status;
                     account.updated_at = new Date().toISOString();
 
@@ -987,8 +989,8 @@
                         'error': '账户授权失败'
                     };
 
-                    const message = statusMessages[data.new_status] || `账户状态更新为: ${data.new_status}`;
-                    this.showNotification(`${account.email}: ${message}`, data.new_status === 'authorized' ? 'success' : 'warning');
+                    const message = statusMessages[data.new_status] || `账户状态更新为: ${data.status}`;
+                    this.showNotification(`${account.email}: ${message}`, data.status === 'authorized' ? 'success' : 'warning');
 
                     // 授权成功后自动触发取件和验证码提取
                     if (data.status === 'authorized' || data.new_status === 'authorized') {
@@ -996,6 +998,41 @@
                         setTimeout(() => {
                             this.autoFetchEmails(account.id);
                         }, 1000); // 延迟1秒确保状态更新完成
+                    }
+                } else {
+                    // 批量导入时创建新账户（后端已创建，前端同步）
+                    if (data.email && (data.status === 'authorized' || data.status === 'failed')) {
+                        console.log(`[批量导入] 创建新账户: ${data.email} (${data.account_id})`);
+
+                        // 从批量导入的account_status_changed事件中获取基本信息
+                        account = {
+                            id: data.account_id,
+                            email: data.email,
+                            password: '', // 批量导入时前端不需要密码
+                            client_id: '', // 批量导入时前端不需要client_id
+                            refresh_token: '', // 批量导入时前端不需要refresh_token
+                            access_token: data.access_token || '',
+                            sequence: this.accounts.length + 1, // 临时序列号，后续会从后端获取
+                            status: data.status,
+                            created_at: new Date().toISOString(),
+                            last_active_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString(),
+                            last_check: new Date().toISOString()
+                        };
+
+                        // 添加到账户列表
+                        this.accounts.push(account);
+
+                        console.log(`[批量导入] ✅ 新账户已创建: ${account.email}, ID: ${account.id}`);
+
+                        this.saveAccounts();
+                        this.render();
+                        this.updateStats();
+
+                        const statusMessage = data.status === 'authorized' ? '账户授权成功' : '账户授权失败';
+                        this.showNotification(`${account.email}: ${statusMessage}`, data.status === 'authorized' ? 'success' : 'error');
+                    } else {
+                        console.warn(`[账户状态变更] 未找到账户且无法创建: ID=${data.account_id}, 邮箱=${data.email}, 状态=${data.status}`);
                     }
                 }
             }

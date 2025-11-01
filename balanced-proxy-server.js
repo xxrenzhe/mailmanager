@@ -825,9 +825,8 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         }
                     };
 
-                    // 通过WebSocket和SSE发送事件
-                    sendWebSocketEvent(sessionId, processedEvent.type, processedEvent.data);
-                    sendSSEEvent(sessionId, processedEvent.type, processedEvent.data);
+                    // 通过emitEvent发送事件（WebSocket + SSE）
+                    emitEvent(processedEvent);
 
                     console.log(`[批量导入] 已发送失败邮箱处理事件: ${email} (状态: failed)`);
                     continue;
