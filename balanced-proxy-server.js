@@ -475,7 +475,7 @@ function startMonitoring(sessionId, account, duration = 60000) {
                 }
             }
 
-        }, 15000) // 每15秒检查一次
+        }, 5000) // 每5秒检查一次
     };
 
     activeMonitors.set(monitorId, monitorTask);
