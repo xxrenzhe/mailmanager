@@ -88,13 +88,18 @@ async function refreshAccessToken(clientId, refreshToken, userInitiated = false)
         }
     }
 
-    try {
-        console.log(`[Token刷新] 尝试为客户端 ${clientId.substring(0, 8)}... 刷新token (用户主动: ${userInitiated})`);
+    // 网络重试机制
+    let lastError;
+    const maxRetries = 3;
 
-        const refreshKey = `${clientId}_${refreshToken.substring(0, 10)}`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`[Token刷新] 尝试为客户端 ${clientId.substring(0, 8)}... 刷新token (用户主动: ${userInitiated}, 尝试 ${attempt}/${maxRetries})`);
 
-        // 使用正确的curl格式 - 不包含scope参数（使用原始授权的scope）
-        const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+            const refreshKey = `${clientId}_${refreshToken.substring(0, 10)}`;
+
+            // 使用正确的curl格式 - 不包含scope参数（使用原始授权的scope）
+            const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -109,7 +114,7 @@ async function refreshAccessToken(clientId, refreshToken, userInitiated = false)
 
         if (tokenResponse.ok) {
             const tokenData = await tokenResponse.json();
-            console.log(`[Token刷新] ✅ Token刷新成功`);
+            console.log(`[Token刷新] ✅ Token刷新成功 (尝试 ${attempt}/${maxRetries})`);
 
             // 只对非用户主动触发的刷新记录冷却时间
             if (!userInitiated) {
@@ -153,10 +158,33 @@ async function refreshAccessToken(clientId, refreshToken, userInitiated = false)
 
             throw new Error(errorMessage);
         }
+
+        // 记录错误用���重试
+        lastError = error;
+
+        // 如果不是最后一次尝试，等待后重试
+        if (attempt < maxRetries) {
+            console.log(`[Token刷新] 尝试 ${attempt}/${maxRetries} 失败，${attempt * 1000}ms 后重试: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            continue;
+        }
+
     } catch (error) {
         console.error(`[Token刷新] 异常:`, error.message);
-        throw error;
+        lastError = error;
+
+        // 如果不是最后一次尝试，等待后重试
+        if (attempt < maxRetries) {
+            console.log(`[Token刷新] 网络异常，尝试 ${attempt}/${maxRetries} 失败，${attempt * 1000}ms 后重试: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            continue;
+        }
     }
+}
+
+    // 所有尝试都失败了
+    console.error(`[Token刷新] ❌ 所有 ${maxRetries} 次尝试都失败`);
+    throw lastError || new Error('Token刷新失败：所有重试尝试都失败');
 }
 
 // HTML标签清理函数
@@ -485,14 +513,70 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${account_id} (会话: ${sessionId})`);
         console.log(`[监控触发] 账户状态: ${current_status}, 有access_token: ${!!req.body.access_token}`);
 
+        // 账户状态检查和处理
+        let finalStatus = current_status;
+
+        if (current_status === 'reauth_required') {
+            console.log(`[监控触发] 账户 ${email} 状态为 reauth_required，将尝试重新授权`);
+
+            // 尝试重新授权（刷新token）
+            try {
+                const tokenResult = await refreshAccessToken(client_id, refresh_token, true);
+                if (tokenResult && tokenResult.access_token) {
+                    finalStatus = 'active';
+                    console.log(`[监控触发] 账户 ${email} 重新授权成功，状态更新为 active`);
+
+                    // 通知前端重新授权成功
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: sessionId,
+                        account_id: account_id,
+                        email: email,
+                        status: 'active',
+                        message: '账户重新授权成功'
+                    });
+                } else {
+                    throw new Error('重新授权失败：未获取到有效token');
+                }
+            } catch (reauthError) {
+                console.log(`[监控触发] 账户 ${email} 重新授权失败: ${reauthError.message}`);
+
+                // 通知前端需要手动重新授权
+                emitEvent({
+                    type: 'account_status_changed',
+                    sessionId: sessionId,
+                    account_id: account_id,
+                    email: email,
+                    status: 'reauth_required',
+                    message: 'Token已失效，请重新获取授权信息',
+                    error: reauthError.message
+                });
+
+                return res.status(403).json({
+                    success: false,
+                    error: '账户重新授权失败，请手动更新授权信息',
+                    status: 'reauth_required',
+                    message: '请在应用中更新refresh_token后重试'
+                });
+            }
+        }
+
+        // 获取最新的access_token（如果重新授权成功）
+        let latestAccessToken = req.body.access_token;
+        if (finalStatus === 'active' && current_status === 'reauth_required') {
+            // 重新授权成功，使用新token
+            const tokenResult = await refreshAccessToken(client_id, refresh_token, true);
+            latestAccessToken = tokenResult.access_token;
+        }
+
         // 创建账户对象
         const account = {
             id: account_id,
             email: email,
             client_id: client_id,
             refresh_token: refresh_token,
-            access_token: req.body.access_token,
-            current_status: current_status,
+            access_token: latestAccessToken,
+            current_status: finalStatus,
             last_active_at: last_active_at || new Date().toISOString(),
             codes: codes || [],
             emails: emails || [],
@@ -714,6 +798,56 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
 
         console.log(`[手动取件] 开始收取: ${email} (账户ID: ${account_id})`);
 
+        // 账户状态检查和处理
+        let finalStatus = current_status;
+        let latestAccessToken = access_token;
+
+        if (current_status === 'reauth_required') {
+            console.log(`[手动取件] 账户 ${email} 状态为 reauth_required，将尝试重新授权`);
+
+            // 尝试重新授权（刷新token）
+            try {
+                const tokenResult = await refreshAccessToken(client_id, refresh_token, true);
+                if (tokenResult && tokenResult.access_token) {
+                    finalStatus = 'active';
+                    latestAccessToken = tokenResult.access_token;
+                    console.log(`[手动取件] 账户 ${email} 重新授权成功，状态更新为 active`);
+
+                    // 通知前端重新授权成功
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: session_id,
+                        account_id: account_id,
+                        email: email,
+                        status: 'active',
+                        message: '账户重新授权成功'
+                    });
+                } else {
+                    throw new Error('重新授权失败：未获取到有效token');
+                }
+            } catch (reauthError) {
+                console.log(`[手动取件] 账户 ${email} 重新授权失败: ${reauthError.message}`);
+
+                // 通知前端需要手动重新授权
+                emitEvent({
+                    type: 'account_status_changed',
+                    sessionId: session_id,
+                    account_id: account_id,
+                    email: email,
+                    status: 'reauth_required',
+                    message: 'Token已失效，请重新获取授权信息',
+                    error: reauthError.message
+                });
+
+                return res.status(403).json({
+                    success: false,
+                    error: '账户重新授权失败，请手动更新授权信息',
+                    status: 'reauth_required',
+                    message: '请在应用中更新refresh_token后重试'
+                });
+            }
+        }
+
         if (!account_id || !email || !client_id || !refresh_token) {
             return res.status(400).json({
                 success: false,
@@ -727,19 +861,21 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             email: email,
             client_id: client_id,
             refresh_token: refresh_token,
-            access_token: access_token,
-            current_status: current_status || 'pending',
+            access_token: latestAccessToken,
+            current_status: finalStatus,
             last_check_time: null // 手动取件不设置时间过滤器，获取最新邮件
         };
 
         try {
-            // 刷新token
-            const tokenResult = await refreshAccessToken(account.client_id, account.refresh_token, true);
-            account.access_token = tokenResult.access_token;
-            account.refresh_token = tokenResult.refresh_token || refresh_token;
+            // 如果重新授权过程中已获取token，直接使用；否则刷新token
+            if (!latestAccessToken || finalStatus !== 'active') {
+                const tokenResult = await refreshAccessToken(account.client_id, account.refresh_token, true);
+                account.access_token = tokenResult.access_token;
+                account.refresh_token = tokenResult.refresh_token || refresh_token;
+            }
 
             // 获取邮件（不设置时间过滤器，获取最新10封邮件）
-            const emails = await fetchEmails(account, tokenResult.access_token, null);
+            const emails = await fetchEmails(account, account.access_token, null);
 
             console.log(`[手动取件] 获取到 ${emails ? emails.length : 0} 封邮件`);
 
