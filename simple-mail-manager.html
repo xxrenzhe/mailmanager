@@ -628,9 +628,10 @@
                         this.wsConnected = true;
                         this.showNotification('已连接到WebSocket实时更新服务', 'success');
 
-                        // 订阅所有事件类型
+                        // 订阅所有事件类型，包含sessionId
                         this.websocket.send(JSON.stringify({
                             type: 'subscribe',
+                            sessionId: this.sessionId,
                             events: [
                                 'verification_code_found',
                                 'account_status_changed',
