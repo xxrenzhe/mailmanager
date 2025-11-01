@@ -2433,6 +2433,16 @@
                     // 监控将在后端持续运行60秒直到成功获取验证码
                     console.log(`[监控] 开始为账户 ${account.email} 启动1分钟监控（将持续运行直到成功）`);
 
+                    // 复制邮箱监控时，清空历史验证码，只显示监控期间获取的新验证码
+                    console.log(`[监控] 清空账户 ${account.email} 的历史验证码，等待监控获取新验证码`);
+                    account.codes = []; // 清空历史验证码
+                    account.last_sync = null; // 重置同步时间
+
+                    // 保存并刷新UI
+                    this.saveAccounts();
+                    this.render();
+                    this.updateStats();
+
                     // 直接启动监控，后端会自动处理授权检查和邮件获取
                     await this.startMonitoringForAccount(account);
                 } catch (error) {
