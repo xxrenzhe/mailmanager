@@ -237,6 +237,13 @@ async function refreshToken(refreshToken, clientId, clientSecret) {
     });
 }
 
+// ========== 路由配置 ==========
+
+// 根路由 - 提供主页面
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/simple-mail-manager.html');
+});
+
 // ========== 简化的API端点 ==========
 
 // 简单的邮箱验证API
@@ -252,6 +259,229 @@ app.post('/api/validate-email', (req, res) => {
         email: email
     });
 });
+
+// 批量导入API - 完整处理版本（授权+取件+验证码提取）
+app.post('/api/accounts/batch-import', async (req, res) => {
+    try {
+        const { emails, sessionId } = req.body;
+
+        console.log(`[批量导入] 开始处理 ${emails ? emails.length : 0} 个邮箱的完整流程`);
+
+        if (!Array.isArray(emails) || emails.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: '请提供有效的邮箱数组'
+            });
+        }
+
+        const AUTH_BATCH_SIZE = 10; // 10个并发授权（避免API限制）
+        const results = [];
+        let successCount = 0;
+        let failureCount = 0;
+
+        // 分批高并发处理邮箱授权和取件
+        for (let i = 0; i < emails.length; i += AUTH_BATCH_SIZE) {
+            const batch = emails.slice(i, i + AUTH_BATCH_SIZE);
+            console.log(`[批量导入] 处理批次 ${Math.floor(i / AUTH_BATCH_SIZE) + 1}/${Math.ceil(emails.length / AUTH_BATCH_SIZE)} (${batch.length} 个邮箱)`);
+
+            // 高并发处理当前批次的邮箱授权
+            const authPromises = batch.map(async (emailData) => {
+                try {
+                    const { email, client_id, refresh_token } = emailData;
+
+                    console.log(`[批量导入] 开始授权: ${email}`);
+
+                    // 1. 验证授权凭证并获取access_token
+                    const tokenResult = await refreshToken(refresh_token, client_id, '');
+                    if (!tokenResult.access_token) {
+                        throw new Error('Token刷新失败');
+                    }
+
+                    console.log(`[批量导入] 授权成功: ${email}`);
+
+                    // 2. 获取邮件
+                    console.log(`[批量导入] 获取邮件: ${email}`);
+                    const emailsResult = await fetchEmailsFromMicrosoft(tokenResult.access_token);
+
+                    // 3. 提取验证码
+                    const verificationCodes = extractVerificationCodes(emailsResult);
+                    const latestCode = verificationCodes.length > 0 ? verificationCodes[0] : null;
+
+                    console.log(`[批量导入] 找到验证码: ${email} -> ${latestCode ? latestCode.code : '无'}`);
+
+                    const accountData = {
+                        id: 'account_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        email: email,
+                        client_id: client_id,
+                        refresh_token: refresh_token,
+                        access_token: tokenResult.access_token,
+                        status: 'authorized',
+                        created_at: new Date().toISOString(),
+                        last_checked: new Date().toISOString(),
+                        email_count: emailsResult.length,
+                        verification_code: latestCode,
+                        sequence: i + batch.indexOf(emailData) + 1,
+                        monitoring_enabled: false,
+                        emails: emailsResult // 包含邮件数据
+                    };
+
+                    successCount++;
+                    return {
+                        success: true,
+                        email: email,
+                        account_id: accountData.id,
+                        status: 'authorized',
+                        verification_code: latestCode,
+                        email_count: emailsResult.length,
+                        data: accountData
+                    };
+
+                } catch (error) {
+                    console.error(`[批量导入] 处理失败 ${emailData.email}:`, error.message);
+                    failureCount++;
+
+                    return {
+                        success: false,
+                        email: emailData.email,
+                        error: error.message,
+                        status: 'failed'
+                    };
+                }
+            });
+
+            // 等待当前批次完成
+            const batchResults = await Promise.allSettled(authPromises);
+            batchResults.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    results.push(result.value);
+                } else {
+                    results.push({
+                        success: false,
+                        email: 'unknown',
+                        error: result.reason.message,
+                        status: 'failed'
+                    });
+                }
+            });
+
+            // 批次间短暂延迟，避免API限制
+            if (i + AUTH_BATCH_SIZE < emails.length) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        console.log(`[批量导入] 完成处理: ${successCount} 成功, ${failureCount} 失败`);
+
+        res.json({
+            success: true,
+            message: `批量处理完成: ${successCount} 成功${failureCount > 0 ? `, ${failureCount} 失败` : ''}`,
+            results: results,
+            processed: results.length,
+            success_count: successCount,
+            failure_count: failureCount,
+            sessionId: sessionId
+        });
+
+    } catch (error) {
+        console.error('[批量导入] 处理失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '批量导入处理失败: ' + error.message
+        });
+    }
+});
+
+// 辅助函数：获取Microsoft邮件（使用现有的正确实现）
+async function fetchEmailsFromMicrosoft(accessToken) {
+    return new Promise((resolve, reject) => {
+        // 使用现有的Outlook API实现（已验证可用）
+        const OUTLOOK_API = 'https://outlook.office.com/api/v2.0';
+        const url = `${OUTLOOK_API}/me/messages?$top=5&$orderby=ReceivedDateTime desc`;
+
+        console.log(`[邮件获取] 获取最新5封邮件`);
+        console.log(`[调试] URL: ${url}`);
+
+        // 从完整URL中提取路径部分（与原实现保持一致）
+        const urlObj = new URL(url);
+        const options = {
+            hostname: urlObj.hostname,
+            port: 443,
+            path: urlObj.pathname + urlObj.search,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Accept': 'application/json'
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    if (res.statusCode === 200) {
+                        const result = JSON.parse(data);
+                        resolve(result.value || []);
+                    } else {
+                        console.error(`[邮件获取错误] HTTP ${res.statusCode} - URL: ${url}`);
+                        console.error(`[邮件获取错误] 响应体:`, data);
+
+                        if (res.statusCode === 400) {
+                            reject(new Error(`邮件获取失败: 400 - 权限不足或token无效`));
+                        } else if (res.statusCode === 401) {
+                            reject(new Error(`邮件获取失败: 401 - 未授权，token已过期`));
+                        } else if (res.statusCode === 403) {
+                            reject(new Error(`邮件获取失败: 403 - 禁止访问，权限不足`));
+                        } else {
+                            reject(new Error(`邮件获取失败: ${res.statusCode}`));
+                        }
+                    }
+                } catch (error) {
+                    console.error(`[邮件解析错误] URL: ${url}`);
+                    console.error(`[邮件解析错误] 原始数据: ${data}`);
+                    reject(new Error(`邮件响应解析失败: ${error.message}`));
+                }
+            });
+        });
+
+        req.on('error', (error) => reject(error));
+        req.setTimeout(30000, () => {
+            req.destroy();
+            reject(new Error('邮件获取超时'));
+        });
+        req.end();
+    });
+}
+
+// 辅助函数：提取验证码
+function extractVerificationCodes(emails) {
+    const codes = [];
+    emails.forEach(email => {
+        const body = email.body?.content || '';
+        const subject = email.subject || '';
+
+        // 多种验证码匹配模式
+        const patterns = [
+            /(?:验证码|verification code|code|验证)[\s:：]*(\d{4,8})/i,
+            /(\d{6})/i,
+            /(\d{4,8})/
+        ];
+
+        for (const pattern of patterns) {
+            const match = body.match(pattern) || subject.match(pattern);
+            if (match) {
+                codes.push({
+                    code: match[1],
+                    sender: email.from?.emailAddress?.address || 'unknown',
+                    received_time: email.receivedDateTime,
+                    subject: subject
+                });
+                break; // 找到第一个匹配就停止
+            }
+        }
+    });
+    return codes;
+}
 
 // 健康检查
 app.get('/api/health', (req, res) => {
