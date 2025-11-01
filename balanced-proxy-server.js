@@ -205,7 +205,9 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
 
         if (sinceTime) {
             const filterTime = new Date(sinceTime).toISOString();
-            url += `&$filter=ReceivedDateTime gt ${filterTime}`;
+            // 对时间字符串进行URL编码，避免特殊字符导致请求失败
+            const encodedFilterTime = encodeURIComponent(filterTime);
+            url += `&$filter=ReceivedDateTime gt ${encodedFilterTime}`;
         }
 
         const options = {
