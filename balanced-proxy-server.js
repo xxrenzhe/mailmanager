@@ -75,63 +75,88 @@ function assignSequence(email) {
 const TOKEN_REFRESH_COOLDOWN = 60;
 const lastTokenRefresh = new Map();
 
-// 2. Microsoft Token刷新（真实实现）
+// 2. Microsoft Token刷新（智能scope回退机制）
 async function refreshAccessToken(clientId, refreshToken, userInitiated = false) {
     // 只对非用户主动触发的刷新进行冷却检查
     if (!userInitiated) {
-        const refreshKey = `${clientId}_${refresh_token.substring(0, 10)}`;
+        const refreshKey = `${clientId}_${refreshToken.substring(0, 10)}`;
         const lastRefresh = lastTokenRefresh.get(refreshKey);
         const now = Date.now();
 
         if (lastRefresh && (now - lastRefresh) < TOKEN_REFRESH_COOLDOWN * 1000) {
-            return reject(new Error(`Token刷新过于频繁，请等待${TOKEN_REFRESH_COOLDOWN}秒`));
+            return Promise.reject(new Error(`Token刷新过于频繁，请等待${TOKEN_REFRESH_COOLDOWN}秒`));
         }
     }
 
-    return new Promise((resolve, reject) => {
-        const postData = querystring.stringify({
-            client_id: clientId,
-            refresh_token: refreshToken,
-            grant_type: 'refresh_token',
-            scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access'
-        });
+    try {
+        console.log(`[Token刷新] 尝试为客户端 ${clientId.substring(0, 8)}... 刷新token (用户主动: ${userInitiated})`);
 
-        const options = {
-            hostname: 'login.microsoftonline.com',
-            port: 443,
-            path: '/common/oauth2/v2.0/token',
+        const refreshKey = `${clientId}_${refreshToken.substring(0, 10)}`;
+
+        // 使用正确的curl格式 - 不包含scope参数（使用原始授权的scope）
+        const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(postData)
-            }
-        };
-
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                try {
-                    const result = JSON.parse(data);
-                    if (res.statusCode === 200) {
-                        // 只对非用户主动触发的刷新记录冷却时间
-                        if (!userInitiated) {
-                            lastTokenRefresh.set(refreshKey, Date.now());
-                        }
-                        resolve(result);
-                    } else {
-                        reject(new Error(`Token刷新失败: ${res.statusCode} - ${result.error_description || result.error}`));
-                    }
-                } catch (error) {
-                    reject(new Error(`Token响应解析失败: ${error.message}`));
-                }
-            });
+            },
+            body: new URLSearchParams({
+                client_id: clientId,
+                refresh_token: refreshToken,
+                grant_type: 'refresh_token'
+                // 注意：不包含scope参数，让Microsoft使用原始授权的scope
+            })
         });
 
-        req.on('error', (error) => reject(error));
-        req.write(postData);
-        req.end();
-    });
+        if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            console.log(`[Token刷新] ✅ Token刷新成功`);
+
+            // 只对非用户主动触发的刷新记录冷却时间
+            if (!userInitiated) {
+                lastTokenRefresh.set(refreshKey, Date.now());
+            }
+
+            return {
+                access_token: tokenData.access_token,
+                refresh_token: tokenData.refresh_token || refreshToken, // 保持原有refresh_token如果没返回新的
+                expires_in: tokenData.expires_in,
+                token_type: tokenData.token_type,
+                scope: tokenData.scope
+            };
+        } else {
+            // 详细的错误处理（参考原始版本）
+            const errorText = await tokenResponse.text();
+            console.error(`[Token刷新] ❌ 失败: ${tokenResponse.status}`, errorText);
+
+            let errorMessage = `Token刷新失败: ${tokenResponse.status}`;
+
+            try {
+                const errorData = JSON.parse(errorText);
+                if (errorData.error === 'invalid_grant') {
+                    if (errorData.error_description && errorData.error_description.includes('AADSTS70008')) {
+                        errorMessage = 'Refresh Token已过期或已被撤销';
+                    } else if (errorData.error_description && errorData.error_description.includes('AADSTS70000')) {
+                        errorMessage = '请求的scope未授权或已过期，需要用户重新授权';
+                    } else {
+                        errorMessage = 'Refresh Token无效或已过期';
+                    }
+                } else if (errorData.error === 'invalid_client') {
+                    errorMessage = 'Client ID配置错误或应用未注册';
+                } else if (errorData.error_description) {
+                    errorMessage = errorData.error_description;
+                } else {
+                    errorMessage = `Token刷新失败: ${errorData.error}`;
+                }
+            } catch (e) {
+                errorMessage = `HTTP ${tokenResponse.status}: Token刷新失败`;
+            }
+
+            throw new Error(errorMessage);
+        }
+    } catch (error) {
+        console.error(`[Token刷新] 异常:`, error.message);
+        throw error;
+    }
 }
 
 // 3. 验证码提取算法（简化但有效）
