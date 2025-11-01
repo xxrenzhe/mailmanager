@@ -159,21 +159,30 @@ async function refreshAccessToken(clientId, refreshToken, userInitiated = false)
     }
 }
 
-// 3. 验证码提取算法（简化但有效）
+// HTML标签清理函数
+function stripHtmlTags(html) {
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// 3. 验证码提取算法（优化版 - 6位纯数字 + HTML清理）
 function extractVerificationCode(subject, body) {
     if (!subject && !body) return null;
 
-    const text = `${subject || ''} ${body || ''}`;
+    // 清理HTML标签
+    const cleanSubject = subject || '';
+    const cleanBody = stripHtmlTags(body || '');
+    const text = `${cleanSubject} ${cleanBody}`;
 
-    // 高可信度模式
+    // 高可信度模式 - 必须包含验证码相关关键词
     const highPatterns = [
-        /(?:verification code|验证码|验证码为|code is|your code is)[\s:：\n\-]*(\d{4,8})/gi,
-        /(?:confirm|activate|verify)[\s\S]{0,30}?(\\d{4,8})/gi
+        /(?:verification code|验证码|验证码为|code is|your code is|安全码|安全验证|verification|authenticate)[\s:：\n\-]*(\d{6})/gi,
+        /(?:confirm|activate|verify|authenticate)[\s\S]{0,50}?(\d{6})/gi
     ];
 
-    // 中等可信度模式
+    // 中等可信度模式 - 6位纯数字
     const mediumPatterns = [
-        /(\d{4,8})/g
+        /\b(\d{6})\b/g  // 6位数字
     ];
 
     // 先尝试高可信度模式
@@ -181,7 +190,7 @@ function extractVerificationCode(subject, body) {
         const matches = text.match(pattern);
         if (matches && matches.length > 0) {
             for (const match of matches) {
-                const code = match.match(/(\d{4,8})/);
+                const code = match.match(/(\d{6})/);
                 if (code && code[1]) {
                     return code[1];
                 }
@@ -192,11 +201,13 @@ function extractVerificationCode(subject, body) {
     // 再尝试中等可信度模式
     const mediumMatches = text.match(mediumPatterns[0]);
     if (mediumMatches && mediumMatches.length > 0) {
+        // 返回第一个匹配的6位数字
         return mediumMatches[0];
     }
 
     return null;
 }
+
 
 // 4. 获取邮件（真实实现）
 async function fetchEmails(account, accessToken, sinceTime = null) {
@@ -215,10 +226,13 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
 
         console.log(`[调试] 完整URL: ${url}`);
 
+        // 对整个path进行URL编码，解决特殊字符问题
+        const encodedPath = encodeURI(url);
+
         const options = {
             hostname: 'outlook.office.com',
             port: 443,
-            path: url,
+            path: encodedPath,
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,

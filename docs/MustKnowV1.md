@@ -131,27 +131,22 @@ LocalStorage    WebSocket      Outlook API
 
 ## 技术方案详解
 
-### 1. Microsoft Outlook 集成方案
+### 1. Microsoft Outlook 集成
 
 **Token刷新机制:**
 - 标准OAuth格式：Client ID + Refresh Token → Access Token
 - 不包含scope参数，使用原始授权scope
 - Access Token 1小时有效，refresh_token长期有效
 
-**API 端点:**
+**API端点:**
 - Token刷新: `https://login.microsoftonline.com/common/oauth2/v2.0/token`
 - 邮件API: `https://outlook.office.com/api/v2.0/me/messages`
-- 权限范围: `IMAP.AccessAsUser.All`, `Mail.ReadWrite`, `SMTP.Send`, `POP.AccessAsUser.All`
-
-**关键特性:**
-- ✅ 兼容所有refresh_token格式，无AADSTS70000错误
-- ✅ 用户主动监控无冷却限制
-- ✅ 智能错误处理和自动重试
+- 权限: `IMAP.AccessAsUser.All`, `Mail.ReadWrite`, `SMTP.Send`, `POP.AccessAsUser.All`
 
 ### 2. 智能验证码提取
 
-**分层识别策略:**
-- 高可信度：直接匹配"验证码"关键词
+**识别策略:**
+- 高可信度：匹配"验证码"关键词
 - 中等可信度：verify/confirm/activate关键词
 - 低可信度：纯数字模式
 
@@ -161,22 +156,21 @@ LocalStorage    WebSocket      Outlook API
 - 关键词匹配: ×2.0
 - 格式独立: ×1.5
 
-### 3. 实时通信方案
+### 3. 实时通信
 
-**双重保障机制:**
-- **WebSocket**: 主要实时通信通道
+**双重保障:**
+- **WebSocket**: 主要实时通信
 - **SSE**: 备用推送方案
 
 **连接策略:**
-- 本地开发: `ws://localhost:3002`
-- 生产HTTP: `ws://domain.com/ws`
-- 生产HTTPS: `wss://domain.com/ws`
+- 本地: `ws://localhost:3002`
+- 生产: `wss://domain.com/ws`
 - 自动降级: WebSocket失败时切换SSE
 
 ### 4. 性能优化
 
 **前端:**
-- 分页显示 (每页50条)
+- 分页显示 (50条/页)
 - 防抖搜索 (300ms)
 - 数据缓存
 
