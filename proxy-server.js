@@ -633,22 +633,13 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
 
     // 设置1分钟停止定时器
     const stopTimeout = setTimeout(() => {
-        // KISS 修复：先清理定时器，再删除监控任务
-        clearInterval(monitoringInterval);
+        console.log(`[监控] 1分钟监控超时: ${email}, 共检查 ${monitoringTask.checkCount + 1} 次`);
 
-        // 检查监控任务是否存在再删除
-        if (activeMonitors.has(monitorId)) {
-            activeMonitors.delete(monitorId);
-        }
+        // KISS修复：调用标准停止函数，确保事件格式正确
+        stopMonitoringTask(monitorId, '1分钟监控超时');
 
-        // 从会话监控映射中移除
-        if (sessionMonitors.has(userSessionId)) {
-            sessionMonitors.get(userSessionId).delete(monitorId);
-            if (sessionMonitors.get(userSessionId).size === 0) {
-                sessionMonitors.delete(userSessionId);
-            }
-        }
-
+  
+    
         console.log(`[监控] 1分钟监控结束: ${email}, 共检查 ${monitoringTask.checkCount + 1} 次`);
 
         // 发送监控结束事件
