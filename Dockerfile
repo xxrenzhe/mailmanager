@@ -27,7 +27,7 @@ WORKDIR /app
 COPY --from=node-builder /app/node_modules ./node_modules
 
 # 复制应用文件
-COPY --chown=mailmanager:nodejs proxy-server.js ./
+COPY --chown=mailmanager:nodejs balanced-proxy-server.js ./proxy-server.js
 COPY --chown=mailmanager:nodejs simple-mail-manager.html ./
 COPY --chown=mailmanager:nodejs server/ ./server/
 
