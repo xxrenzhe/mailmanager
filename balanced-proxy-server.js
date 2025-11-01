@@ -251,9 +251,10 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
                 const filterDate = new Date(sinceTime);
                 const filterTime = filterDate.toISOString();
 
-                // OData查询中日期时间需要使用datetime'YYYY-MM-DDTHH:mm:ssZ'格式
-                const odataDateTime = filterTime.replace(/[-:]?\d+.\d+Z$/, '').replace('Z', '');
-                const filterClause = `ReceivedDateTime gt ${odataDateTime}`;
+                // OData查询中日期时间需要使用完整的datetime格式
+                // 移除毫秒部分但保留秒数和时区信息
+                const odataDateTime = filterTime.replace(/\.\d+Z$/, 'Z');
+                const filterClause = `ReceivedDateTime gt '${odataDateTime}'`;
                 const encodedFilter = encodeURIComponent(filterClause);
                 url += `&$filter=${encodedFilter}`;
                 console.log(`[时间过滤] 获取比 ${sinceTime} 更新的邮件`);
