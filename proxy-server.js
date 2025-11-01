@@ -2223,7 +2223,15 @@ wss.on('connection', (ws, request) => {
     const clientId = generateClientId();
     const sessionId = extractSessionId(request) || 'default';
 
-    console.log(`[WebSocket] 新客户端连接: ${clientId} (会话: ${sessionId})`);
+    // 简单的会话连接数限制 - KISS原则
+    const sessionConnections = Array.from(wsClients.values()).filter(c => c.sessionId === sessionId);
+    if (sessionConnections.length >= 5) {
+        console.log(`[WebSocket] 会话 ${sessionId} 连接数超限，拒绝连接 (当前: ${sessionConnections.length})`);
+        ws.close(1008, '连接数超限');
+        return;
+    }
+
+    console.log(`[WebSocket] 新客户端连接: ${clientId} (会话: ${sessionId}, 连接数: ${sessionConnections.length + 1})`);
 
     // 存储客户端信息
     const clientInfo = {
@@ -2235,6 +2243,11 @@ wss.on('connection', (ws, request) => {
     };
 
     wsClients.set(clientId, clientInfo);
+
+    // 简单的连接清理 - 定期清理断开的连接
+    if (wsClients.size % 100 === 0) {
+        cleanupStaleConnections();
+    }
 
     // 发送连接确认
     ws.send(JSON.stringify({
@@ -2288,6 +2301,47 @@ function extractSessionId(request) {
     const match = url.match(/sessionId=([^&]+)/);
     return match ? decodeURIComponent(match[1]) : null;
 }
+
+// 简单的连接清理函数 - KISS原则
+function cleanupStaleConnections() {
+    const now = new Date();
+    const staleThreshold = 5 * 60 * 1000; // 5分钟超时
+    let cleaned = 0;
+
+    wsClients.forEach((client, clientId) => {
+        if (now - client.lastPing > staleThreshold || client.ws.readyState !== 1) {
+            try {
+                client.ws.close();
+            } catch (e) {
+                // 忽略关闭错误
+            }
+            wsClients.delete(clientId);
+            cleaned++;
+        }
+    });
+
+    if (cleaned > 0) {
+        console.log(`[WebSocket] 清理了 ${cleaned} 个断开的连接，当前连接数: ${wsClients.size}`);
+    }
+}
+
+// 简单的并发监控 - KISS原则
+setInterval(() => {
+    const sessionCount = new Set(Array.from(wsClients.values()).map(c => c.sessionId)).size;
+    const connectionCount = wsClients.size;
+    const memoryUsage = process.memoryUsage();
+
+    console.log(`[并发监控] 会话数: ${sessionCount}, 连接数: ${connectionCount}, 内存: ${(memoryUsage.heapUsed / 1024 / 1024).toFixed(1)}MB`);
+
+    // 简单的内存监控和自动清理
+    if (memoryUsage.heapUsed > 200 * 1024 * 1024) { // 200MB阈值
+        console.log(`[内存监控] 内存使用过高，执行清理`);
+        if (global.gc) {
+            global.gc();
+        }
+        cleanupStaleConnections();
+    }
+}, 60000); // 每分钟监控一次
 
 // 处理WebSocket消息
 function handleWebSocketMessage(clientId, message) {

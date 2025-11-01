@@ -178,7 +178,7 @@
                 <div class="flex items-center gap-2">
                     <label class="text-sm font-medium text-gray-700">搜索:</label>
                     <input type="text" id="searchInput" placeholder="邮箱地址"
-                           class="search-filter" onkeyup="filterAccounts()">
+                           class="search-filter">
                 </div>
                 <div class="flex items-center gap-2">
                     <label class="text-sm font-medium text-gray-700">状态:</label>
@@ -192,9 +192,9 @@
                 <div class="flex items-center gap-2">
                     <label class="text-sm font-medium text-gray-700">每页显示:</label>
                     <select id="pageSize" class="search-filter" onchange="changePageSize()">
-                        <option value="20">20</option>
-                        <option value="50" selected>50</option>
-                        <option value="100">100</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
                     </select>
                 </div>
             </div>
@@ -558,7 +558,7 @@
                 this.sortField = 'sequence';
                 this.sortDirection = 'asc';
                 this.currentPage = 1;
-                this.pageSize = 50;
+                this.pageSize = 100; // 优化：提高默认每页显示数量，减少翻页
 
                 // 邮件序列管理器
                 this.sequenceManager = new EmailSequenceManager();
@@ -582,6 +582,16 @@
                 // 优先启动WebSocket实时更新
                 this.connectWebSocket();
 
+                // 设置简单事件委托
+                this.setupEventDelegation();
+
+                // 初始化批量更新
+                this.pendingUpdates = new Map();
+                this.updateTimer = null;
+
+                // 简单的本地存储��理 - KISS原则
+                this.cleanupLocalStorage();
+
                 this.render();
                 this.updateStats();
             }
@@ -599,7 +609,11 @@
                         this.sessionId = savedSessionId;
                         console.log(`[WebSocket] 恢复会话ID: ${this.sessionId}`);
                     } else {
-                        this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        // 简单但更安全的会话ID生成 - KISS原则
+                        const timestamp = Date.now().toString(36);
+                        const random = Math.random().toString(36).substr(2, 12);
+                        const fingerprint = navigator.userAgent.length.toString(36);
+                        this.sessionId = `s_${timestamp}_${random}_${fingerprint}`;
                         localStorage.setItem('mail_manager_session_id', this.sessionId);
                         console.log(`[WebSocket] 生成并保存会话ID: ${this.sessionId}`);
                     }
@@ -2038,7 +2052,7 @@
                             <td class="px-3 py-3 whitespace-nowrap w-40">
                                 <div class="flex gap-1 flex-wrap">
                                     <!-- 手动取件按钮 - 始终显示 -->
-                                    <button onclick="manualFetchEmails('${account.id}')"
+                                    <button data-action="fetch" data-account-id="${account.id}"
                                             class="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded transition text-base"
                                             title="手动收取最新邮件">
                                         取件
@@ -2053,17 +2067,17 @@
                                         `<span class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-medium">
                                             等待重新授权
                                         </span>` :
-                                        `<button onclick="copyEmailToClipboard('${account.id}')"
+                                        `<button data-action="copy-email" data-account-id="${account.id}"
                                                 class="px-2 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition text-base">
                                             复制
                                         </button>`
                                     }
 
-                                    <button onclick="copyLatestCode('${account.id}')"
+                                    <button data-action="copy-code" data-account-id="${account.id}"
                                             class="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition text-base">
                                         验证码
                                     </button>
-                                    <button onclick="deleteAccountConfirm('${account.id}')"
+                                    <button data-action="delete" data-account-id="${account.id}"
                                             class="px-2 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded transition text-base">
                                         删除
                                     </button>
@@ -2076,6 +2090,250 @@
                 // 更新分页信息
                 this.updatePaginationInfo(from, to, totalRecords);
                 this.renderPagination(totalPages);
+            }
+
+            // 简单事件委托设置
+            setupEventDelegation() {
+                const tableBody = document.getElementById('accountTableBody');
+                if (!tableBody) return;
+
+                // 简单的点击事件委托
+                tableBody.addEventListener('click', (e) => {
+                    const button = e.target.closest('button[data-action]');
+                    if (!button) return;
+
+                    const action = button.dataset.action;
+                    const accountId = button.dataset.accountId;
+
+                    switch (action) {
+                        case 'fetch':
+                            this.manualFetchEmails(accountId);
+                            break;
+                        case 'copy-email':
+                            this.copyEmailToClipboard(accountId);
+                            break;
+                        case 'copy-code':
+                            this.copyLatestCode(accountId);
+                            break;
+                        case 'delete':
+                            this.deleteAccountConfirm(accountId);
+                            break;
+                    }
+                });
+
+                // 简单搜索防抖
+                const searchInput = document.getElementById('searchInput');
+                if (searchInput) {
+                    let searchTimer = null;
+                    searchInput.addEventListener('input', (e) => {
+                        clearTimeout(searchTimer);
+                        searchTimer = setTimeout(() => {
+                            this.performFilter();
+                        }, 200); // 200ms防抖延迟
+                    });
+                }
+
+                // 状态过滤
+                const statusFilter = document.getElementById('statusFilter');
+                if (statusFilter) {
+                    statusFilter.addEventListener('change', () => {
+                        this.performFilter();
+                    });
+                }
+            }
+
+            // 简化的过滤方法
+            performFilter() {
+                const searchQuery = document.getElementById('searchInput').value.trim();
+                const statusFilter = document.getElementById('statusFilter').value;
+
+                this.filteredAccounts = this.accounts.filter(account => {
+                    const matchesSearch = !searchQuery ||
+                        account.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        account.name.toLowerCase().includes(searchQuery.toLowerCase());
+
+                    const matchesStatus = !statusFilter || account.status === statusFilter;
+                    return matchesSearch && matchesStatus;
+                });
+
+                this.currentPage = 1; // 重置到第一页
+                this.render();
+            }
+
+            // 简单批量更新机制
+            scheduleUpdate(accountId) {
+                this.pendingUpdates.set(accountId, true);
+
+                if (this.updateTimer) {
+                    clearTimeout(this.updateTimer);
+                }
+
+                this.updateTimer = setTimeout(() => {
+                    this.applyBatchUpdate();
+                }, 50); // 50ms批量更新延迟
+            }
+
+            applyBatchUpdate() {
+                if (this.pendingUpdates.size === 0) return;
+
+                // 清空更新队列
+                this.pendingUpdates.clear();
+                this.updateTimer = null;
+
+                // 只执行一次渲染
+                this.render();
+                this.updateStats();
+            }
+
+            // 优化的render方法 - 减少不必要的完整重渲染
+            render() {
+                // 如果有批量更新在等待，取消它们
+                if (this.updateTimer) {
+                    clearTimeout(this.updateTimer);
+                    this.updateTimer = null;
+                }
+
+                const tbody = document.getElementById('accountsTableBody');
+                const totalRecords = this.filteredAccounts.length;
+
+                if (totalRecords === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="text-center py-8 text-gray-500">
+                                暂无账户数据
+                            </td>
+                        </tr>
+                    `;
+                    document.getElementById('paginationInfo').textContent = '显示第 0 条，共 0 条';
+                    return;
+                }
+
+                // 计算分页
+                const from = (this.currentPage - 1) * this.pageSize + 1;
+                const to = Math.min(this.currentPage * this.pageSize, totalRecords);
+                const totalPages = Math.ceil(totalRecords / this.pageSize);
+
+                const paginatedAccounts = this.sortAccounts([...this.filteredAccounts])
+                    .slice(from - 1, to);
+
+                // 使用DocumentFragment优化DOM操作
+                const fragment = document.createDocumentFragment();
+                paginatedAccounts.forEach((account) => {
+                    const row = this.createAccountRow(account);
+                    fragment.appendChild(row);
+                });
+
+                tbody.innerHTML = '';
+                tbody.appendChild(fragment);
+
+                // 更新分页信息
+                this.updatePaginationInfo(from, to, totalRecords);
+                this.renderPagination(totalPages);
+            }
+
+            // 简单的本地存储清理 - KISS原则
+            cleanupLocalStorage() {
+                try {
+                    // 清理过期数据（7天前）
+                    const cutoffTime = Date.now() - (7 * 24 * 60 * 60 * 1000);
+
+                    // 清理验证码历史（只保留最近10个）
+                    this.accounts.forEach(account => {
+                        if (account.codes && account.codes.length > 10) {
+                            account.codes = account.codes.slice(0, 10);
+                        }
+
+                        // 清理过期邮件（30天前）
+                        if (account.emails) {
+                            account.emails = account.emails.filter(email =>
+                                new Date(email.received_at).getTime() > cutoffTime
+                            );
+                        }
+                    });
+
+                    // 保存清理后的数据
+                    this.saveAccounts();
+                    console.log('[本地存储] 数据清理完成');
+                } catch (error) {
+                    console.warn('[本地存储] 清理失败:', error.message);
+                }
+            }
+
+            // 创建单行DOM
+            createAccountRow(account) {
+                const latestCode = account.codes[0];
+                const statusIcon = this.getStatusIcon(account.status);
+                const statusClass = this.getStatusClass(account.status);
+                const statusText = this.getStatusText(account.status);
+
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-colors';
+                row.innerHTML = `
+                    <td class="px-3 py-3 whitespace-nowrap text-center w-16">
+                        ${this.sequenceNumber++}
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap text-base w-20">
+                        <span class="inline-flex items-center gap-1">
+                            ${statusIcon}
+                            <span class="${statusClass} font-medium">${statusText}</span>
+                        </span>
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap text-base w-40">
+                        <div class="flex flex-col">
+                            <strong>${account.name}</strong>
+                            <span class="text-gray-600 text-sm">${account.email}</span>
+                        </div>
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap text-center w-14">
+                        <input type="checkbox"
+                               class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                               data-account-id="${account.id}"
+                               ${this.selectedAccounts.has(account.id) ? 'checked' : ''}
+                               onchange="handleAccountSelection(this)">
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap w-32 code-cell">
+                        <div class="flex flex-col">
+                            ${this.getVerificationCodeDisplay(account)}
+                        </div>
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-28">
+                        ${this.getActiveTimeDisplay(account)}
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-24">
+                        ${this.getEmailSenderDisplay(account)}
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap w-40">
+                        <div class="flex gap-1 flex-wrap">
+                            <button data-action="fetch" data-account-id="${account.id}"
+                                    class="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded transition text-base"
+                                    title="手动收取最新邮件">
+                                取件
+                            </button>
+                            ${account.status === 'reauthorizing' ?
+                                `<span class="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-sm font-medium">
+                                    自动重新授权中...
+                                </span>` :
+                                account.reauth_required || account.status === 'reauth_required' || account.status === 'expired_refresh_token' || account.status === 'invalid_refresh_token' ?
+                                `<span class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-medium">
+                                    等待重新授权
+                                </span>` :
+                                `<button data-action="copy-email" data-account-id="${account.id}"
+                                        class="px-2 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition text-base">
+                                    复制
+                                </button>`
+                            }
+                            <button data-action="copy-code" data-account-id="${account.id}"
+                                    class="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition text-base">
+                                验证码
+                            </button>
+                            <button data-action="delete" data-account-id="${account.id}"
+                                    class="px-2 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded transition text-base">
+                                删除
+                            </button>
+                        </div>
+                    </td>
+                `;
+                return row;
             }
 
             updateStats() {
