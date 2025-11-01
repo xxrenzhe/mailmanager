@@ -814,12 +814,28 @@ async function performMonitoringCheck(monitorId, email) {
         };
         eventEmitter.emit(`monitoring_event_${sessionId}`, progressEventData);
 
-        // KISS 优化：监控时只获取新邮件，避免重复历史邮件
+        // KISS 优化：监控时只获取新邮件，使用最新邮件收件时间作为基准
         if (accountInfo.access_token) {
-            // 如果刚刚重新授权成功，邮件已经被获取过了，使用新邮件模式
-            const fetchOptions = accountInfo._just_reauthorized ?
-                { onlyNew: true, sinceTime: accountInfo.monitor_start_time || new Date(Date.now() - 15000).toISOString() } :
-                { onlyNew: true };
+            // 获取最新邮件的收件时间作为过滤基准
+            const latestEmailTime = getLatestEmailReceivedTime(accountInfo);
+
+            // 构建邮件获取选项
+            let fetchOptions = { onlyNew: true };
+
+            if (latestEmailTime) {
+                // 如果有最新邮件时间，使用该时间作为过滤起点
+                fetchOptions.sinceTime = latestEmailTime;
+                console.log(`[监控检查] 账户 ${email} 使用最新邮件时间作为过滤基准: ${latestEmailTime}`);
+            } else if (accountInfo._just_reauthorized) {
+                // 如果刚刚重新授权成功，使用监控开始时间
+                fetchOptions.sinceTime = accountInfo.monitor_start_time || new Date(Date.now() - 15000).toISOString();
+                console.log(`[监控检查] 账户 ${email} 刚重新授权，使用监控开始时间: ${fetchOptions.sinceTime}`);
+            } else {
+                // 默认情况：使用15秒前的时间，确保获取到一些新邮件
+                const fallbackTime = new Date(Date.now() - 15000).toISOString();
+                fetchOptions.sinceTime = fallbackTime;
+                console.log(`[监控检查] 账户 ${email} 使用默认时间基准: ${fallbackTime}`);
+            }
 
             const emailResult = await fetchNewEmails(accountId, accountInfo, sessionId, fetchOptions);
 
@@ -902,6 +918,35 @@ async function attemptTokenRefresh(accountInfo) {
         console.error(`[Token刷新] 异常:`, error);
         return { success: false, error: error.message };
     }
+}
+
+// 获取最新邮件的收件时间
+function getLatestEmailReceivedTime(accountInfo) {
+    // 如果账户有邮件数据，找到最新邮件的收件时间
+    if (accountInfo.emails && accountInfo.emails.length > 0) {
+        // 按收件时间降序排列，获取最新的邮件
+        const sortedEmails = accountInfo.emails.sort((a, b) =>
+            new Date(b.received_at) - new Date(a.received_at)
+        );
+        const latestEmail = sortedEmails[0];
+        if (latestEmail && latestEmail.received_at) {
+            return new Date(latestEmail.received_at).toISOString();
+        }
+    }
+
+    // 如果账户有验证码记录，也可以从中推断最新邮件时间
+    if (accountInfo.codes && accountInfo.codes.length > 0) {
+        const sortedCodes = accountInfo.codes.sort((a, b) =>
+            new Date(b.received_at) - new Date(a.received_at)
+        );
+        const latestCode = sortedCodes[0];
+        if (latestCode && latestCode.received_at) {
+            return new Date(latestCode.received_at).toISOString();
+        }
+    }
+
+    // 如果都没有，返回null
+    return null;
 }
 
 // 获取新邮件（支持只获取新邮件的模式）
