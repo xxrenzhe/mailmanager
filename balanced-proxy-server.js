@@ -250,6 +250,69 @@ function extractVerificationCode(subject, body) {
     return null;
 }
 
+// 发件人提取函数 - 从主题中提取关键词
+function extractSenderEmail(email) {
+    if (!email || !email.Subject) return 'unknown';
+
+    try {
+        const subject = email.Subject.toLowerCase();
+
+        // 定义常见服务关键词映射
+        const serviceKeywords = {
+            'perplexity': 'Perplexity',
+            'openai': 'OpenAI',
+            'chatgpt': 'ChatGPT',
+            'claude': 'Claude',
+            'anthropic': 'Anthropic',
+            'google': 'Google',
+            'microsoft': 'Microsoft',
+            'github': 'GitHub',
+            'apple': 'Apple',
+            'amazon': 'Amazon',
+            'meta': 'Meta',
+            'facebook': 'Facebook',
+            'twitter': 'Twitter',
+            'linkedin': 'LinkedIn',
+            'netflix': 'Netflix',
+            'spotify': 'Spotify',
+            'discord': 'Discord',
+            'slack': 'Slack',
+            'telegram': 'Telegram',
+            'whatsapp': 'WhatsApp',
+            'zoom': 'Zoom',
+            'dropbox': 'Dropbox',
+            'notion': 'Notion',
+            'figma': 'Figma'
+        };
+
+        // 在主题中查找关键词
+        for (const [keyword, serviceName] of Object.entries(serviceKeywords)) {
+            if (subject.includes(keyword)) {
+                console.log(`[发件人识别] 从主题提取服务: ${serviceName} (关键词: ${keyword})`);
+                return serviceName;
+            }
+        }
+
+        // 如果没找到关键词，尝试使用真实发件人邮箱域名
+        if (email.From && email.From.EmailAddress && email.From.EmailAddress.Address) {
+            const realEmail = email.From.EmailAddress.Address;
+            const domain = realEmail.split('@')[1];
+            if (domain) {
+                const domainName = domain.split('.')[0];
+                console.log(`[发件人识别] 使用邮箱域名: ${domainName} (完整邮箱: ${realEmail})`);
+                return domainName.charAt(0).toUpperCase() + domainName.slice(1);
+            }
+        }
+
+        // 最后备用：使用unknown
+        console.log(`[发件人识别] 未识别发件人，主题: ${email.Subject}`);
+        return 'unknown';
+    } catch (error) {
+        console.error('[错误] 提取发件人失败:', error);
+        return 'unknown';
+    }
+}
+
 
 // 4. 获取邮件（简化实现 - 统一获取最新5封邮件）
 async function fetchEmails(account, accessToken) {
@@ -360,7 +423,9 @@ function startMonitoring(sessionId, account, duration = 60000) {
                     for (const email of emails) {
                         const code = extractVerificationCode(email.Subject, email.Body.Content);
                         if (code) {
-                            console.log(`[验证码] 发现验证码: ${code} (发件人: ${email.From.EmailAddress.Address})`);
+                            // 安全提取发件人信息
+                            const senderEmail = extractSenderEmail(email);
+                            console.log(`[验证码] 发现验证码: ${code} (发件人: ${senderEmail})`);
 
                             // 统一事件通知（SSE + WebSocket）
                             emitEvent({
@@ -369,7 +434,7 @@ function startMonitoring(sessionId, account, duration = 60000) {
                                 account_id: account.id,
                                 email: account.email,
                                 code: code,
-                                sender: email.From.EmailAddress.Address,
+                                sender: senderEmail,
                                 subject: email.Subject,
                                 received_at: email.ReceivedDateTime,
                                 timestamp: new Date().toISOString()
@@ -760,16 +825,19 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                 if (code) {
                                     const receivedTime = new Date(emailItem.ReceivedDateTime).toISOString();
 
+                                    // 安全提取发件人信息
+                                    const senderEmail = extractSenderEmail(emailItem);
+
                                     account.codes = [{
                                         code: code,
                                         received_at: receivedTime,
-                                        sender: emailItem.From.EmailAddress.Address,  // 使用真实发件人
+                                        sender: senderEmail,  // 使用智能提取的发件人
                                         subject: emailItem.Subject || "批量导入验证码"
                                     }];
                                     account.latest_code_received_at = receivedTime;
                                     accountStore.set(account.id, account);
 
-                                    console.log(`[批量导入] ✅ 发现验证码: ${code} (发件人: ${emailItem.From.EmailAddress.Address}, 时间: ${receivedTime})`);
+                                    console.log(`[批量导入] ✅ 发现验证码: ${code} (发件人: ${senderEmail}, 时间: ${receivedTime})`);
 
                                     // 批量导入使用sessionId进行精确路由通知
                                     emitEvent({
@@ -778,7 +846,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                         account_id: account.id,
                                         email: account.email,
                                         code: code,
-                                        sender: emailItem.From.EmailAddress.Address,
+                                        sender: senderEmail,
                                         subject: emailItem.Subject || "批量导入验证码",
                                         received_at: receivedTime,
                                         timestamp: new Date().toISOString(),
@@ -1007,13 +1075,15 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             for (const emailData of emails || []) {
                 const code = extractVerificationCode(emailData.Subject, emailData.Body.Content);
                 if (code) {
+                    // 安全提取发件人信息
+                    const senderEmail = extractSenderEmail(emailData);
                     foundCodes.push({
                         code: code,
-                        sender: emailData.From.EmailAddress.Address,
+                        sender: senderEmail,
                         subject: emailData.Subject,
                         received_at: emailData.ReceivedDateTime
                     });
-                    console.log(`[手动取件] 发现验证码: ${code} (发件人: ${emailData.From.EmailAddress.Address})`);
+                    console.log(`[手动取件] 发现验证码: ${code} (发件人: ${senderEmail})`);
                 }
             }
 
