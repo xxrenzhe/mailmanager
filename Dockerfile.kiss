@@ -11,9 +11,8 @@ COPY package*.json ./
 # 安装依赖（只安装核心依赖）
 RUN npm ci --only=production && npm cache clean --force
 
-# 复制KISS版本文件
-COPY simple-proxy-server.js .
-COPY test_simple_proxy.js .
+# 复制纯前端版本文件
+COPY balanced-proxy-server-simple.js .
 COPY simple-mail-manager.html .
 
 # 创建非root用户

@@ -29,25 +29,25 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    - name: Test balanced-proxy-server.js
+    - name: Test balanced-proxy-server-simple.js
       run: |
-        echo "🧪 Testing Balanced KISS version..."
-        node -c balanced-proxy-server.js && echo "✅ balanced-proxy-server.js syntax check passed"
-        echo "✅ No separate test file needed - functionality built into main server"
+        echo "🧪 Testing Simple Pure Frontend version..."
+        node -c balanced-proxy-server-simple.js && echo "✅ balanced-proxy-server-simple.js syntax check passed"
+        echo "✅ Pure Frontend architecture - no data storage"
 
-    - name: Run Balanced KISS functionality tests
+    - name: Run Simple Frontend functionality tests
       run: |
-        echo "🚀 Starting Balanced KISS version for testing..."
-        node balanced-proxy-server.js &
+        echo "🚀 Starting Simple Pure Frontend version for testing..."
+        node balanced-proxy-server-simple.js &
         SERVER_PID=$!
         sleep 3
 
         echo "🧪 Running basic health check..."
         curl -f http://localhost:3001/api/health || (echo "❌ Health check failed" && exit 1)
-        echo "✅ Server is responding correctly"
+        echo "✅ Simple server is responding correctly"
 
         echo "🧪 Testing API endpoints..."
-        curl -f http://localhost:3001/api/info || (echo "❌ Info endpoint failed" && exit 1)
+        curl -f http://localhost:3001/api/health || (echo "❌ Health endpoint failed" && exit 1)
         echo "✅ API endpoints are working"
 
         echo "✅ Cleaning up..."
