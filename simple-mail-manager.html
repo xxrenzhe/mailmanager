@@ -2785,119 +2785,69 @@
                 const pendingAccounts = this.accounts.filter(acc => acc.status === 'pending');
                 if (pendingAccounts.length === 0) return;
 
-                console.log(`[异步验证] 开始批量处理 ${pendingAccounts.length} 个待验证账户`);
+                console.log(`[批量导入] 开始批量处理 ${pendingAccounts.length} 个待验证账户`);
 
                 try {
-                    // 准备批量验证数据
-                    const accountsToValidate = pendingAccounts.map(account => ({
-                        id: account.id,
+                    // 确保sessionId存在
+                    if (!this.sessionId) {
+                        const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                        if (savedSessionId) {
+                            this.sessionId = savedSessionId;
+                        } else {
+                            this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            localStorage.setItem('mail_manager_session_id', this.sessionId);
+                        }
+                        console.log(`[批量导入] 会话ID: ${this.sessionId}`);
+                    }
+
+                    // 准备批量导入数据（使用后端已实现的batch-import接口格式）
+                    const emailsData = pendingAccounts.map(account => ({
                         email: account.email,
+                        password: account.email, // 密码字段，后端需要但不实际使用
                         client_id: account.client_id,
                         refresh_token: account.refresh_token
                     }));
 
-                    // 第一步：Token预检查
-                    console.log(`[异步验证] 执行Token预检查...`);
-                    const checkResponse = await fetch('/api/accounts/check-tokens', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            accounts: accountsToValidate
-                        })
-                    });
+                    console.log(`[批量导入] 调用后端batch-import接口，处理 ${emailsData.length} 个账户`);
 
-                    if (!checkResponse.ok) {
-                        throw new Error(`Token预检查失败: ${checkResponse.status}`);
-                    }
-
-                    const checkResult = await checkResponse.json();
-                    console.log(`[异步验证] Token预检查完成:`, checkResult);
-
-                    // 分析预检查结果
-                    const validAccounts = checkResult.results.filter(r => r.valid);
-                    const invalidAccounts = checkResult.results.filter(r => !r.valid);
-
-                    console.log(`[异步验证] 预检查结果: ${validAccounts.length} 个有效Token, ${invalidAccounts.length} 个无效Token`);
-
-                    // 更新无效Token的账户状态
-                    invalidAccounts.forEach(invalid => {
-                        const account = this.accounts.find(acc => acc.id === invalid.account_id);
-                        if (account) {
-                            account.status = invalid.status || 'failed';
-                            account.error = invalid.message;
-                            console.log(`[异步验证] 账户 ${account.email} Token无效: ${invalid.message}`);
-                        }
-                    });
-
-                    // 只对有效Token的账户进行批量验证
-                    if (validAccounts.length === 0) {
-                        this.showNotification('所有账户的Token都已失效，正在准备重新授权...', 'warning');
-                        await this.handleReauthorization(invalidAccounts);
-                        await this.loadAccounts();
-                        this.render();
-                        return;
-                    }
-
-                    // 如果有部分账户需要重新授权，提供快捷操作
-                    if (invalidAccounts.length > 0) {
-                        console.log(`[异步验证] ${invalidAccounts.length} 个账户需要重新授权`);
-                        this.showReauthorizationOptions(invalidAccounts);
-                    }
-
-                    console.log(`[异步验证] 开始对 ${validAccounts.length} 个有效Token账户进行批量验证...`);
-
-                    // 第二步：只验证有效Token的账户
-                    const validAccountIds = validAccounts.map(v => v.account_id);
-                    const accountsForBatchValidation = accountsToValidate.filter(acc => validAccountIds.includes(acc.id));
-
-                    const response = await fetch('/api/accounts/batch-validate', {
+                    // 调用后端的batch-import接口（已完整实现授权、取件、提取验证码）
+                    const response = await fetch('/api/accounts/batch-import', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             sessionId: this.sessionId,
-                            accounts: accountsForBatchValidation
+                            emails: emailsData
                         })
                     });
 
                     if (!response.ok) {
-                        throw new Error(`批量验证失败: ${response.status}`);
+                        throw new Error(`批量导入失败: ${response.status}`);
                     }
 
                     const result = await response.json();
-                    console.log(`[异步验证] 批量验证完成`, result);
+                    console.log(`[批量导入] 后端处理完成:`, result);
 
-                    // 更新账户状态
+                    // 更新前端账户状态
                     let successCount = 0;
                     let failureCount = 0;
 
-                    result.results.forEach(accountResult => {
-                        const account = this.accounts.find(acc => acc.id === accountResult.account_id);
+                    result.results.forEach(importResult => {
+                        const account = this.accounts.find(acc => acc.email === importResult.email);
                         if (account) {
-                            if (accountResult.success) {
+                            if (importResult.success) {
+                                // 更新账户ID（后端生成的新ID）
+                                account.id = importResult.account_id;
                                 account.status = 'authorized';
+                                account.sequence = importResult.sequence;
                                 account.last_check = new Date().toISOString();
-                                if (accountResult.verification_codes && accountResult.verification_codes.length > 0) {
-                                    account.verification_codes = accountResult.verification_codes;
-                                }
                                 successCount++;
-                                console.log(`[异步验证] 账户 ${account.email} 验证成功`);
+                                console.log(`[批量导入] 账户 ${account.email} 导入成功，序列号: ${importResult.sequence}`);
                             } else {
-                                // 验证失败的账户保持 pending 状态，等待手动重试
-                                // 只有明确授权失败的账户才设置为 failed
-                                if (accountResult.status === 'authorization_failed' || accountResult.status === 'access_denied') {
-                                    account.status = 'failed';
-                                    console.log(`[异步验证] 账户 ${account.email} 授权失败，设置为失败状态`);
-                                } else {
-                                    // 网络错误、服务器错误等临时问题保持 pending 状态
-                                    account.status = 'pending';
-                                    console.log(`[异步验证] 账户 ${account.email} 临时验证失败，保持待授权状态: ${accountResult.status}`);
-                                }
-                                account.error = accountResult.message;
+                                account.status = 'failed';
+                                account.error = importResult.error;
                                 failureCount++;
-                                console.log(`[异步验证] 账户 ${account.email} 验证失败: ${accountResult.status} - ${accountResult.message}`);
+                                console.log(`[批量导入] 账户 ${account.email} 导入失败: ${importResult.error}`);
                             }
-                        } else {
-                            console.error(`[异步验证] 找不到账户 ${accountResult.account_id}`);
                         }
                     });
 
@@ -2906,15 +2856,28 @@
                     this.saveAccounts();
                     this.render();
 
-                    // 发送完成进度
-                    this.sendImportProgress(pendingAccounts.length, pendingAccounts.length,
-                        `批量验证完成: ${successCount} 成功, ${failureCount} 失败`);
+                    // 显示通知
+                    if (successCount > 0) {
+                        this.showNotification(
+                            `批量导入完成: ${successCount} 成功${failureCount > 0 ? `, ${failureCount} 失败` : ''}。验证码将在后台异步提取。`,
+                            successCount === result.results.length ? 'success' : 'warning'
+                        );
+                    }
 
-                    console.log(`[异步验证] 批量处理完成: ${successCount} 成功, ${failureCount} 失败`);
+                    console.log(`[批量导入] 完成统计: ${successCount} 成功, ${failureCount} 失败`);
+                    console.log(`[批量导入] 后端正在异步处理取件和验证码提取，请等待SSE事件通知`);
 
                 } catch (error) {
-                    console.error(`[异步验证] 批量验证失败:`, error);
-                    this.sendImportProgress(0, pendingAccounts.length, `批量验证失败: ${error.message}`);
+                    console.error(`[批量导入] 处理失败:`, error);
+                    this.showNotification(`批量导入失败: ${error.message}`, 'error');
+
+                    // 将所有pending账户标记为error
+                    pendingAccounts.forEach(account => {
+                        account.status = 'error';
+                        account.error = error.message;
+                    });
+                    this.saveAccounts();
+                    this.render();
                 }
             }
 
