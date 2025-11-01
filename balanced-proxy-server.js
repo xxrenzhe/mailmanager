@@ -266,10 +266,12 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
 
         console.log(`[调试] 完整URL: ${url}`);
 
+        // 从完整URL中提取路径部分
+        const urlObj = new URL(url);
         const options = {
-            hostname: 'outlook.office.com',
+            hostname: urlObj.hostname,
             port: 443,
-            path: url,  // 直接使用构造好的URL，不再进行额外编码
+            path: urlObj.pathname + urlObj.search,  // 使用URL对象正确处理路径和���询参数
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,

@@ -272,14 +272,18 @@ open http://localhost:3001
 **获取Microsoft授权:**
 
 1. **Azure应用注册**
-   - 访问 Azure Portal
+   - 访问 Azure Portal → 应用注册 → 新注册
    - 配置API权限: `Mail.Read`, `IMAP.AccessAsUser.All`, `SMTP.Send`, `offline_access`
-   - 记录 Client ID
+   - 记录应用程序(客户端) ID
 
-2. **OAuth授权流程**
-   - 构建授权URL并获取授权码
-   - 使用授权码换取 refresh_token
-   - 保存 Client ID 和 refresh_token
+2. **获取Refresh Token**
+   ```bash
+   # 标准OAuth 2.0 Token刷新方式
+   curl -s https://login.microsoftonline.com/common/oauth2/v2.0/token \
+     -d 'client_id=YOUR_CLIENT_ID' \
+     -d 'grant_type=refresh_token' \
+     -d 'refresh_token=YOUR_REFRESH_TOKEN'
+   ```
 
 **批量导入邮箱:**
 ```
@@ -291,6 +295,20 @@ user@outlook.com,password123,YOUR_CLIENT_ID,YOUR_REFRESH_TOKEN
 1. 复制邮箱地址
 2. 自动启动60秒监控
 3. 实时显示验证码
+
+**API测试方式:**
+```bash
+# 通过后端接口测试邮箱授权和邮件获取
+curl -X POST http://localhost:3001/api/monitor/copy-trigger \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@outlook.com",
+    "password": "password123",
+    "client_id": "YOUR_CLIENT_ID",
+    "refresh_token": "YOUR_REFRESH_TOKEN",
+    "sessionId": "test-session-123"
+  }'
+```
 
 ## 🔧 高级功能
 
@@ -326,24 +344,36 @@ user@outlook.com,password123,YOUR_CLIENT_ID,YOUR_REFRESH_TOKEN
    docker restart mailmanager
    ```
 
-2. **授权失败**
+2. **授权失败 (AADSTS70000/9002313)**
    - 重新获取refresh_token
    - 检查Client ID配置
+   - 验证Azure应用权限设置
 
 3. **验证码提取失败**
-   - 确认4-8位数字格式
-   - 查看服务器日志
+   - 确认邮件包含4-8位数字验证码
+   - 查看服务器日志中的邮件解析结果
+   - 检查发件人是否被正确识别
 
 4. **监控异常**
    ```bash
+   # 本地开发
+   curl http://localhost:3001/api/health
+   curl -N http://localhost:3001/api/events/stream/test-session-123
+
+   # Docker部署
    curl http://localhost/api/health
-   curl -N http://localhost/api/events/stream
+   curl -N http://localhost/api/events/stream/test-session-123
    ```
 
+5. **连接错误**
+   - 确认服务器正在运行
+   - 检查端口配置: 3001(代理), 3002(WebSocket)
+   - 查看控制台日志获取详细错误信息
+
 **维护:**
-- 数据: 浏览器LocalStorage
+- 数据: 浏览器LocalStorage (账户信息)
 - 备份: 定期导出配置
-- 日志: `docker logs -f mailmanager`
+- ���志: `docker logs -f mailmanager` 或控制台输出
 
 ## 🔧 开发指南
 
@@ -511,7 +541,13 @@ PORT=3000
 
 ## 🚀 版本更新日志
 
-**v3.2.1 - AADSTS70000修复版本 (2025-11-01) ⭐ 当前版本**
+**v3.2.2 - URL转义修复版本 (2025-11-01) ⭐ 当前版本**
+- 🛠️ **URL转义修复**: 解决Node.js https模块OData查询参数转义问题
+- ✅ **API调用优化**: 正确处理Microsoft Outlook API特殊字符
+- 📚 **文档更新**: 添加标准OAuth 2.0授权流程和API测试方法
+- 🎯 **验证通过**: 真实邮箱数据测试成功，验证码提取正常
+
+**v3.2.1 - AADSTS70000修复版本 (2025-11-01)**
 - 🔧 Token刷新机制修复：解决AADSTS70000错误
 - ✅ 用户体验优化：用户主动监控无冷却限制
 - 🛠️ 错误处理增强：详细错误代码解析
@@ -544,4 +580,4 @@ PORT=3000
 
 ---
 
-*最后更新: 2025-11-01 | v3.2.1 (AADSTS70000修复版本)*
+*最后更新: 2025-11-01 | v3.2.2 (URL转义修复版本)*
