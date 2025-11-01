@@ -1007,12 +1007,15 @@
                 if (data.account_id) {
                     const account = this.accounts.find(acc => acc.id === data.account_id);
                     if (account) {
+                        // 只有在状态发生变化或失败时才需要保存数据
+                        const needsSave = account.status !== (data.status || 'unknown') || data.status === 'failed';
+
                         // 根据事件数据更新账户状态
                         account.status = data.status || 'unknown';
                         account.updated_at = new Date().toISOString();
 
-                        // 如果有验证码数据，更新验证码信息
-                        if (data.verification_code) {
+                        // 如果有验证码数据但账户还没有验证码，则添加验证码信息
+                        if (data.verification_code && (!account.verification_code || account.verification_code !== data.verification_code)) {
                             account.verification_code = data.verification_code;
                             account.verification_code_time = data.received_at || new Date().toISOString();
                             account.verification_code_from = data.sender || 'Unknown';
@@ -1029,7 +1032,7 @@
                                 `${account.email}: 授权失败 - ${data.error}`,
                                 'error'
                             );
-                        } else {
+                        } else if (!data.verification_code && needsSave) {
                             // 显示处理完成通知（无验证码）
                             this.showNotification(
                                 `${account.email}: 邮件处理完成，未找到验证码`,
@@ -1037,12 +1040,16 @@
                             );
                         }
 
-                        // 保存数据并更新界面
-                        this.saveAccounts();
+                        // 只在需要时才保存数据，避免覆盖验证码信息
+                        if (needsSave) {
+                            this.saveAccounts();
+                        }
+
+                        // 始终更新界面和统计
                         this.render();
                         this.updateStats();
 
-                        console.log(`[邮件处理完成] 账户 ${account.email} 状态已更新为: ${account.status}`);
+                        console.log(`[邮件处理完成] 账户 ${account.email} 状态已更新为: ${account.status}, 需要保存: ${needsSave}`);
                     } else {
                         console.warn(`[邮件处理完成] 未找到账户 ID: ${data.account_id}`);
                     }
