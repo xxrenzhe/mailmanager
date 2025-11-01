@@ -76,14 +76,16 @@ const TOKEN_REFRESH_COOLDOWN = 60;
 const lastTokenRefresh = new Map();
 
 // 2. Microsoft Token刷新（真实实现）
-async function refreshAccessToken(clientId, refreshToken) {
-    // 检查冷却时间
-    const refreshKey = `${clientId}_${refresh_token.substring(0, 10)}`;
-    const lastRefresh = lastTokenRefresh.get(refreshKey);
-    const now = Date.now();
+async function refreshAccessToken(clientId, refreshToken, userInitiated = false) {
+    // 只对非用户主动触发的刷新进行冷却检查
+    if (!userInitiated) {
+        const refreshKey = `${clientId}_${refresh_token.substring(0, 10)}`;
+        const lastRefresh = lastTokenRefresh.get(refreshKey);
+        const now = Date.now();
 
-    if (lastRefresh && (now - lastRefresh) < TOKEN_REFRESH_COOLDOWN * 1000) {
-        return reject(new Error(`Token刷新过于频繁，请等待${TOKEN_REFRESH_COOLDOWN}秒`));
+        if (lastRefresh && (now - lastRefresh) < TOKEN_REFRESH_COOLDOWN * 1000) {
+            return reject(new Error(`Token刷新过于频繁，请等待${TOKEN_REFRESH_COOLDOWN}秒`));
+        }
     }
 
     return new Promise((resolve, reject) => {
@@ -112,8 +114,10 @@ async function refreshAccessToken(clientId, refreshToken) {
                 try {
                     const result = JSON.parse(data);
                     if (res.statusCode === 200) {
-                        // 记录成功的刷新时间
-                        lastTokenRefresh.set(refreshKey, Date.now());
+                        // 只对非用户主动触发的刷新记录冷却时间
+                        if (!userInitiated) {
+                            lastTokenRefresh.set(refreshKey, Date.now());
+                        }
                         resolve(result);
                     } else {
                         reject(new Error(`Token刷新失败: ${res.statusCode} - ${result.error_description || result.error}`));
@@ -248,8 +252,8 @@ function startMonitoring(sessionId, account, duration = 60000) {
             }
 
             try {
-                // 获取access token
-                const tokenResult = await refreshAccessToken(account.client_id, account.refresh_token);
+                // 获取access token（用户主动触发的监控，跳过冷却限制）
+                const tokenResult = await refreshAccessToken(account.client_id, account.refresh_token, true);
 
                 // 获取邮件
                 const emails = await fetchEmails(account, tokenResult.access_token, account.last_check_time);
