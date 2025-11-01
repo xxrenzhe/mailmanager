@@ -1257,14 +1257,24 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
 
         console.log(`[批量验证] 使用动态批量大小: ${batchSize}, 总账户数: ${accounts.length}`);
 
-        // 分批处理，避免API限制
+        // 性能优化：并行处理所有批次，大幅提升处理速度
+        const totalBatches = Math.ceil(accounts.length / batchSize);
+        console.log(`[批量验证] 性能优化模式：${totalBatches} 个批次并行处理，每批 ${batchSize} 个账户`);
+
+        // 创建所有批次的任务
+        const allBatchTasks = [];
         for (let i = 0; i < accounts.length; i += batchSize) {
+            const batchIndex = Math.floor(i / batchSize);
             const batch = accounts.slice(i, i + batchSize);
 
-            const batchPromises = batch.map(async (account) => {
+            const batchTask = (async () => {
+                const startTime = Date.now();
+                console.log(`[批次 ${batchIndex + 1}/${totalBatches}] 开始处理 ${batch.length} 个账户`);
+
+                const batchPromises = batch.map(async (account) => {
                 let retryCount = 0;
                 const maxRetries = 3;
-                const retryDelay = 2000; // 2秒重试间隔
+                const retryDelay = 500; // 减少重试延迟到0.5秒，提升性能
 
                 while (retryCount < maxRetries) {
                     try {
@@ -1296,6 +1306,51 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
                             if (emailResponse.ok) {
                                 const emails = await emailResponse.json();
                                 const verificationCodes = await extractVerificationCodesAdvanced(emails.value, account.id, 'auto');
+
+                                // 发送验证码发现事件（批量验证时也需要通知前端）
+                                if (verificationCodes.length > 0) {
+                                    console.log(`[批量验证] 账户 ${account.email} 提取到 ${verificationCodes.length} 个验证码，发送WebSocket事件`);
+
+                                    verificationCodes.forEach(result => {
+                                        // 向所有活跃的WebSocket连接广播事件
+                                        if (websocketServer && websocketServer.clients) {
+                                            const codeFoundEvent = {
+                                                sessionId: sessionId,
+                                                type: 'verification_code_found',
+                                                account_id: account.id,
+                                                code: result.code,
+                                                sender: result.sender,
+                                                received_at: result.received_at,
+                                                score: result.score || 1.0,
+                                                priority: result.priority || 'medium',
+                                                subject: result.subject,
+                                                timestamp: new Date().toISOString()
+                                            };
+
+                                            websocketServer.clients.forEach(client => {
+                                                if (client.readyState === 1) { // WebSocket.OPEN
+                                                    client.send(JSON.stringify(codeFoundEvent));
+                                                }
+                                            });
+                                        }
+
+                                        // 同时通过SSE发送事件（兼容性）
+                                        if (eventEmitter) {
+                                            pushEventToSession(sessionId, {
+                                                type: 'verification_code_found',
+                                                sessionId: sessionId,
+                                                account_id: account.id,
+                                                code: result.code,
+                                                sender: result.sender,
+                                                received_at: result.received_at,
+                                                score: result.score || 1.0,
+                                                priority: result.priority || 'medium',
+                                                subject: result.subject,
+                                                timestamp: new Date().toISOString()
+                                            });
+                                        }
+                                    });
+                                }
 
                                 return {
                                     account_id: account.id,
@@ -1409,24 +1464,50 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
 
             const batchResults = await Promise.allSettled(batchPromises);
 
-            // 处理批次结果
-            batchResults.forEach(promiseResult => {
-                if (promiseResult.status === 'fulfilled') {
-                    const result = promiseResult.value;
-                    results.push(result);
+                // 处理批次结果
+                const validResults = [];
+                batchResults.forEach(promiseResult => {
+                    if (promiseResult.status === 'fulfilled') {
+                        const result = promiseResult.value;
+                        validResults.push(result);
+                        // 保存验证历史
+                        saveValidationHistory(result.account_id, result);
+                    } else {
+                        console.error(`[批量验证] 批次处理异常:`, promiseResult.reason);
+                    }
+                });
 
-                    // 保存验证历史
-                    saveValidationHistory(result.account_id, result);
-                } else {
-                    console.error(`[批量验证] 批次处理异常:`, promiseResult.reason);
+                const duration = Date.now() - startTime;
+                console.log(`[批次 ${batchIndex + 1}/${totalBatches}] 完成，耗时: ${(duration/1000).toFixed(1)}秒，有效结果: ${validResults.length}`);
+
+                return validResults;
+            })();
+
+            allBatchTasks.push(batchTask);
+        }
+
+        // 并行执行所有批次，但限制并发数以避免过载
+        const maxConcurrentBatches = Math.min(8, totalBatches); // 最多8个批次并行
+        console.log(`[批量验证] 启动并行处理，最多 ${maxConcurrentBatches} 个批次同时执行`);
+
+        const finalResults = [];
+        for (let i = 0; i < allBatchTasks.length; i += maxConcurrentBatches) {
+            const currentBatchTasks = allBatchTasks.slice(i, i + maxConcurrentBatches);
+            const batchResults = await Promise.allSettled(currentBatchTasks);
+
+            batchResults.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    finalResults.push(...result.value);
                 }
             });
 
-            // 批次间短暂延迟，避免API限制
-            if (i + batchSize < accounts.length) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
+            // 发送进度更新
+            const completedBatches = Math.min(i + maxConcurrentBatches, totalBatches);
+            const progress = (completedBatches / totalBatches * 100).toFixed(1);
+            console.log(`[批量验证] 进度: ${completedBatches}/${totalBatches} 批次完成 (${progress}%)`);
         }
+
+        results.push(...finalResults);
 
         const successCount = results.filter(r => r.success).length;
         const totalCodes = results.reduce((sum, r) => sum + (r.verification_codes?.length || 0), 0);
@@ -1448,7 +1529,7 @@ app.post('/api/accounts/batch-validate', async (req, res) => {
 
 // Token有效性预检查API
 app.post('/api/accounts/check-tokens', async (req, res) => {
-    const { accounts } = req.body;
+    const { accounts, sessionId } = req.body;
 
     if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
         return res.status(400).json({
@@ -1478,6 +1559,32 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
 
                     if (response.ok) {
                         const tokenData = await response.json();
+
+                        // 发送账户状态变更事件 - Token有效，账户已授权
+                        if (sessionId && eventEmitter) {
+                            const statusChangedEvent = {
+                                sessionId: sessionId,
+                                type: 'account_status_changed',
+                                account_id: account.id,
+                                email: account.email,
+                                status: 'authorized',
+                                message: `账户 ${account.email} Token验证成功，状态已更新为已授权`,
+                                timestamp: new Date().toISOString()
+                            };
+
+                            // 向所有活跃的WebSocket连接广播事件
+                            if (websocketServer && websocketServer.clients) {
+                                websocketServer.clients.forEach(client => {
+                                    if (client.readyState === 1) { // WebSocket.OPEN
+                                        client.send(JSON.stringify(statusChangedEvent));
+                                    }
+                                });
+                            }
+
+                            // 同时通过SSE发送事件（兼容性）
+                            eventEmitter.emit(`monitoring_event_${sessionId}`, statusChangedEvent);
+                        }
+
                         return {
                             account_id: account.id,
                             email: account.email,
@@ -1504,6 +1611,31 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
                             message = `HTTP ${response.status}: Token验证失败`;
                         }
 
+                        // 发送账户状态变更事件 - Token无效，需要重新授权
+                        if (sessionId && eventEmitter) {
+                            const statusChangedEvent = {
+                                sessionId: sessionId,
+                                type: 'account_status_changed',
+                                account_id: account.id,
+                                email: account.email,
+                                status: 'reauth_needed',
+                                message: `账户 ${account.email} ${message}`,
+                                timestamp: new Date().toISOString()
+                            };
+
+                            // 向所有活跃的WebSocket连接广播事件
+                            if (websocketServer && websocketServer.clients) {
+                                websocketServer.clients.forEach(client => {
+                                    if (client.readyState === 1) { // WebSocket.OPEN
+                                        client.send(JSON.stringify(statusChangedEvent));
+                                    }
+                                });
+                            }
+
+                            // 同时通过SSE发送事件（兼容性）
+                            eventEmitter.emit(`monitoring_event_${sessionId}`, statusChangedEvent);
+                        }
+
                         return {
                             account_id: account.id,
                             email: account.email,
@@ -1514,6 +1646,32 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
                     }
                 } catch (error) {
                     console.error(`[Token检查] 账户 ${account.email} 检查异常:`, error.message);
+
+                    // 发送账户状态变更事件 - 网络错误
+                    if (sessionId && eventEmitter) {
+                        const statusChangedEvent = {
+                            sessionId: sessionId,
+                            type: 'account_status_changed',
+                            account_id: account.id,
+                            email: account.email,
+                            status: 'network_error',
+                            message: `账户 ${account.email} 网络连接失败`,
+                            timestamp: new Date().toISOString()
+                        };
+
+                        // 向所有活跃的WebSocket连接广播事件
+                        if (websocketServer && websocketServer.clients) {
+                            websocketServer.clients.forEach(client => {
+                                if (client.readyState === 1) { // WebSocket.OPEN
+                                    client.send(JSON.stringify(statusChangedEvent));
+                                }
+                            });
+                        }
+
+                        // 同时通过SSE发送事件（兼容性）
+                        eventEmitter.emit(`monitoring_event_${sessionId}`, statusChangedEvent);
+                    }
+
                     return {
                         account_id: account.id,
                         email: account.email,
@@ -1553,37 +1711,41 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
     }
 });
 
-// 计算最优批量大小
+// 计算最优批量大小（性能优化版本）
 function calculateOptimalBatchSize(totalAccounts) {
     const memoryUsage = process.memoryUsage();
     const memoryUtilization = memoryUsage.heapUsed / memoryUsage.heapTotal;
 
-    // 基础批量大小
-    let baseBatchSize = 3;
+    // 性能优化的基础批量大小
+    let baseBatchSize = 8; // 提高基础并发数
 
-    // 根据内存使用率调整
-    if (memoryUtilization > 0.8) {
-        baseBatchSize = 1; // 高内存使用时降低并发
-    } else if (memoryUtilization < 0.4) {
-        baseBatchSize = 5; // 低内存使用时可以增加并发
+    // 根据内存使用率调整（更宽松的限制）
+    if (memoryUtilization > 0.85) {
+        baseBatchSize = 4; // 极高内存使用时适度降低
+    } else if (memoryUtilization < 0.5) {
+        baseBatchSize = 12; // 低内存使用时可以大幅增加并发
     }
 
-    // 根据账户数量调整
-    if (totalAccounts > 50) {
-        baseBatchSize = Math.min(baseBatchSize, 2); // 大量账户时更保守
-    } else if (totalAccounts < 10) {
-        baseBatchSize = Math.min(baseBatchSize + 1, 5); // 少量账户时可以更激进
+    // 根据账户数量动态调整（性能优化）
+    if (totalAccounts >= 1000) {
+        baseBatchSize = Math.min(baseBatchSize, 15); // 超大批量时允许更高并发
+    } else if (totalAccounts >= 500) {
+        baseBatchSize = Math.min(baseBatchSize, 12); // 大批量时适中并发
+    } else if (totalAccounts >= 100) {
+        baseBatchSize = Math.min(baseBatchSize, 8); // 中等批量时标准并发
+    } else if (totalAccounts < 20) {
+        baseBatchSize = Math.min(baseBatchSize + 2, 10); // 小批量时可以更激进
     }
 
-    // 根据时间调整（避开高峰时段）
+    // 根据时间调整（避开高峰时段，但限制更宽松）
     const hour = new Date().getHours();
-    if (hour >= 9 && hour <= 17) {
-        baseBatchSize = Math.max(baseBatchSize - 1, 1); // 工作时间降低并发
+    if (hour >= 9 && hour <= 11 || hour >= 14 && hour <= 16) {
+        baseBatchSize = Math.max(baseBatchSize - 2, 4); // 仅在高峰时段适度降低
     }
 
-    console.log(`[批量大小计算] 内存使用率: ${(memoryUtilization * 100).toFixed(1)}%, 基础批量大小: ${baseBatchSize}`);
+    console.log(`[批量大小计算] 内存使用率: ${(memoryUtilization * 100).toFixed(1)}%, 账户数: ${totalAccounts}, 批量大小: ${baseBatchSize}`);
 
-    return Math.max(baseBatchSize, 1);
+    return Math.max(baseBatchSize, 4); // 最小批量大小提高到4
 }
 
 // 验证历史记录存储

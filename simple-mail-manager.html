@@ -2643,7 +2643,8 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            accounts: accountsToValidate
+                            accounts: accountsToValidate,
+                            sessionId: this.sessionId
                         })
                     });
 
