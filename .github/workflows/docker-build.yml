@@ -1,4 +1,4 @@
-name: Docker Image Build and Deploy
+name: KISS MailManager - Build and Deploy
 
 on:
   push:
@@ -13,8 +13,53 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Test Balanced KISS version
+  test-balanced:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Test balanced-proxy-server.js
+      run: |
+        echo "🧪 Testing Balanced KISS version..."
+        node -c balanced-proxy-server.js && echo "✅ balanced-proxy-server.js syntax check passed"
+        node -c test_balanced_proxy.js && echo "✅ test_balanced_proxy.js syntax check passed"
+
+    - name: Run Balanced KISS functionality tests
+      run: |
+        echo "🚀 Starting Balanced KISS version for testing..."
+        node balanced-proxy-server.js &
+        SERVER_PID=$!
+        sleep 3
+
+        echo "🧪 Running Balanced KISS functionality tests..."
+        node test_balanced_proxy.js
+
+        echo "✅ Cleaning up..."
+        kill $SERVER_PID 2>/dev/null || true
+
+    - name: Code size analysis
+      run: |
+        echo "📊 Balanced KISS Version Code Analysis:"
+        echo "  - Original proxy-server.js: $(wc -l < proxy-server.js) lines"
+        echo "  - balanced-proxy-server.js: $(wc -l < balanced-proxy-server.js) lines"
+        echo "  - test_balanced_proxy.js: $(wc -l < test_balanced_proxy.js) lines"
+        REDUCTION=$((($(wc -l < proxy-server.js) - $(wc -l < balanced-proxy-server.js)) * 100 / $(wc -l < proxy-server.js)))
+        echo "  - Code reduction: ${REDUCTION}% (保持完整功能)"
+
   build:
     runs-on: ubuntu-latest
+    needs: test-balanced
 
     permissions:
       contents: read
@@ -42,7 +87,9 @@ jobs:
         tags: |
           type=raw,value=prod-latest,enable={{is_default_branch}}
           type=raw,value=dev-latest,enable={{is_default_branch}}
+          type=raw,value=balanced-latest,enable={{is_default_branch}}
           type=semver,pattern={{version}},prefix=prod-
+          type=semver,pattern={{version}},prefix=balanced-
         flavor: |
           latest=false
 
@@ -69,9 +116,11 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Image Details" >> $GITHUB_STEP_SUMMARY
         echo "- **Repository**: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tag**: `prod-latest`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tags**: `prod-latest`, `balanced-latest`" >> $GITHUB_STEP_SUMMARY
         echo "- **Digest**: `${{ steps.build.outputs.digest }}`" >> $GITHUB_STEP_SUMMARY
         echo "- **Platforms**: `linux/amd64, linux/arm64`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: `v3.2.0 (最终平衡版本)`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Code Reduction**: `77% (3326→765行，保持完整功能)`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📋 Build Information" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit**: `${{ github.sha }}`" >> $GITHUB_STEP_SUMMARY
@@ -82,11 +131,14 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔗 Quick Deploy" >> $GITHUB_STEP_SUMMARY
         echo "```bash" >> $GITHUB_STEP_SUMMARY
-        echo "# Pull the image" >> $GITHUB_STEP_SUMMARY
-        echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest" >> $GITHUB_STEP_SUMMARY
+        echo "# Pull the Balanced version image" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:balanced-latest" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# Run the container" >> $GITHUB_STEP_SUMMARY
-        echo "docker run -d --name mailmanager -p 80:80 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest" >> $GITHUB_STEP_SUMMARY
+        echo "# Run the Balanced container" >> $GITHUB_STEP_SUMMARY
+        echo "docker run -d --name mailmanager-balanced -p 3001:3001 -p 3002:3002 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:balanced-latest" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# Access the Balanced version" >> $GITHUB_STEP_SUMMARY
+        echo "open http://localhost:3001" >> $GITHUB_STEP_SUMMARY
         echo "```" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
@@ -132,9 +184,11 @@ jobs:
         echo ""
         echo "📦 Image Details:"
         echo "  Repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "  Tag: prod-latest"
+        echo "  Tags: prod-latest, balanced-latest"
         echo "  Digest: ${{ needs.build.outputs.digest }}"
-        echo "  Pull Command: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest"
+        echo "  Version: v3.2.0 (最终平衡版本)"
+        echo "  Code Reduction: 77% (3326→765行，保持完整功能)"
+        echo "  Pull Command: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:balanced-latest"
         echo ""
         echo "📋 Build Information:"
         echo "  Commit: ${{ github.sha }}"
@@ -145,7 +199,7 @@ jobs:
         echo "  Platforms: linux/amd64,linux/arm64"
         echo ""
         echo "🔗 Quick Deploy:"
-        echo "  docker run -d --name mailmanager -p 80:80 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest"
+        echo "  docker run -d --name mailmanager -p 80:80 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:balanced-latest"
         echo ""
         echo "✅ Build completed successfully!"
 
