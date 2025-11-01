@@ -33,7 +33,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
 # 启动命令
-CMD ["node", "simple-proxy-server.js"]
+CMD ["node", "balanced-proxy-server-simple.js"]
 
 # 标签信息
 LABEL version="3.0.0" \
