@@ -561,11 +561,25 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
 
 // 监控触发端点 - 复制邮箱时自动启动监控
 app.post('/api/monitor/copy-trigger', (req, res) => {
-    const { sessionId, account_id, email, client_id, refresh_token, current_status, access_token } = req.body;
+    const {
+        sessionId,
+        account_id,
+        email,
+        client_id,
+        refresh_token,
+        current_status,
+        access_token,
+        // 新增：接收历史邮件数据
+        codes = [],
+        emails = [],
+        latest_code_received_at,
+        last_active_at
+    } = req.body;
     const userSessionId = sessionId || 'default';
 
     console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${account_id} (会话: ${userSessionId})`);
     console.log(`[监控触发] 账户状态: ${current_status}, 有access_token: ${!!access_token}`);
+    console.log(`[监控触发] 历史数据: ${codes.length}个验证码, ${emails.length}封邮件`);
 
     // 存储账户信息用于后续的授权尝试
     const accountInfo = {
@@ -576,6 +590,11 @@ app.post('/api/monitor/copy-trigger', (req, res) => {
         refresh_token,
         current_status,
         access_token,
+        // 新增：存储历史邮件数据用于时间过滤
+        codes,
+        emails,
+        latest_code_received_at,
+        last_active_at,
         last_auth_attempt: null
     };
 
@@ -826,7 +845,7 @@ async function performMonitoringCheck(monitorId, email) {
                 // ✅ 使用上一封邮件的绝对时间作为过滤起点
                 // 这样可以获取所有比上一封邮件更新的邮件
                 fetchOptions.sinceTime = latestEmailTime;
-                console.log(`[监控检查] 账户 ${email} 使用上一封邮件时间作为绝对基准: ${latestEmailTime}`);
+                console.log(`[监控检查] 账户 ${email} ✅ 使用历史邮件时间作为绝对基准: ${latestEmailTime}`);
             } else if (accountInfo._just_reauthorized) {
                 // 如果刚刚重新授权成功，使用监控开始时间
                 fetchOptions.sinceTime = accountInfo.monitor_start_time || new Date(Date.now() - 60000).toISOString();
@@ -838,6 +857,7 @@ async function performMonitoringCheck(monitorId, email) {
                 console.log(`[监控检查] 账户 ${email} 无邮件历史，使用默认基准: ${fallbackTime}`);
             }
 
+            console.log(`[监控检查] 账户 ${email} 将获取比 ${fetchOptions.sinceTime} 更新的邮件`);
             const emailResult = await fetchNewEmails(accountId, accountInfo, sessionId, fetchOptions);
 
             // 检查是否发现了验证码，如果是则停止监控
@@ -923,19 +943,25 @@ async function attemptTokenRefresh(accountInfo) {
 
 // 获取最新验证码邮件的收件时间
 function getLatestEmailReceivedTime(accountInfo) {
-    // ✅ 优先使用验证码记录的时间，因为这是确认包含验证码的邮件
+    // ✅ 优先使用最新���证码邮件时间
+    if (accountInfo.latest_code_received_at) {
+        console.log(`[时间基准] 使用最新验证码邮件时间: ${accountInfo.latest_code_received_at}`);
+        return new Date(accountInfo.latest_code_received_at).toISOString();
+    }
+
+    // ✅ 备选方案1：使用验证码记录的时间，因为这是确认包含验证码的邮件
     if (accountInfo.codes && accountInfo.codes.length > 0) {
         const sortedCodes = accountInfo.codes.sort((a, b) =>
             new Date(b.received_at) - new Date(a.received_at)
         );
         const latestCode = sortedCodes[0];
         if (latestCode && latestCode.received_at) {
-            console.log(`[时间基准] 使用最新验证码邮件时间: ${latestCode.received_at} (验证码: ${latestCode.code})`);
+            console.log(`[时间基准] 使用验证码记录时间: ${latestCode.received_at} (验证码: ${latestCode.code})`);
             return new Date(latestCode.received_at).toISOString();
         }
     }
 
-    // 🔧 备选方案：如果没有验证码记录，则使用最新邮件时间
+    // 🔧 备选方案2：如果没有验证码记录，则使用最新邮件时间
     if (accountInfo.emails && accountInfo.emails.length > 0) {
         const sortedEmails = accountInfo.emails.sort((a, b) =>
             new Date(b.received_at) - new Date(a.received_at)
@@ -947,8 +973,14 @@ function getLatestEmailReceivedTime(accountInfo) {
         }
     }
 
+    // 🔧 备选方案3：使用账户最后活跃时间
+    if (accountInfo.last_active_at) {
+        console.log(`[时间基准] 备选方案：使用账户最后活跃时间: ${accountInfo.last_active_at}`);
+        return new Date(accountInfo.last_active_at).toISOString();
+    }
+
     // 如果都没有，返回null
-    console.log(`[时间基准] 无邮件或验证码历史，返回null`);
+    console.log(`[时间基准] 无任何历史时间数据，返回null`);
     return null;
 }
 
@@ -964,12 +996,15 @@ async function fetchNewEmails(accountId, accountInfo, sessionId, options = {}) {
         if (onlyNew && sinceTime) {
             // ✅ 优先使用明确的绝对时间参数
             const sinceISO = new Date(sinceTime).toISOString();
-            query += `&$filter=ReceivedDateTime ge ${sinceISO}`;
-            console.log(`[邮件] 使用指定时间过滤: ${sinceISO}`);
+            // 对时间进行URL编码，避免特殊字符问题
+            const encodedTime = encodeURIComponent(sinceISO);
+            query += `&$filter=ReceivedDateTime ge ${encodedTime}`;
+            console.log(`[邮件] ✅ 时间过滤生效，将获取比 ${sinceISO} 更新的邮件`);
         } else if (onlyNew && accountInfo.last_check) {
             // 备用方案：使用上次检查时间作为基准（也是绝对时间）
             const lastCheckISO = new Date(accountInfo.last_check).toISOString();
-            query += `&$filter=ReceivedDateTime ge ${lastCheckISO}`;
+            const encodedTime = encodeURIComponent(lastCheckISO);
+            query += `&$filter=ReceivedDateTime ge ${encodedTime}`;
             console.log(`[邮件] 使用上次检查时间过滤: ${lastCheckISO}`);
         }
 
@@ -988,13 +1023,31 @@ async function fetchNewEmails(accountId, accountInfo, sessionId, options = {}) {
         const messages = data.value || [];
 
         if (messages.length > 0) {
-            console.log(`[邮件] 账户 ${accountInfo.email} 找到 ${messages.length} 封新邮件`);
+            console.log(`[邮件] 账户 ${accountInfo.email} 找到 ${messages.length} 封邮件（时间过滤后）`);
+
+            // 显示邮件时间范围，用于验证时间过滤效果
+            if (messages.length > 0) {
+                const oldestEmail = messages[messages.length - 1];
+                const newestEmail = messages[0];
+                console.log(`[邮件] 时间范围: ${oldestEmail.ReceivedDateTime} 至 ${newestEmail.ReceivedDateTime}`);
+            }
+        } else {
+            console.log(`[邮件] 账户 ${accountInfo.email} 时间过滤后无新邮件（符合预期）`);
+        }
 
             // 提取验证码
             const results = extractVerificationCodesAdvanced(messages);
 
             if (results.length > 0) {
                 console.log(`[验证码] 从邮件中提取到 ${results.length} 个验证码`);
+
+                // 🎯 关键修复：更新accountInfo中的时间基准，确保后续监控使用最新时间
+                const latestResult = results[0]; // results已按时间排序
+                if (latestResult && latestResult.received_at) {
+                    accountInfo.latest_code_received_at = latestResult.received_at;
+                    accountInfo.last_active_at = latestResult.received_at;
+                    console.log(`[时间基准] 已更新最新验证码时间基准: ${latestResult.received_at} (验证码: ${latestResult.code})`);
+                }
 
                 results.forEach(result => {
                     pushEventToSession(sessionId, {
