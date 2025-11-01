@@ -874,7 +874,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     email: email,
                     sequence: sequence,
                     account_id: account.id,
-                    status: 'pending'
+                    status: 'authorized'
                 });
 
                 successCount++;
