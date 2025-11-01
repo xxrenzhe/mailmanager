@@ -566,6 +566,23 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     continue;
                 }
 
+                // 验证授权凭证
+                console.log(`[批量导入] 验证授权: ${email}`);
+                let tokenResult;
+                try {
+                    tokenResult = await refreshAccessToken(client_id, refresh_token, false);
+                    console.log(`[批量导入] ✅ 授权验证成功: ${email}`);
+                } catch (error) {
+                    console.error(`[批量导入] ❌ 授权验证失败: ${email}`, error.message);
+                    results.push({
+                        success: false,
+                        email: email,
+                        error: `授权验证失败: ${error.message}`
+                    });
+                    errorCount++;
+                    continue;
+                }
+
                 // 分配序列号
                 const sequence = assignSequence(email);
 
@@ -575,9 +592,10 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     email: email,
                     password: password,
                     client_id: client_id,
-                    refresh_token: refresh_token,
+                    refresh_token: tokenResult.refresh_token || refresh_token, // 使用新的refresh_token
+                    access_token: tokenResult.access_token, // 存储access_token
                     sequence: sequence,
-                    status: 'pending',
+                    status: 'authorized', // 直接设置为已授权
                     created_at: new Date().toISOString(),
                     last_active_at: new Date().toISOString()
                 };
@@ -668,6 +686,121 @@ app.post('/api/accounts', (req, res) => {
 
     } catch (error) {
         console.error('[账户] 创建失败:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 手动取件邮件
+app.post('/api/manual-fetch-emails', async (req, res) => {
+    try {
+        const { account_id, email, client_id, refresh_token, access_token, current_status, session_id } = req.body;
+
+        console.log(`[手动取件] 开始收取: ${email} (账户ID: ${account_id})`);
+
+        if (!account_id || !email || !client_id || !refresh_token) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少必需参数: account_id, email, client_id, refresh_token'
+            });
+        }
+
+        // 创建账户对象
+        const account = {
+            id: account_id,
+            email: email,
+            client_id: client_id,
+            refresh_token: refresh_token,
+            access_token: access_token,
+            current_status: current_status || 'pending',
+            last_check_time: null // 手动取件不设置时间过滤器，获取最新邮件
+        };
+
+        try {
+            // 刷新token
+            const tokenResult = await refreshAccessToken(account.client_id, account.refresh_token, true);
+            account.access_token = tokenResult.access_token;
+            account.refresh_token = tokenResult.refresh_token || refresh_token;
+
+            // 获取邮件（不设置时间过滤器，获取最新10封邮件）
+            const emails = await fetchEmails(account, tokenResult.access_token, null);
+
+            console.log(`[手动取件] 获取到 ${emails ? emails.length : 0} 封邮件`);
+
+            // 提取验证码
+            const foundCodes = [];
+            for (const emailData of emails || []) {
+                const code = extractVerificationCode(emailData.Subject, emailData.Body.Content);
+                if (code) {
+                    foundCodes.push({
+                        code: code,
+                        sender: emailData.From.EmailAddress.Address,
+                        subject: emailData.Subject,
+                        received_at: emailData.ReceivedDateTime
+                    });
+                    console.log(`[手动取件] 发现验证码: ${code} (发件人: ${emailData.From.EmailAddress.Address})`);
+                }
+            }
+
+            // 通知前端结果
+            if (foundCodes.length > 0) {
+                // 使用最新的验证码
+                const latestCode = foundCodes[foundCodes.length - 1];
+
+                emitEvent({
+                    type: 'verification_code_found',
+                    sessionId: session_id,
+                    account_id: account_id,
+                    email: email,
+                    code: latestCode.code,
+                    sender: latestCode.sender,
+                    subject: latestCode.subject,
+                    received_at: latestCode.received_at,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            emitEvent({
+                type: 'manual_fetch_complete',
+                sessionId: session_id,
+                account_id: account_id,
+                email: email,
+                emails_count: emails ? emails.length : 0,
+                codes_count: foundCodes.length,
+                timestamp: new Date().toISOString()
+            });
+
+            res.json({
+                success: true,
+                message: `成功收取 ${emails ? emails.length : 0} ��邮件`,
+                emails_count: emails ? emails.length : 0,
+                codes_found: foundCodes.length,
+                codes: foundCodes
+            });
+
+        } catch (error) {
+            console.error(`[手动取件] 失败: ${email}`, error.message);
+
+            // 通知前端错误
+            emitEvent({
+                type: 'manual_fetch_error',
+                sessionId: session_id,
+                account_id: account_id,
+                email: email,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+
+            res.status(500).json({
+                success: false,
+                error: `手动取件失败: ${error.message}`
+            });
+        }
+
+    } catch (error) {
+        console.error('[手动取件] 处理失败:', error);
         res.status(500).json({
             success: false,
             error: error.message
