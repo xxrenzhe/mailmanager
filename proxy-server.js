@@ -17,9 +17,9 @@ const WS_PORT = process.env.WS_PORT || 3002;
 const MAX_CONNECTIONS = 1000; // 最大SSE连接数限制
 const MEMORY_THRESHOLD = 100 * 1024 * 1024; // 100MB内存阈值
 
-// 添加body parser中间件
-app.use(express.json());
-app.use(express.urlencoded({ extended: true })); // 支持form-data解析
+// 添加body parser中间件 - 支持大批量数据
+app.use(express.json({ limit: '10mb' })); // 增加JSON请求体限制到10MB
+app.use(express.urlencoded({ extended: true, limit: '10mb' })); // 增加form-data限制到10MB
 
 // 提供静态文件服务
 app.use(express.static(__dirname));

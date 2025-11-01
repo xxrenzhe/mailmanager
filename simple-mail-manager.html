@@ -280,7 +280,8 @@
                 </label>
                 <div class="bg-gray-50 p-3 rounded border text-sm text-gray-600 mb-4">
                     格式：邮箱地址----密码----Client ID----Refresh Token<br>
-                    （每行一个邮箱信息，使用四个----分隔，支持智能UUID识别）
+                    （每行一个邮箱信息，使用四个----分隔，支持智能UUID识别）<br>
+                    <span class="text-amber-600 font-medium">💡 建议一次导入不超过1000个邮箱，以确保最佳性能</span>
                 </div>
 
                 <label class="block text-sm font-medium text-gray-700 mb-2">
@@ -553,6 +554,7 @@
             constructor() {
                 this.accounts = [];
                 this.filteredAccounts = [];
+                this.selectedAccounts = new Set(); // 选中的账户ID集合
                 this.sortField = 'sequence';
                 this.sortDirection = 'asc';
                 this.currentPage = 1;
@@ -1160,7 +1162,7 @@
                 const sequence = await this.sequenceManager.assignSequence(email);
 
                 const account = {
-                    id: Date.now().toString(),
+                    id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
                     email: email,
                     name: name || email,
                     client_id: clientId,
@@ -2019,6 +2021,7 @@
                                 <input type="checkbox"
                                        class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                                        data-account-id="${account.id}"
+                                       ${this.selectedAccounts.has(account.id) ? 'checked' : ''}
                                        onchange="handleAccountSelection(this)">
                             </td>
                             <td class="px-3 py-3 whitespace-nowrap w-32 code-cell">
@@ -3689,7 +3692,7 @@
         }
 
         function handleAccountSelection(checkbox) {
-            const accountId = parseInt(checkbox.dataset.accountId);
+            const accountId = checkbox.dataset.accountId; // 使用字符串ID，不转换为数字
             if (checkbox.checked) {
                 manager.selectedAccounts.add(accountId);
             } else {
