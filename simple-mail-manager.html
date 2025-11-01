@@ -1092,7 +1092,68 @@
 
                         console.log(`[邮件处理完成] 账户 ${account.email} 状态已更新为: ${account.status}, 需要保存: ${needsSave}`);
                     } else {
-                        console.warn(`[邮件处理完成] 未找到账户 ID: ${data.account_id}`);
+                        // 批量导入时账户可能不存在于前端，需要创建
+                        if (data.email && data.account_id) {
+                            console.log(`[邮件处理完成] 创建新账户: ${data.email} (${data.account_id})`);
+
+                            // 创建新账户（包括失败账户）
+                            const newAccount = {
+                                id: data.account_id,
+                                email: data.email,
+                                password: '', // 批量导入时前端不需要密码
+                                client_id: '', // 批量导入时前端不需要client_id
+                                refresh_token: '', // 批量导入时前端不需要refresh_token
+                                access_token: '', // 批量导入时前端不需要access_token
+                                sequence: this.accounts.length + 1, // 临时序列号
+                                status: data.status || 'failed', // 使用事件中的状态，默认为failed
+                                created_at: new Date().toISOString(),
+                                last_active_at: new Date().toISOString(),
+                                updated_at: new Date().toISOString(),
+                                last_check: new Date().toISOString()
+                            };
+
+                            // 如果有错误信息，添加到账户
+                            if (data.status === 'failed' && data.error) {
+                                newAccount.error = data.error;
+                            }
+
+                            // 如果有验证码信息，添加到账户
+                            if (data.verification_code) {
+                                newAccount.verification_code = data.verification_code;
+                                newAccount.verification_code_time = data.received_at || new Date().toISOString();
+                                newAccount.verification_code_from = data.sender || 'Unknown';
+                            }
+
+                            // 添加到账户列表
+                            this.accounts.push(newAccount);
+
+                            // 保存并更新UI
+                            this.saveAccounts();
+                            this.render();
+                            this.updateStats();
+
+                            console.log(`[邮件处理完成] 已创建新账户: ${data.email}, 状态: ${newAccount.status}`);
+
+                            // 显示通知
+                            if (data.status === 'failed') {
+                                this.showNotification(
+                                    `${data.email}: 授权失败 - ${data.error || '未知错误'}`,
+                                    'error'
+                                );
+                            } else if (data.verification_code) {
+                                this.showNotification(
+                                    `${data.email}: 找到验证码 ${data.verification_code} (来自: ${data.sender || 'Unknown'})`,
+                                    'success'
+                                );
+                            } else {
+                                this.showNotification(
+                                    `${data.email}: 邮件处理完成，未找到验证码`,
+                                    'info'
+                                );
+                            }
+                        } else {
+                            console.warn(`[邮件处理完成] 无法创建账户，缺少必要信息:`, data);
+                        }
                     }
                 } else {
                     console.warn(`[邮件处理完成] 事件数据缺少 account_id:`, data);
