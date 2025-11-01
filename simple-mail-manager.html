@@ -3073,6 +3073,67 @@
                 }
             }
 
+            // 新的批量导入函数 - 直接调用后端创建账户，避免重复创建
+            async startAsyncBatchImport(emailDataList) {
+                if (!emailDataList || emailDataList.length === 0) return;
+
+                console.log(`[批量导入] 开始后端批量处理 ${emailDataList.length} 个邮箱`);
+
+                try {
+                    // 确保sessionId存在
+                    if (!this.sessionId) {
+                        const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                        if (savedSessionId) {
+                            this.sessionId = savedSessionId;
+                        } else {
+                            this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            localStorage.setItem('mail_manager_session_id', this.sessionId);
+                        }
+                        console.log(`[批量导入] 会话ID: ${this.sessionId}`);
+                    }
+
+                    // 准备批量导入数据（使用后端batch-import接口格式）
+                    const emailsData = emailDataList.map(data => ({
+                        email: data.email,
+                        password: data.email, // 密码字段，后端需要但不实际使用
+                        client_id: data.client_id,
+                        refresh_token: data.refresh_token
+                    }));
+
+                    console.log(`[批量导入] 调用后端batch-import接口，处理 ${emailsData.length} 个邮箱`);
+
+                    // 调用后端的batch-import接口（后端负责创建账户、授权、取件、提取验证码）
+                    const response = await fetch('/api/accounts/batch-import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: this.sessionId,
+                            emails: emailsData
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`批量导入失败: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    console.log(`[批量导入] 后端已接收请求:`, result);
+
+                    // 显示导入开始通知
+                    this.showNotification(
+                        `批量导入已启动: ${emailsData.length} 个邮箱正在后台处理...`,
+                        'info'
+                    );
+
+                    console.log(`[批量导入] 后端正在异步处理授权、取件和验证码提取，请等待SSE事件通知`);
+                    console.log(`[批量导入] 总账户数将通过SSE事件同步，预期: ${emailsData.length} 个账户`);
+
+                } catch (error) {
+                    console.error(`[批量导入] 启动失败:`, error);
+                    this.showNotification(`批量导入启动失败: ${error.message}`, 'error');
+                }
+            }
+
             // validateAccountAsync 方法已删除 - 现在使用批量验证API /api/accounts/batch-validate
 
             // quickTokenCheck 方法已删除 - 现在使用 /api/accounts/validate 统一API
@@ -3730,6 +3791,8 @@
                 let successCount = 0;
                 let errorCount = 0;
 
+                // 修改：前端不再预先创建账户，只检查重复和解析数据
+                const validEmailData = [];
                 for (let i = 0; i < emailData.length; i++) {
                     const data = emailData[i];
 
@@ -3750,29 +3813,31 @@
                             refreshTokenLength: data.refresh_token ? data.refresh_token.length : 0
                         });
 
-                        // 添加账户 - 立即保��为pending状态
-                        const account = await manager.addAccount(data.email, data.email, data.client_id, data.refresh_token);
-                        console.log(`[导入] 账户 ${data.email} 已保存，状态: pending`);
+                        // 添加到有效数据列表，不创建账户
+                        validEmailData.push(data);
                         successCount++;
-                        updateProgress(i + 1, emailData.length, `⏳ 已保存: ${data.email}`);
+                        updateProgress(i + 1, emailData.length, `✅ 已解析: ${data.email}`);
 
-  
                     } catch (error) {
-                        console.error(`导入 ${data.email} 失败:`, error);
+                        console.error(`解析 ${data.email} 失败:`, error);
                         errorCount++;
-                        updateProgress(i + 1, emailData.length, `导入失败: ${data.email}`);
+                        updateProgress(i + 1, emailData.length, `解析失败: ${data.email}`);
                     }
                 }
 
-                // 启动异步验证（后台处理）
-                setTimeout(() => {
-                    manager.startAsyncImportValidation();
-                }, 1000);
+                // 如果有有效数据，启动后端批量处理
+                if (validEmailData.length > 0) {
+                    updateProgress(0, validEmailData.length, '正在批量处理授权和取件...');
 
-                // 显示导入完成状态
-                setTimeout(() => {
-                    showDetailedImportComplete(successCount, manager.accounts.length, 0, 0, 0);
-                }, 500);
+                    setTimeout(() => {
+                        manager.startAsyncBatchImport(validEmailData);
+                    }, 1000);
+                } else {
+                    // 没有有效数据，显示完成状态
+                    setTimeout(() => {
+                        showDetailedImportComplete(0, manager.accounts.length, 0, 0, 0);
+                    }, 500);
+                }
 
             } catch (error) {
                 console.error('批量导入失败:', error);
