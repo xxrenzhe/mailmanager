@@ -998,7 +998,7 @@
                         refresh_token: account.refresh_token,
                         access_token: account.access_token,
                         current_status: account.status,
-                        session_id: this.sessionId
+                        sessionId: this.sessionId
                     };
 
                     console.log(`[自动取件] 发送取件请求:`, requestData);
@@ -2759,7 +2759,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            session_id: this.sessionId,
+                            sessionId: this.sessionId,
                             accounts: accountsForBatchValidation
                         })
                     });
