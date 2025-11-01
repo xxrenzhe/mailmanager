@@ -71,14 +71,27 @@ function assignSequence(email) {
     return maxSequence;
 }
 
+// Token刷新冷却时间（秒）
+const TOKEN_REFRESH_COOLDOWN = 60;
+const lastTokenRefresh = new Map();
+
 // 2. Microsoft Token刷新（真实实现）
 async function refreshAccessToken(clientId, refreshToken) {
+    // 检查冷却时间
+    const refreshKey = `${clientId}_${refresh_token.substring(0, 10)}`;
+    const lastRefresh = lastTokenRefresh.get(refreshKey);
+    const now = Date.now();
+
+    if (lastRefresh && (now - lastRefresh) < TOKEN_REFRESH_COOLDOWN * 1000) {
+        return reject(new Error(`Token刷新过于频繁，请等待${TOKEN_REFRESH_COOLDOWN}秒`));
+    }
+
     return new Promise((resolve, reject) => {
         const postData = querystring.stringify({
             client_id: clientId,
             refresh_token: refreshToken,
             grant_type: 'refresh_token',
-            scope: 'https://outlook.office.com/Mail.Read offline_access'
+            scope: 'https://outlook.office.com/Mail.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access'
         });
 
         const options = {
@@ -99,6 +112,8 @@ async function refreshAccessToken(clientId, refreshToken) {
                 try {
                     const result = JSON.parse(data);
                     if (res.statusCode === 200) {
+                        // 记录成功的刷新时间
+                        lastTokenRefresh.set(refreshKey, Date.now());
                         resolve(result);
                     } else {
                         reject(new Error(`Token刷新失败: ${res.statusCode} - ${result.error_description || result.error}`));
@@ -271,6 +286,26 @@ function startMonitoring(sessionId, account, duration = 60000) {
 
             } catch (error) {
                 console.error(`[监控检查] 账户 ${account.email} 检查失败:`, error.message);
+
+                // 如果是token刷新失败，更新账户状态并通知前端
+                if (error.message.includes('Token刷新失败') || error.message.includes('AADSTS70000')) {
+                    account.current_status = 'reauth_required';
+                    account.last_error = error.message;
+                    accountStore.set(account.id, account);
+
+                    // 通知前端需要重新授权
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: sessionId,
+                        account_id: account.id,
+                        email: account.email,
+                        status: 'reauth_required',
+                        message: 'Token已过期，请重新授权',
+                        error: error.message
+                    });
+
+                    console.log(`[授权] 账户 ${account.email} 需要重新授权`);
+                }
             }
 
         }, 15000) // 每15秒检查一次
