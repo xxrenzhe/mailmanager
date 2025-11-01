@@ -243,13 +243,25 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
         // 构造基础URL
         let url = `${OUTLOOK_API}/me/messages?$top=10&$orderby=ReceivedDateTime desc`;
 
+        // 智能时间过滤器处理
         if (sinceTime) {
-            const filterTime = new Date(sinceTime).toISOString();
-            // 使用OData标准格式，时间值需要用单引号包围
-            // 构造过滤器时进行正确的URL编码
-            const filterClause = `ReceivedDateTime gt '${filterTime}'`;
-            const encodedFilter = encodeURIComponent(filterClause);
-            url += `&$filter=${encodedFilter}`;
+            try {
+                const filterTime = new Date(sinceTime).toISOString();
+                // 使用OData标准格式，时间值需要用单引号包围
+                // 构造过滤器时进行正确的URL编码
+                const filterClause = `ReceivedDateTime gt '${filterTime}'`;
+                const encodedFilter = encodeURIComponent(filterClause);
+                url += `&$filter=${encodedFilter}`;
+                console.log(`[时间过滤] 获取比 ${sinceTime} 更新的邮件`);
+            } catch (error) {
+                console.log(`[时间过滤] 时间格式错误，降级获取最近5封邮件: ${error.message}`);
+                // 降级到最近5封邮件
+                url = `${OUTLOOK_API}/me/messages?$top=5&$orderby=ReceivedDateTime desc`;
+            }
+        } else {
+            // 没有时间过滤器，降级获取最近5封邮件
+            console.log(`[时间过滤] 无时间基准，降级获取最近5封邮件`);
+            url = `${OUTLOOK_API}/me/messages?$top=5&$orderby=ReceivedDateTime desc`;
         }
 
         console.log(`[调试] 完整URL: ${url}`);
@@ -329,7 +341,7 @@ function startMonitoring(sessionId, account, duration = 60000) {
                 // 获取access token（用户主动触发的监控，跳过冷却限制）
                 const tokenResult = await refreshAccessToken(account.client_id, account.refresh_token, true);
 
-                // 获取邮件
+                // 获取邮件（使用智能时间过滤器）
                 const emails = await fetchEmails(account, tokenResult.access_token, account.last_check_time);
 
                 if (emails && emails.length > 0) {
@@ -357,9 +369,11 @@ function startMonitoring(sessionId, account, duration = 60000) {
                         }
                     }
 
-                    // 更新最后检查时间
-                    account.last_check_time = new Date().toISOString();
-                    accountStore.set(account.id, account);
+                    // 发现验证码后，更新最后检查时间为当前邮件的接收时间
+                    if (emails && emails.length > 0) {
+                        account.last_check_time = emails[0].ReceivedDateTime; // 使用最新邮件时间作为基准
+                        accountStore.set(account.id, account);
+                    }
                 }
 
             } catch (error) {
@@ -508,7 +522,15 @@ app.post('/api/microsoft/token', async (req, res) => {
 // 触发监控（恢复完整功能）
 app.post('/api/monitor/copy-trigger', async (req, res) => {
     try {
-        const { sessionId, account_id, email, client_id, refresh_token, current_status, codes = [], emails = [], latest_code_received_at, last_active_at } = req.body;
+        const { sessionId, account_id, email, client_id, refresh_token, current_status, codes = [], emails = [], latest_code_received_at } = req.body;
+
+        // 多用户隔离验证：必须有sessionId
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少会话标识：sessionId'
+            });
+        }
 
         console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${account_id} (会话: ${sessionId})`);
         console.log(`[监控触发] 账户状态: ${current_status}, 有access_token: ${!!req.body.access_token}`);
@@ -569,6 +591,22 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
             latestAccessToken = tokenResult.access_token;
         }
 
+        // 计算时间过滤基准（只使用latest_code_received_at）
+        let timeFilter = latest_code_received_at;
+
+        // 如果有codes数组，使用最新的验证码时间
+        if (codes && codes.length > 0) {
+            const latestCode = codes.reduce((latest, code) => {
+                return new Date(code.received_at) > new Date(latest.received_at) ? code : latest;
+            });
+            timeFilter = latestCode.received_at;
+            console.log(`[时间基准] 使用codes数组最新时间: ${timeFilter}`);
+        } else if (latest_code_received_at) {
+            console.log(`[时间基准] 使用最新验证码邮件时间: ${timeFilter}`);
+        } else {
+            console.log(`[时间基准] 无验证码邮件时间，将降级获取最近5封邮件`);
+        }
+
         // 创建账户对象
         const account = {
             id: account_id,
@@ -581,21 +619,8 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
             codes: codes || [],
             emails: emails || [],
             latest_code_received_at: latest_code_received_at,
-            last_check_time: latest_code_received_at || last_active_at || new Date().toISOString()
+            last_check_time: timeFilter  // 使用计算好的时间过滤基准
         };
-
-        // 计算时间过滤基准
-        let timeFilter = account.last_check_time;
-        if (account.latest_code_received_at) {
-            timeFilter = account.latest_code_received_at;
-            console.log(`[时间基准] 使用最新验证码邮件时间: ${timeFilter}`);
-        } else if (codes && codes.length > 0) {
-            const latestCode = codes.reduce((latest, code) => {
-                return new Date(code.received_at) > new Date(latest.received_at) ? code : latest;
-            });
-            timeFilter = latestCode.received_at;
-            console.log(`[时间基准] 使用codes数组最新时间: ${timeFilter}`);
-        }
 
         console.log(`[监控检查] 账户 ${email} 将获取比 ${timeFilter} 更新的邮件`);
 
@@ -637,7 +662,15 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
 // 批量导入账户（前端兼容）
 app.post('/api/accounts/batch-import', async (req, res) => {
     try {
-        const { emails } = req.body;
+        const { emails, sessionId } = req.body;
+
+        // 多用户隔离验证：必须有sessionId
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少会话标识：sessionId'
+            });
+        }
 
         if (!Array.isArray(emails) || emails.length === 0) {
             return res.status(400).json({
@@ -700,6 +733,70 @@ app.post('/api/accounts/batch-import', async (req, res) => {
 
                 // 存储账户
                 accountStore.set(account.id, account);
+
+                // 异步取件最新5封邮件并提取验证码
+                (async () => {
+                    try {
+                        console.log(`[批量导入] 开始异步取件: ${email}`);
+
+                        // 获取最新5封邮件（无时间过滤器，降级处理）
+                        const emails = await fetchEmails(account, tokenResult.access_token, null);
+
+                        if (emails && emails.length > 0) {
+                            console.log(`[批量导入] 获取到 ${emails.length} 封邮件: ${email}`);
+
+                            // 提取验证码并保存最新的
+                            let latestCode = null;
+                            let latestCodeTime = null;
+
+                            for (const emailItem of emails) {
+                                const code = extractVerificationCode(emailItem.Subject, emailItem.Body.Content);
+                                if (code) {
+                                    const receivedTime = new Date(emailItem.ReceivedDateTime).toISOString();
+                                    if (!latestCodeTime || new Date(receivedTime) > new Date(latestCodeTime)) {
+                                        latestCode = code;
+                                        latestCodeTime = receivedTime;
+                                    }
+                                    console.log(`[批量导入] 发现验证码: ${code} (发件人: ${emailItem.From.EmailAddress.Address})`);
+                                }
+                            }
+
+                            // 更新账户信息
+                            if (latestCode) {
+                                account.codes = [{
+                                    code: latestCode,
+                                    received_at: latestCodeTime,
+                                    sender: email,  // 统一使用sender字段名
+                                    subject: "批量导入验证码"
+                                }];
+                                account.latest_code_received_at = latestCodeTime;
+                                accountStore.set(account.id, account);
+
+                                console.log(`[批量导入] ✅ 提取最新验证码: ${latestCode} (时间: ${latestCodeTime})`);
+
+                                // 批量导入使用sessionId进行精确路由通知
+                                emitEvent({
+                                    type: 'verification_code_found',
+                                    sessionId: sessionId, // 使用sessionId进行精确路由
+                                    account_id: account.id,
+                                    email: account.email,
+                                    code: latestCode,
+                                    sender: email,
+                                    subject: "批量导入验证码",
+                                    received_at: latestCodeTime,
+                                    timestamp: new Date().toISOString(),
+                                    batch_import: true // 标识这是批量导入的验证码
+                                });
+                            } else {
+                                console.log(`[批量导入] 未发现验证码: ${email}`);
+                            }
+                        } else {
+                            console.log(`[批量导入] 未获取到邮件: ${email}`);
+                        }
+                    } catch (error) {
+                        console.error(`[批量导入] 异步取件失败: ${email}`, error.message);
+                    }
+                })();
 
                 results.push({
                     success: true,
@@ -794,7 +891,15 @@ app.post('/api/accounts', (req, res) => {
 // 手动取件邮件
 app.post('/api/manual-fetch-emails', async (req, res) => {
     try {
-        const { account_id, email, client_id, refresh_token, access_token, current_status, session_id } = req.body;
+        const { account_id, email, client_id, refresh_token, access_token, current_status, sessionId, latest_code_received_at, codes = [] } = req.body;
+
+        // 多用户隔离验证：必须有sessionId
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少会话标识：sessionId'
+            });
+        }
 
         console.log(`[手动取件] 开始收取: ${email} (账户ID: ${account_id})`);
 
@@ -816,7 +921,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
                     // 通知前端重新授权成功
                     emitEvent({
                         type: 'account_status_changed',
-                        sessionId: session_id,
+                        sessionId: sessionId,
                         account_id: account_id,
                         email: email,
                         status: 'active',
@@ -831,7 +936,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
                 // 通知前端需要手动重新授权
                 emitEvent({
                     type: 'account_status_changed',
-                    sessionId: session_id,
+                    sessionId: sessionId,
                     account_id: account_id,
                     email: email,
                     status: 'reauth_required',
@@ -855,6 +960,22 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             });
         }
 
+        // 计算时间过滤基准（只使用latest_code_received_at）
+        let timeFilter = latest_code_received_at;
+
+        // 如果有codes数组，使用最新的验证码时间
+        if (codes && codes.length > 0) {
+            const latestCode = codes.reduce((latest, code) => {
+                return new Date(code.received_at) > new Date(latest.received_at) ? code : latest;
+            });
+            timeFilter = latestCode.received_at;
+            console.log(`[手动取件] 使用codes数组最新时间: ${timeFilter}`);
+        } else if (latest_code_received_at) {
+            console.log(`[手动取件] 使用最新验证码邮件时间: ${timeFilter}`);
+        } else {
+            console.log(`[手动取件] 无验证码邮件时间，将降级获取最近5封邮件`);
+        }
+
         // 创建账户对象
         const account = {
             id: account_id,
@@ -863,7 +984,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             refresh_token: refresh_token,
             access_token: latestAccessToken,
             current_status: finalStatus,
-            last_check_time: null // 手动取件不设置时间过滤器，获取最新邮件
+            last_check_time: timeFilter // 使用智能时间过滤器
         };
 
         try {
@@ -874,8 +995,8 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
                 account.refresh_token = tokenResult.refresh_token || refresh_token;
             }
 
-            // 获取邮件（不设置时间过滤器，获取最新10封邮件）
-            const emails = await fetchEmails(account, account.access_token, null);
+            // 获取邮件（使用智能时间过滤器）
+            const emails = await fetchEmails(account, account.access_token, account.last_check_time);
 
             console.log(`[手动取件] 获取到 ${emails ? emails.length : 0} 封邮件`);
 
@@ -901,7 +1022,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
 
                 emitEvent({
                     type: 'verification_code_found',
-                    sessionId: session_id,
+                    sessionId: sessionId,
                     account_id: account_id,
                     email: email,
                     code: latestCode.code,
@@ -914,7 +1035,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
 
             emitEvent({
                 type: 'manual_fetch_complete',
-                sessionId: session_id,
+                sessionId: sessionId,
                 account_id: account_id,
                 email: email,
                 emails_count: emails ? emails.length : 0,
@@ -936,7 +1057,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             // 通知前端错误
             emitEvent({
                 type: 'manual_fetch_error',
-                sessionId: session_id,
+                sessionId: sessionId,
                 account_id: account_id,
                 email: email,
                 error: error.message,
@@ -1025,18 +1146,36 @@ app.get('/api/events/stream/:sessionId?', (req, res) => {
     });
 });
 
-// 统一事件推送函数 - 支持SSE和WebSocket
+// 统一事件推送函数 - 支持SSE和WebSocket，支持sessionId精确路由
 function emitEvent(eventData) {
-    // WebSocket推送
+    // WebSocket推送 - 支持基于sessionId的精确路由
     const wsNotification = JSON.stringify(eventData);
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(wsNotification);
-        }
-    });
 
-    // SSE推送
-    eventEmitter.emit(eventData.type, eventData);
+    if (eventData.sessionId) {
+        // 如果指定了sessionId，只推送给对应的会话
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN && client.sessionId === eventData.sessionId) {
+                client.send(wsNotification);
+                console.log(`[WebSocket] 🎯 精确路由通知到会话 ${eventData.sessionId}: ${eventData.type}`);
+            }
+        });
+    } else {
+        // 没有指定sessionId，广播给所有客户端（向后兼容）
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(wsNotification);
+            }
+        });
+    }
+
+    // SSE推送 - 支持基于sessionId的精确路由
+    if (eventData.sessionId) {
+        eventEmitter.emit(`${eventData.type}_${eventData.sessionId}`, eventData);
+        console.log(`[SSE] 🎯 精确路由事件到会话 ${eventData.sessionId}: ${eventData.type}`);
+    } else {
+        // 没有指定sessionId，广播事件（向后兼容）
+        eventEmitter.emit(eventData.type, eventData);
+    }
 }
 
 // 基本统计
