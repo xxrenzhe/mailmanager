@@ -2489,23 +2489,13 @@
                     return;
                 }
 
-                // KISS 防抖机制：防止重复触发，但允许持续监控直到成功
-                const now = Date.now();
-                const lastMonitorTime = this.lastMonitorTimes?.[accountId] || 0;
-                const DEBOUNCE_TIME = 30000; // 30秒防抖，避免重复触发
-
-                if (now - lastMonitorTime < DEBOUNCE_TIME) {
-                    console.log(`[防抖] 账户 ${account.email} (ID: ${accountId}) 触发过于频繁，跳过重复触发`);
-                    return; // 静默跳过，不显示提示
-                }
+                // 移除防抖机制：允许用户随时触发监控
 
                 try {
                     await navigator.clipboard.writeText(account.email);
                     this.showSuccess('邮箱已复制: ' + account.email);
 
-                    // 记录触发时间（KISS 原则：简单的时间戳记录）
-                    if (!this.lastMonitorTimes) this.lastMonitorTimes = {};
-                    this.lastMonitorTimes[accountId] = now;
+                    // 移除触发时间记录（防抖机制已取消）
 
                     // 仅在特定场景触发监控：复制邮箱触发后台监控
                     // 监控将在后端持续运行60秒直到成功获取验证码
