@@ -201,14 +201,19 @@ function extractVerificationCode(subject, body) {
 // 4. 获取邮件（真实实现）
 async function fetchEmails(account, accessToken, sinceTime = null) {
     return new Promise((resolve, reject) => {
+        // 构造基础URL
         let url = `${OUTLOOK_API}/me/messages?$top=10&$orderby=ReceivedDateTime desc`;
 
         if (sinceTime) {
             const filterTime = new Date(sinceTime).toISOString();
-            // 对时间字符串进行URL编码，避免特殊字符导致请求失败
-            const encodedFilterTime = encodeURIComponent(filterTime);
-            url += `&$filter=ReceivedDateTime gt ${encodedFilterTime}`;
+            // 使用OData标准格式，时间值需要用单引号包围
+            // 构造过滤器时进行正确的URL编码
+            const filterClause = `ReceivedDateTime gt '${filterTime}'`;
+            const encodedFilter = encodeURIComponent(filterClause);
+            url += `&$filter=${encodedFilter}`;
         }
+
+        console.log(`[调试] 完整URL: ${url}`);
 
         const options = {
             hostname: 'outlook.office.com',
