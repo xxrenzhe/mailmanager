@@ -90,9 +90,9 @@ const TOKEN_REFRESH_COOLDOWN = 60;
 const lastTokenRefresh = new Map();
 
 // 2. Microsoft Token刷新（智能scope回退机制）
-async function refreshAccessToken(clientId, refreshToken, userInitiated = false) {
-    // 只对非用户主动触发的刷新进行冷却检查
-    if (!userInitiated) {
+async function refreshAccessToken(clientId, refreshToken, userInitiated = false, batchImport = false) {
+    // 批量导入时绕过冷却检查，因为这是合理的业务需求
+    if (!userInitiated && !batchImport) {
         const refreshKey = `${clientId}_${refreshToken.substring(0, 10)}`;
         const lastRefresh = lastTokenRefresh.get(refreshKey);
         const now = Date.now();
@@ -782,16 +782,54 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                 console.log(`[批量导入] 验证授权: ${email}`);
                 let tokenResult;
                 try {
-                    tokenResult = await refreshAccessToken(client_id, refresh_token, false);
+                    tokenResult = await refreshAccessToken(client_id, refresh_token, false, true);
                     console.log(`[批量导入] ✅ 授权验证成功: ${email}`);
                 } catch (error) {
                     console.error(`[批量导入] ❌ 授权验证失败: ${email}`, error.message);
+
+                    // 为失败的账户也创建记录，标记为failed状态
+                    const failedAccount = {
+                        id: `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        email: email,
+                        password: password,
+                        client_id: client_id,
+                        refresh_token: refresh_token,
+                        access_token: null, // 失败时没有access_token
+                        sequence: assignSequence(email),
+                        status: 'failed', // 标记为失败状态
+                        created_at: new Date().toISOString(),
+                        last_active_at: new Date().toISOString(),
+                        error: error.message
+                    };
+
                     results.push({
                         success: false,
                         email: email,
-                        error: `授权验证失败: ${error.message}`
+                        error: `授权验证失败: ${error.message}`,
+                        account_id: failedAccount.id
                     });
                     errorCount++;
+
+                    // 为失败的账户也发送emails_processed事件，让前端知道处理已完成
+                    const processedEvent = {
+                        type: 'emails_processed',
+                        data: {
+                            account_id: failedAccount.id,
+                            email: email,
+                            status: 'failed',
+                            error: error.message,
+                            verification_code: null,
+                            sender: null,
+                            received_at: new Date().toISOString(),
+                            session_id: sessionId
+                        }
+                    };
+
+                    // 通过WebSocket和SSE发送事件
+                    sendWebSocketEvent(sessionId, processedEvent.type, processedEvent.data);
+                    sendSSEEvent(sessionId, processedEvent.type, processedEvent.data);
+
+                    console.log(`[批量导入] 已发送失败邮箱处理事件: ${email} (状态: failed)`);
                     continue;
                 }
 

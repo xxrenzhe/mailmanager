@@ -1000,15 +1000,15 @@
                 }
             }
 
-            // 处理邮件处理完成事件（批量导入���）
+            // 处理邮件处理完成事件（批量导入）
             handleEmailsProcessed(data) {
                 console.log('[邮件处理完成] 收到批量导入完成事件:', data);
 
                 if (data.account_id) {
                     const account = this.accounts.find(acc => acc.id === data.account_id);
                     if (account) {
-                        // 更新账户状态为已授权（无论是否找到验证码）
-                        account.status = 'authorized';
+                        // 根据事件数据更新账户状态
+                        account.status = data.status || 'unknown';
                         account.updated_at = new Date().toISOString();
 
                         // 如果有验证码数据，更新验证码信息
@@ -1021,6 +1021,13 @@
                             this.showNotification(
                                 `${account.email}: 找到验证码 ${data.verification_code} (来自: ${data.sender || 'Unknown'})`,
                                 'success'
+                            );
+                        } else if (data.status === 'failed') {
+                            // 处理失败情况
+                            account.error = data.error;
+                            this.showNotification(
+                                `${account.email}: 授权失败 - ${data.error}`,
+                                'error'
                             );
                         } else {
                             // 显示处理完成通知（无验证码）
