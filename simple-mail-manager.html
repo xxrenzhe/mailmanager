@@ -905,10 +905,24 @@
 
             // 处理发现验证码事件
             handleVerificationCodeFound(data) {
-                console.log('[SSE] 收到验证码事件:', data);
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                console.log('[WebSocket] 收到验证码事件:', data);
+                let account = this.accounts.find(acc => acc.id === data.account_id);
+
+                // 如果通过ID找不到，尝试通过邮箱地址匹配
+                if (!account && data.email) {
+                    account = this.accounts.find(acc => acc.email === data.email);
+                    if (account) {
+                        console.log('[WebSocket] 通过邮箱地址匹配到账户:', account.email, 'ID不匹配 - 期望ID:', data.account_id, '实际ID:', account.id);
+                    }
+                }
+
                 if (account) {
-                    console.log('[SSE] 找到账户:', account.email, '当前验证码数量:', account.codes?.length || 0);
+                    console.log('[WebSocket] 找到账户:', account.email, '当前验证码数量:', account.codes?.length || 0);
+
+                    // 确保codes数组存在
+                    if (!account.codes) {
+                        account.codes = [];
+                    }
 
                     account.codes.unshift({
                         code: data.code,
@@ -927,12 +941,13 @@
                     this.updateStats();
 
                     // 标记新验证码，触发10秒蓝色背景提醒（包含渲染）
-                    this.markNewVerificationCode(data.account_id);
+                    this.markNewVerificationCode(account.id);
 
                     this.showNotification(`收到新验证码: ${data.code} (${data.sender})`, 'success');
-                    console.log('[SSE] 验证码已更新到账户，重新渲染完成');
+                    console.log('[WebSocket] 验证码已更新到账户，重新渲染完成');
                 } else {
-                    console.log('[SSE] 未找到账户，ID:', data.account_id);
+                    console.log('[WebSocket] 未找到账户，ID:', data.account_id, '邮箱:', data.email);
+                    console.log('[WebSocket] 当前账户列表:', this.accounts.map(acc => ({ id: acc.id, email: acc.email })));
                 }
             }
 
