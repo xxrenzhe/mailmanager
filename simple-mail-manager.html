@@ -873,6 +873,11 @@
                 const account = this.accounts.find(acc => acc.id === data.account_id);
                 if (account) {
                     account.is_monitoring = false;
+                    // 监控结束时清除只显示监控验证码的标记
+                    if (account.monitoring_codes_only) {
+                        account.monitoring_codes_only = false;
+                        console.log(`[监控结束] 账户 ${account.email} 清除监控标记，现在显示所有验证码`);
+                    }
                     this.saveAccounts();
                     this.updateStats();
                     this.render();
@@ -918,8 +923,10 @@
 
                     account.updated_at = new Date().toISOString();
                     this.saveAccounts();
-                    this.render();
                     this.updateStats();
+
+                    // 标记新验证码，触发10秒蓝色背景提醒（包含渲染）
+                    this.markNewVerificationCode(data.account_id);
 
                     this.showNotification(`收到新验证码: ${data.code} (${data.sender})`, 'success');
                     console.log('[SSE] 验证码已更新到账户，重新渲染完成');
@@ -1978,12 +1985,14 @@
 
                     switch (this.sortField) {
                         case 'sequence':
-                            aValue = this.accounts.findIndex(acc => acc.id === a.id) + 1;
-                            bValue = this.accounts.findIndex(acc => acc.id === b.id) + 1;
+                            aValue = a.sequence || a.import_seq || Infinity;
+                            bValue = b.sequence || b.import_seq || Infinity;
                             break;
                         case 'status':
-                            aValue = a.status;
-                            bValue = b.status;
+                            // 定义状态优先级：pending < authorized < reauth_needed < failed < error
+                            const statusOrder = { 'pending': 1, 'authorized': 2, 'reauth_needed': 3, 'failed': 4, 'error': 5 };
+                            aValue = statusOrder[a.status] || 99;
+                            bValue = statusOrder[b.status] || 99;
                             break;
                         case 'email':
                             aValue = a.email.toLowerCase();
@@ -1994,8 +2003,8 @@
                             bValue = b.codes[0]?.code || '';
                             break;
                         case 'received_time':
-                            aValue = a.codes[0]?.received_at || '';
-                            bValue = b.codes[0]?.received_at || '';
+                            aValue = a.codes[0]?.received_at ? new Date(a.codes[0].received_at).getTime() : 0;
+                            bValue = b.codes[0]?.received_at ? new Date(b.codes[0].received_at).getTime() : 0;
                             break;
                         case 'sender':
                             aValue = a.codes[0]?.sender || '';
@@ -2089,7 +2098,7 @@
                                        onchange="handleAccountSelection(this)">
                             </td>
                             <td class="px-3 py-3 whitespace-nowrap w-32 code-cell">
-                                <div class="flex flex-col">
+                                <div class="flex flex-col ${account.is_new_code ? 'bg-blue-50 border border-blue-300 rounded' : ''}">
                                     ${this.getVerificationCodeDisplay(account)}
                                 </div>
                             </td>
@@ -2309,8 +2318,15 @@
                     codes: account.codes,
                     codesLength: account.codes?.length || 0,
                     last_sync: account.last_sync,
-                    emailsLength: account.emails?.length || 0
+                    emailsLength: account.emails?.length || 0,
+                    monitoring_codes_only: account.monitoring_codes_only
                 });
+
+                // 如果账户设置了只显示监控期间的验证码，但还没有新验证码，显示"监控中..."
+                if (account.monitoring_codes_only && (!account.codes || account.codes.length === 0)) {
+                    console.log(`[验证码显示] 账户 ${account.email} 监控中，等待新验证码`);
+                    return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
+                }
 
                 if (!account.codes || account.codes.length === 0) {
                     console.log(`[验证码显示] 账户 ${account.email} 无验证码数据`);
@@ -2357,6 +2373,31 @@
                     // 不是纯数字验证码，显示为"无"
                     return '<span class="text-gray-400 text-base">无</span>';
                 }
+            }
+
+            // 标记新验证码（KISS方案：10秒蓝色背景提醒）
+            markNewVerificationCode(accountId) {
+                const account = this.accounts.find(acc => acc.id === accountId);
+                if (!account) return;
+
+                console.log(`[新验证码] 账户 ${account.email} 获取到新验证码，开始10秒提醒`);
+
+                // 设置新验证码标记
+                account.is_new_code = true;
+
+                // 立即保存并渲染
+                this.saveAccounts();
+                this.render();
+
+                // 10秒后自动清除标记
+                setTimeout(() => {
+                    if (account.is_new_code) {
+                        account.is_new_code = false;
+                        console.log(`[新验证码] 账户 ${account.email} 10秒提醒结束`);
+                        this.saveAccounts();
+                        this.render();
+                    }
+                }, 10000);
             }
 
             // 数据导出功能已下线 - 原功能代码已注释
@@ -2433,15 +2474,13 @@
                     // 监控将在后端持续运行60秒直到成功获取验证码
                     console.log(`[监控] 开始为账户 ${account.email} 启动1分钟监控（将持续运行直到成功）`);
 
-                    // 复制邮箱监控时，清空历史验证码，只显示监控期间获取的新验证码
-                    console.log(`[监控] 清空账户 ${account.email} 的历史验证码，等待监控获取新验证码`);
-                    account.codes = []; // 清空历史验证码
+                    // 复制邮箱监控时，标记只显示新获取的验证码
+                    console.log(`[监控] 账户 ${account.email} 开始监控，将只显示新获取的验证码`);
+                    account.monitoring_codes_only = true; // 标记只显示监控期间的验证码
                     account.last_sync = null; // 重置同步时间
 
-                    // 保存并刷新UI
+                    // 保存但不重新渲染UI，避免闪烁
                     this.saveAccounts();
-                    this.render();
-                    this.updateStats();
 
                     // 直接启动监控，后端会自动处理授权检查和邮件获取
                     await this.startMonitoringForAccount(account);
@@ -2797,7 +2836,16 @@
                                 successCount++;
                                 console.log(`[异步验证] 账户 ${account.email} 验证成功`);
                             } else {
-                                account.status = accountResult.status || 'failed';
+                                // 验证失败的账户保持 pending 状态，等待手动重试
+                                // 只有明确授权失败的账户才设置为 failed
+                                if (accountResult.status === 'authorization_failed' || accountResult.status === 'access_denied') {
+                                    account.status = 'failed';
+                                    console.log(`[异步验证] 账户 ${account.email} 授权失败，设置为失败状态`);
+                                } else {
+                                    // 网络错误、服务器错误等临时问题保持 pending 状态
+                                    account.status = 'pending';
+                                    console.log(`[异步验证] 账户 ${account.email} 临时验证失败，保持待授权状态: ${accountResult.status}`);
+                                }
                                 account.error = accountResult.message;
                                 failureCount++;
                                 console.log(`[异步验证] 账户 ${account.email} 验证失败: ${accountResult.status} - ${accountResult.message}`);
