@@ -2852,6 +2852,11 @@
                                 account.status = 'authorized';
                                 account.last_updated = new Date().toISOString();
 
+                                // 保存账户数据并更新界面
+                                this.saveAccounts();
+                                this.render();
+                                this.updateStats();
+
                                 this.showNotification(`账户 ${account.email} Token已自动刷新`, 'success');
 
                             } else {

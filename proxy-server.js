@@ -1574,11 +1574,17 @@ app.post('/api/accounts/check-tokens', async (req, res) => {
 
                             // 向所有活跃的WebSocket连接广播事件
                             if (websocketServer && websocketServer.clients) {
+                                console.log(`[WebSocket事件] 准备发送account_status_changed事件: ${account.email} -> authorized`);
+                                let sentCount = 0;
                                 websocketServer.clients.forEach(client => {
                                     if (client.readyState === 1) { // WebSocket.OPEN
                                         client.send(JSON.stringify(statusChangedEvent));
+                                        sentCount++;
                                     }
                                 });
+                                console.log(`[WebSocket事件] account_status_changed事件已发送给 ${sentCount} 个客户端`);
+                            } else {
+                                console.log(`[WebSocket事件] websocketServer或clients不存在，跳过WebSocket发送`);
                             }
 
                             // 同时通过SSE发送事件（兼容性）
