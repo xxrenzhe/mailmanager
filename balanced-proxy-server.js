@@ -259,6 +259,7 @@ function extractSenderEmail(email) {
 
         // 定义常见服务关键词映射
         const serviceKeywords = {
+            'comet': 'Comet',
             'perplexity': 'Perplexity',
             'openai': 'OpenAI',
             'chatgpt': 'ChatGPT',
