@@ -289,9 +289,25 @@ async function fetchEmails(account, accessToken, sinceTime = null) {
                         const result = JSON.parse(data);
                         resolve(result.value || []);
                     } else {
-                        reject(new Error(`邮件获取失败: ${res.statusCode}`));
+                        // 详细错误日志，特别是400错误
+                        console.error(`[邮件获取错误] HTTP ${res.statusCode} - URL: ${url}`);
+                        console.error(`[邮件获取错误] 响应头:`, res.headers);
+                        console.error(`[邮件获取错误] 响应体:`, data);
+
+                        // 400错误通常是权限或token问题
+                        if (res.statusCode === 400) {
+                            reject(new Error(`邮件获取失败: 400 - 权限不足或token无效`));
+                        } else if (res.statusCode === 401) {
+                            reject(new Error(`邮件获取失败: 401 - 未授权，token已过期`));
+                        } else if (res.statusCode === 403) {
+                            reject(new Error(`邮件获取失败: 403 - 禁止访问，权限不足`));
+                        } else {
+                            reject(new Error(`邮件获取失败: ${res.statusCode}`));
+                        }
                     }
                 } catch (error) {
+                    console.error(`[邮件解析错误] URL: ${url}`);
+                    console.error(`[邮件解析错误] 原始数据: ${data}`);
                     reject(new Error(`邮件响应解析失败: ${error.message}`));
                 }
             });
