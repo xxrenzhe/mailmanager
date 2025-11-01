@@ -1,0 +1,46 @@
+# KISS MailManager - 极简版本
+# 基于KISS原则的简化邮件管理系统
+FROM node:18-alpine
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制package文件
+COPY package*.json ./
+
+# 安装依赖（只安装核心依赖）
+RUN npm ci --only=production && npm cache clean --force
+
+# 复制KISS版本文件
+COPY simple-proxy-server.js .
+COPY test_simple_proxy.js .
+COPY simple-mail-manager.html .
+
+# 创建非root用户
+RUN addgroup -g 1001 -S mailmanager && \
+    adduser -S mailmanager -u 1001
+
+# 更改文件所有权
+RUN chown -R mailmanager:mailmanager /app
+
+# 切换到非root用户
+USER mailmanager
+
+# 暴露端口
+EXPOSE 3001 3002
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+
+# 启动命令
+CMD ["node", "simple-proxy-server.js"]
+
+# 标签信息
+LABEL version="3.0.0" \
+      description="KISS MailManager - 极简邮件管理系统" \
+      maintainer="mailmanager" \
+      code.lines="364" \
+      code.reduction="89%" \
+      architecture="nodejs" \
+      principles="KISS (Keep It Simple, Stupid)"

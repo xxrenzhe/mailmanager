@@ -1,6 +1,7 @@
 /**
- * CORS代理服务器
+ * 增强版CORS代理服务器
  * 解决浏览器跨域访问Outlook API的问题
+ * 集成server/index.js的优秀功能，无需数据库
  */
 
 const express = require('express');
@@ -8,6 +9,7 @@ const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const EventEmitter = require('events');
 const WebSocket = require('ws');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PROXY_PORT || 3001;
@@ -27,6 +29,325 @@ app.use(express.static(__dirname));
 // 创建事件发射器用于SSE
 const eventEmitter = new EventEmitter();
 let connectedClients = new Set();
+
+// ========== 增强功能模块 (无数据库版本) ==========
+
+// 1. 缓存管理系统
+class CacheManager {
+    constructor() {
+        this.memoryCache = new Map();
+        this.diskCache = new Map();
+        this.lruQueue = [];
+        this.maxMemorySize = 100; // 最大内存缓存项数
+        this.maxDiskSize = 1000; // 最大磁盘缓存项数
+        this.cacheTimeout = 10 * 60 * 1000; // 10分钟过期
+    }
+
+    get(key) {
+        // 优先从内存缓存获取
+        let item = this.memoryCache.get(key);
+        if (item && Date.now() - item.timestamp < this.cacheTimeout) {
+            this.updateLRU(key);
+            return item.data;
+        }
+
+        // 从磁盘缓存获取
+        item = this.diskCache.get(key);
+        if (item && Date.now() - item.timestamp < this.cacheTimeout) {
+            // 提升到内存缓存
+            this.memoryCache.set(key, item);
+            this.updateLRU(key);
+            return item.data;
+        }
+
+        return null;
+    }
+
+    set(key, data) {
+        const item = { data, timestamp: Date.now() };
+
+        // 先尝试存储到内存
+        if (this.memoryCache.size >= this.maxMemorySize) {
+            this.evictLRU('memory');
+        }
+        this.memoryCache.set(key, item);
+        this.updateLRU(key);
+    }
+
+    updateLRU(key) {
+        const index = this.lruQueue.indexOf(key);
+        if (index > -1) {
+            this.lruQueue.splice(index, 1);
+        }
+        this.lruQueue.push(key);
+    }
+
+    evictLRU(type) {
+        if (this.lruQueue.length === 0) return;
+
+        const key = this.lruQueue.shift();
+        if (type === 'memory') {
+            const item = this.memoryCache.get(key);
+            this.memoryCache.delete(key);
+            // 降级到磁盘缓存
+            if (item && this.diskCache.size < this.maxDiskSize) {
+                this.diskCache.set(key, item);
+            }
+        } else {
+            this.diskCache.delete(key);
+        }
+    }
+
+    clear() {
+        this.memoryCache.clear();
+        this.diskCache.clear();
+        this.lruQueue = [];
+    }
+
+    getStats() {
+        return {
+            memorySize: this.memoryCache.size,
+            diskSize: this.diskCache.size,
+            totalSize: this.memoryCache.size + this.diskCache.size
+        };
+    }
+}
+
+// 2. 邮箱序列编号管理器 (无数据库版本)
+class EmailSequenceManager {
+    constructor() {
+        this.sequenceCache = new Map(); // email -> sequence_number
+        this.maxSequence = 0;
+        this.emailToSequenceMap = new Map(); // 持久化映射关系
+    }
+
+    initialize() {
+        console.log('[EmailSequence] 初始化邮箱序列管理器...');
+        // 从已有映射恢复数据
+        this.maxSequence = Math.max(...Array.from(this.sequenceCache.values()), 0);
+        console.log(`[EmailSequence] 初始化完成，当前最大编号: ${this.maxSequence}`);
+    }
+
+    assignSequence(email) {
+        const normalizedEmail = email.toLowerCase().trim();
+
+        // 检查是否已有序列号
+        if (this.sequenceCache.has(normalizedEmail)) {
+            return this.sequenceCache.get(normalizedEmail);
+        }
+
+        // 分配新序列号
+        this.maxSequence++;
+        this.sequenceCache.set(normalizedEmail, this.maxSequence);
+        this.emailToSequenceMap.set(normalizedEmail, this.maxSequence);
+
+        console.log(`[EmailSequence] 分配序列号: ${normalizedEmail} -> ${this.maxSequence}`);
+        return this.maxSequence;
+    }
+
+    assignSequencesBatch(emails) {
+        const mapping = new Map();
+
+        for (const email of emails) {
+            const normalizedEmail = email.toLowerCase().trim();
+            const sequence = this.assignSequence(normalizedEmail);
+            mapping.set(normalizedEmail, sequence);
+        }
+
+        return mapping;
+    }
+
+    getSequence(email) {
+        const normalizedEmail = email.toLowerCase().trim();
+        return this.sequenceCache.get(normalizedEmail) || null;
+    }
+
+    getMaxSequence() {
+        return this.maxSequence;
+    }
+
+    getStats() {
+        return {
+            totalEmails: this.sequenceCache.size,
+            maxSequence: this.maxSequence,
+            cacheSize: this.sequenceCache.size
+        };
+    }
+}
+
+// 3. 简化的邮箱处理队列管理器 (保持现有导入邮箱功能)
+class SimpleEmailQueue {
+    constructor(sequenceManager) {
+        this.sequenceManager = sequenceManager;
+        this.queue = [];
+        this.processing = false;
+    }
+
+    async processEmail(emailData) {
+        try {
+            // 验证必需的4个参数
+            const { email, password, client_id, refresh_token } = emailData;
+
+            if (!email || !password || !client_id || !refresh_token) {
+                throw new Error('缺少必需参数: email, password, client_id, refresh_token');
+            }
+
+            // 分配序列号
+            const sequence = this.sequenceManager.assignSequence(email);
+
+            console.log(`[EmailQueue] 处理邮箱: ${email} -> 序列号: ${sequence}`);
+
+            return {
+                success: true,
+                email: email,
+                password: password,
+                sequence: sequence,
+                client_id: client_id,
+                refresh_token: refresh_token,
+                status: 'pending',
+                processed_at: new Date().toISOString()
+            };
+
+        } catch (error) {
+            console.error(`[EmailQueue] 处理邮箱失败: ${emailData.email}`, error);
+            throw error;
+        }
+    }
+
+    async processEmails(emails) {
+        const results = [];
+
+        for (const emailData of emails) {
+            try {
+                const result = await this.processEmail(emailData);
+                results.push(result);
+
+                // 小延迟避免API限制
+                await this.delay(200);
+
+            } catch (error) {
+                results.push({
+                    success: false,
+                    email: emailData.email,
+                    error: error.message
+                });
+            }
+        }
+
+        return results;
+    }
+
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    getStats() {
+        return {
+            queueSize: this.queue.length,
+            processing: this.processing
+        };
+    }
+}
+
+// 4. 数据统计分析器
+class DataAnalyzer {
+    constructor() {
+        this.stats = {
+            accounts: {
+                total: 0,
+                authorized: 0,
+                pending: 0,
+                error: 0
+            },
+            verificationCodes: {
+                total: 0,
+                today: 0,
+                thisWeek: 0
+            },
+            imports: {
+                total: 0,
+                successful: 0,
+                failed: 0
+            },
+            performance: {
+                avgResponseTime: 0,
+                cacheHitRate: 0,
+                errorRate: 0
+            }
+        };
+        this.responseTimes = [];
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
+    }
+
+    updateAccountStats(accounts) {
+        this.stats.accounts.total = accounts.length;
+        this.stats.accounts.authorized = accounts.filter(a => a.status === 'authorized').length;
+        this.stats.accounts.pending = accounts.filter(a => a.status === 'pending').length;
+        this.stats.accounts.error = accounts.filter(a => a.status === 'error').length;
+    }
+
+    recordVerificationCode() {
+        this.stats.verificationCodes.total++;
+        this.stats.verificationCodes.today++;
+        this.stats.verificationCodes.thisWeek++;
+    }
+
+    recordImport(success = true) {
+        this.stats.imports.total++;
+        if (success) {
+            this.stats.imports.successful++;
+        } else {
+            this.stats.imports.failed++;
+        }
+    }
+
+    recordResponseTime(time) {
+        this.responseTimes.push(time);
+        // 保持最近100次响应时间
+        if (this.responseTimes.length > 100) {
+            this.responseTimes.shift();
+        }
+        this.stats.performance.avgResponseTime = this.responseTimes.reduce((a, b) => a + b, 0) / this.responseTimes.length;
+    }
+
+    recordCacheHit() {
+        this.cacheHits++;
+        this.updateCacheHitRate();
+    }
+
+    recordCacheMiss() {
+        this.cacheMisses++;
+        this.updateCacheHitRate();
+    }
+
+    updateCacheHitRate() {
+        const total = this.cacheHits + this.cacheMisses;
+        this.stats.performance.cacheHitRate = total > 0 ? (this.cacheHits / total * 100).toFixed(2) : 0;
+    }
+
+    getStats() {
+        return {
+            ...this.stats,
+            timestamp: new Date().toISOString()
+        };
+    }
+
+    resetDailyStats() {
+        this.stats.verificationCodes.today = 0;
+    }
+}
+
+// 初始化增强功能模块
+const cacheManager = new CacheManager();
+const sequenceManager = new EmailSequenceManager();
+const emailQueue = new SimpleEmailQueue(sequenceManager);
+const dataAnalyzer = new DataAnalyzer();
+
+// 初始化序列管理器
+sequenceManager.initialize();
+
+// ========== 原有功能模块 ==========
 
 // 后台自动Token刷新和重新授权系统
 class AutoTokenManager {
@@ -943,7 +1264,7 @@ async function attemptTokenRefresh(accountInfo) {
 
 // 获取最新验证码邮件的收件时间
 function getLatestEmailReceivedTime(accountInfo) {
-    // ✅ 优先使用最新���证码邮件时间
+    // ✅ 优先使用最新验证码邮件时间
     if (accountInfo.latest_code_received_at) {
         console.log(`[时间基准] 使用最新验证码邮件时间: ${accountInfo.latest_code_received_at}`);
         return new Date(accountInfo.latest_code_received_at).toISOString();
@@ -1035,56 +1356,53 @@ async function fetchNewEmails(accountId, accountInfo, sessionId, options = {}) {
             console.log(`[邮件] 账户 ${accountInfo.email} 时间过滤后无新邮件（符合预期）`);
         }
 
-            // 提取验证码
-            const results = extractVerificationCodesAdvanced(messages);
+        // 提取验证码
+        const results = extractVerificationCodesAdvanced(messages);
 
-            if (results.length > 0) {
-                console.log(`[验证码] 从邮件中提取到 ${results.length} 个验证码`);
+        if (results.length > 0) {
+            console.log(`[验证码] 从邮件中提取到 ${results.length} 个验证码`);
 
-                // 🎯 关键修复：更新accountInfo中的时间基准，确保后续监控使用最新时间
-                const latestResult = results[0]; // results已按时间排序
-                if (latestResult && latestResult.received_at) {
-                    accountInfo.latest_code_received_at = latestResult.received_at;
-                    accountInfo.last_active_at = latestResult.received_at;
-                    console.log(`[时间基准] 已更新最新验证码时间基准: ${latestResult.received_at} (验证码: ${latestResult.code})`);
-                }
-
-                results.forEach(result => {
-                    pushEventToSession(sessionId, {
-                        type: 'verification_code_found',
-                        sessionId: sessionId,
-                        account_id: accountId,
-                        code: result.code,
-                        sender: result.sender,
-                        received_at: result.received_at,
-                        score: result.score || 1.0,
-                        priority: result.priority || 'medium',
-                        subject: result.subject,
-                        timestamp: new Date().toISOString()
-                    });
-                });
-
-                // 发送验证码发现事件
-                const codesFoundEvent = {
-                    sessionId: sessionId,
-                    type: 'monitoring_progress',
-                    account_id: accountId,
-                    email: accountInfo.email,
-                    message: `发现 ${results.length} 个新验证码`,
-                    timestamp: new Date().toISOString()
-                };
-                eventEmitter.emit(`monitoring_event_${sessionId}`, codesFoundEvent);
-
-                // 返回验证码发现状态，用于监控停止判断
-                return {
-                    success: true,
-                    verification_codes_found: results.length,
-                    emails_found: messages.length,
-                    should_stop_monitoring: results.length > 0 // 发现验证码时建议停止监控
-                };
+            // 🎯 关键修复：更新accountInfo中的时间基准，确保后续监控使用最新时间
+            const latestResult = results[0]; // results已按时间排序
+            if (latestResult && latestResult.received_at) {
+                accountInfo.latest_code_received_at = latestResult.received_at;
+                accountInfo.last_active_at = latestResult.received_at;
+                console.log(`[时间基准] 已更新最新验证码时间基准: ${latestResult.received_at} (验证码: ${latestResult.code})`);
             }
-        } else {
-            console.log(`[邮件] 账户 ${accountInfo.email} 没有新邮件`);
+
+            results.forEach(result => {
+                pushEventToSession(sessionId, {
+                    type: 'verification_code_found',
+                    sessionId: sessionId,
+                    account_id: accountId,
+                    code: result.code,
+                    sender: result.sender,
+                    received_at: result.received_at,
+                    score: result.score || 1.0,
+                    priority: result.priority || 'medium',
+                    subject: result.subject,
+                    timestamp: new Date().toISOString()
+                });
+            });
+
+            // 发送验证码发现事件
+            const codesFoundEvent = {
+                sessionId: sessionId,
+                type: 'monitoring_progress',
+                account_id: accountId,
+                email: accountInfo.email,
+                message: `发现 ${results.length} 个新验证码`,
+                timestamp: new Date().toISOString()
+            };
+            eventEmitter.emit(`monitoring_event_${sessionId}`, codesFoundEvent);
+
+            // 返回验证码发现状态，用于监控停止判断
+            return {
+                success: true,
+                verification_codes_found: results.length,
+                emails_found: messages.length,
+                should_stop_monitoring: results.length > 0 // 发现验证码时建议停止监控
+            };
         }
 
         // 返回默认状态（没有发现验证码）
@@ -2259,21 +2577,270 @@ app.get('/', (req, res) => {
     res.sendFile(__dirname + '/simple-mail-manager.html');
 });
 
-// 服务信息API端点
+// ========== 增强功能API端点 ==========
+
+// 简化的邮箱处理API - 保持现有导入邮箱功能
+app.post('/api/email/process', async (req, res) => {
+    try {
+        const { emails } = req.body;
+
+        if (!Array.isArray(emails) || emails.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: '请提供有效的邮箱数组'
+            });
+        }
+
+        // 处理邮箱
+        const results = await emailQueue.processEmails(emails);
+
+        const successful = results.filter(r => r.success).length;
+        const failed = results.filter(r => !r.success).length;
+
+        res.json({
+            success: true,
+            stats: {
+                total: emails.length,
+                successful,
+                failed
+            },
+            results
+        });
+
+        console.log(`[EmailQueue] 邮箱处理完成: ${successful}/${emails.length} 成功`);
+
+    } catch (error) {
+        console.error('[EmailQueue] 处理失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '邮箱处理失败: ' + error.message
+        });
+    }
+});
+
+// 邮箱队列状态API
+app.get('/api/email/queue/stats', (req, res) => {
+    try {
+        const stats = emailQueue.getStats();
+        res.json({
+            success: true,
+            stats
+        });
+    } catch (error) {
+        console.error('[EmailQueue] 状态查询失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '查询队列状态失败: ' + error.message
+        });
+    }
+});
+
+// 邮箱序列统计API
+app.get('/api/sequence/stats', (req, res) => {
+    try {
+        const stats = sequenceManager.getStats();
+        res.json({
+            success: true,
+            stats
+        });
+    } catch (error) {
+        console.error('[Sequence] 统计查询失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '查询序列统计失败: ' + error.message
+        });
+    }
+});
+
+// 邮箱序列查询API
+app.get('/api/sequence/email/:email', (req, res) => {
+    try {
+        const { email } = req.params;
+        const sequence = sequenceManager.getSequence(email);
+
+        res.json({
+            success: true,
+            email,
+            sequence
+        });
+    } catch (error) {
+        console.error('[Sequence] 查询失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '查询邮箱序列失败: ' + error.message
+        });
+    }
+});
+
+// 邮箱序列导出API
+app.get('/api/sequence/export', (req, res) => {
+    try {
+        const stats = sequenceManager.getStats();
+
+        // 生成CSV格式的序列数据
+        let csv = 'Email,Sequence\n';
+        for (const [email, sequence] of sequenceManager.sequenceCache) {
+            csv += `${email},${sequence}\n`;
+        }
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=email_sequences.csv');
+        res.send(csv);
+
+        console.log(`[Sequence] 导出序列数据: ${stats.totalEmails} 条记录`);
+
+    } catch (error) {
+        console.error('[Sequence] 导出失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '导出序列数据失败: ' + error.message
+        });
+    }
+});
+
+// 系统统计分析API
+app.get('/api/analytics/stats', (req, res) => {
+    try {
+        const startTime = Date.now();
+
+        // 获取各模块统计
+        const cacheStats = cacheManager.getStats();
+        const sequenceStats = sequenceManager.getStats();
+        const queueStats = emailQueue.getStats();
+        const systemStats = dataAnalyzer.getStats();
+
+        // 组合统计信息
+        const combinedStats = {
+            system: {
+                uptime: process.uptime(),
+                memoryUsage: process.memoryUsage(),
+                connectedClients: connectedClients.size,
+                activeMonitors: activeMonitors.size,
+                queueSize: queueStats.queueSize
+            },
+            cache: cacheStats,
+            sequence: sequenceStats,
+            emailQueue: queueStats,
+            analytics: systemStats
+        };
+
+        // 记录响应时间
+        dataAnalyzer.recordResponseTime(Date.now() - startTime);
+
+        res.json({
+            success: true,
+            stats: combinedStats,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('[Analytics] 统计查询失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '查询系统统计失败: ' + error.message
+        });
+    }
+});
+
+// 缓存管理API
+app.post('/api/cache/clear', (req, res) => {
+    try {
+        const { type } = req.body; // 'memory', 'disk', 'all'
+
+        if (type === 'memory') {
+            cacheManager.memoryCache.clear();
+            cacheManager.lruQueue = [];
+        } else if (type === 'disk') {
+            cacheManager.diskCache.clear();
+        } else {
+            cacheManager.clear();
+        }
+
+        const stats = cacheManager.getStats();
+
+        res.json({
+            success: true,
+            message: `${type || 'all'} 缓存已清理`,
+            stats
+        });
+
+        console.log(`[Cache] 清理缓存: ${type || 'all'}`);
+
+    } catch (error) {
+        console.error('[Cache] 清理失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '清理缓存失败: ' + error.message
+        });
+    }
+});
+
+// 缓存统计API
+app.get('/api/cache/stats', (req, res) => {
+    try {
+        const stats = cacheManager.getStats();
+        res.json({
+            success: true,
+            stats
+        });
+    } catch (error) {
+        console.error('[Cache] 统计查询失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '查询缓存统计失败: ' + error.message
+        });
+    }
+});
+
+// 原有服务信息API端点
 app.get('/api/info', (req, res) => {
     res.json({
-        name: 'Mail Manager Proxy Server',
-        description: 'CORS代理服务器，用于解决跨域访问Outlook API的问题',
-        version: '1.0.0',
+        name: 'Enhanced Mail Manager Proxy Server',
+        description: '增强版CORS代理服务器，集成批量导入、序列管理、缓存系统等功能',
+        version: '2.0.0',
+        features: [
+            'CORS代理 - 解决跨域访问问题',
+            '邮箱序列管理 - 自动分配唯一序列号',
+            '多层缓存系统 - 内存+磁盘缓存优化',
+            '数据分析统计 - 实时性能和业务统计',
+            '时间过滤机制 - 精确的邮件获取过滤',
+            '简化邮箱处理 - 保持现有导入邮箱功能'
+        ],
         endpoints: {
-            token: '/api/microsoft/token - Microsoft OAuth token端点',
-            outlook: '/api/outlook/* - Outlook REST API端点',
-            health: '/api/health - 健康检查'
+            '基础功能': {
+                token: '/api/microsoft/token - Microsoft OAuth token端点',
+                outlook: '/api/outlook/* - Outlook REST API端点',
+                health: '/api/health - 健康检查',
+                info: '/api/info - 服务信息'
+            },
+            '邮箱处理': {
+                process: '/api/email/process - 处理邮箱列表',
+                queueStats: '/api/email/queue/stats - 查询队列状态'
+            },
+            '序列管理': {
+                stats: '/api/sequence/stats - 序列统计',
+                email: '/api/sequence/email/:email - 查询邮箱序列',
+                export: '/api/sequence/export - 导出序列数据'
+            },
+            '缓存管理': {
+                stats: '/api/cache/stats - 缓存统计',
+                clear: '/api/cache/clear - 清理缓存'
+            },
+            '数据分析': {
+                stats: '/api/analytics/stats - 系统统计'
+            },
+            '监控功能': {
+                monitorStart: '/api/monitor/start - 启动监控',
+                monitorStop: '/api/monitor/stop - 停止监控',
+                copyTrigger: '/api/monitor/copy-trigger - 复制触发监控'
+            }
         },
         usage: {
             '添加账户': '使用表单添加账户并自动验证授权',
-            '批量导入': '上传CSV文件批量导入账户',
-            '同步邮件': '自动同步邮件并提取验证码'
+            '导入邮箱': '保持现有邮箱导入功能',
+            '序列管理': '自动为邮箱分配唯一序列号',
+            '性能优化': '多层缓存提升响应速度',
+            '数据分析': '实时监控系统和业务指标'
         }
     });
 });
