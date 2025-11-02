@@ -104,8 +104,8 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=raw,value=prod-latest
-          type=raw,value=dev-latest
+          type=raw,value=prod-latest,enable={{is_default_branch}}
+          type=raw,value=prod-{{commit}}
           type=semver,pattern={{version}},prefix=prod-
         flavor: |
           latest=false
