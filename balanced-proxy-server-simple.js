@@ -1353,7 +1353,79 @@ function extractSenderEmail(email) {
     }
 }
 
-// 验证码提取算法（优化版 - 6位纯数字 + HTML清理）
+// 邮政编码过滤函数 - 检查是否为邮政编码或地址中的数字
+function isZipCodeOrAddressNumber(text, code, codePosition) {
+    if (!text || !code || codePosition === undefined) return false;
+
+    // 获取代码前后的上下文（各30个字符）
+    const start = Math.max(0, codePosition - 30);
+    const end = Math.min(text.length, codePosition + code.length + 30);
+    const context = text.substring(start, end);
+
+    console.log(`[邮政编码检查] 代码: ${code}, 上下文: "${context}"`);
+
+    // 1. 检查美国州缩写 + 邮政编码格式
+    const statePattern = /\b(AK|AL|AR|AZ|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\s+\d{5,6}\b/gi;
+    if (statePattern.test(context)) {
+        console.log(`[邮政编码检查] 匹配到州缩写+邮政编码格式: ${code}`);
+        return true;
+    }
+
+    // 2. 检查完整地址格式 (Street, City, ST ZIP)
+    const addressPattern = /\b(St|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way),\s*[^,]+,\s*[A-Z]{2}\s+\d{5,6}\b/gi;
+    if (addressPattern.test(context)) {
+        console.log(`[邮政编码检查] 匹配到完整地址格式: ${code}`);
+        return true;
+    }
+
+    // 3. 检查标准邮政编码格式
+    const zipCodePattern = /\b\d{5}(-\d{4})?\b/g;
+    if (zipCodePattern.test(context)) {
+        // 进一步检查是否为6位数的邮政编码（一些国际格式）
+        if (code.length === 6) {
+            // 检查是否为常见的国际邮政编码前缀
+            const internationalZipPatterns = [
+                /\b(Canada|CA)\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d\b/i,  // 加拿大格式
+                /\b(UK|GB)\s+([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})\b/i,  // 英国格式
+                /\b(Germany|DE)\s+\d{5}\b/i,  // 德国格式
+                /\b(France|FR)\s+\d{5}\b/i,  // 法国格式
+                /\b(Japan|JP)\s+\d{3}-\d{4}\b/i,  // 日本格式
+                /\b(Australia|AU)\s+\d{4}\b/i  // 澳大利亚格式
+            ];
+
+            for (const pattern of internationalZipPatterns) {
+                if (pattern.test(context)) {
+                    console.log(`[邮政编码检查] 匹配到国际邮政编码格式: ${code}`);
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 4. 检查常见的城市名+邮政编码组合
+    const cityZipPatterns = [
+        /\b(San Francisco|New York|Los Angeles|Chicago|Houston|Phoenix|Philadelphia|San Antonio|San Diego|Dallas|San Jose|Austin|Jacksonville|Fort Worth|Columbus|Charlotte|San Francisco|Indianapolis|Seattle|Denver|Washington|Boston|El Paso|Nashville|Detroit|Oklahoma City|Portland|Las Vegas|Memphis|Louisville|Milwaukee|Baltimore|Albuquerque|Tucson|Fresno|Sacramento|Kansas City|Mesa|Atlanta|Omaha|Colorado Springs|Raleigh|Miami|Oakland|Tulsa|Minneapolis|Cleveland|Wichita|Arlington|Tampa|New Orleans|Honolulu|Anaheim|Santa Ana|Corpus Christi|Riverside|Lexington|Stockton|St. Paul|Cincinnati|Greensboro|Pittsburgh|Anchorage|Plano|Henderson|Lincoln|Orlando|Durham|Chula Vista|Newark|Chandler|St. Petersburg|Laredo|Norfolk|Madison|Lubbock|Scottsdale|Reno|Glendale|Gilbert|Winston Salem|North Las Vegas|Hialeah|Garland|Arlington|Akron|Buffalo|Irving| Fremont|Rochester|Boise|Spokane|Birmingham|Montgomery)\s+,[A-Z]{2}\s+\d{5,6}\b/gi
+    ];
+
+    for (const pattern of cityZipPatterns) {
+        if (pattern.test(context)) {
+            console.log(`[邮政编码检查] 匹配到城市名+邮政编码格式: ${code}`);
+            return true;
+        }
+    }
+
+    // 5. 检查是否为电话号码片段
+    const phonePattern = /\b(\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\(\d{3}\)\s*\d{3}[-.\s]?\d{4})\b/g;
+    if (phonePattern.test(context)) {
+        console.log(`[邮政编码检查] 匹配到电话号码格式: ${code}`);
+        return true;
+    }
+
+    console.log(`[邮政编码检查] 未匹配到邮政编码模式: ${code}`);
+    return false;
+}
+
+// 验证码提取算法（优化版 - 6位纯数字 + HTML清理 + 邮政编码过滤）
 function extractVerificationCode(subject, body) {
     if (!subject && !body) return null;
 
@@ -1373,7 +1445,7 @@ function extractVerificationCode(subject, body) {
         /(?:confirm|activate|verify|authenticate)[\s\S]{0,50}?(\d{6})/gi
     ];
 
-    // 中等可信度模式 - 6位纯数字
+    // 改进的中等可信度模式 - 6位纯数字 + 上下文检查
     const mediumPatterns = [
         /\b(\d{6})\b/g  // 6位数字
     ];
@@ -1387,21 +1459,40 @@ function extractVerificationCode(subject, body) {
             for (const match of matches) {
                 const code = match.match(/(\d{6})/);
                 if (code && code[1]) {
-                    console.log(`[验证码提取] 找到验证码: ${code[1]}`);
+                    console.log(`[验证码提取] 高可信度模式找到验证码: ${code[1]}`);
                     return code[1];
                 }
             }
         }
     }
 
-    // 再尝试中等可信度模式
-    console.log(`[验证码提取] 尝试中等可信度模式匹配...`);
+    // 再尝试中等可信度模式（带邮政编码过滤）
+    console.log(`[验证码提取] 尝试中等可信度模式匹配（带邮政编码过滤）...`);
     const mediumMatches = text.match(mediumPatterns[0]);
     console.log(`[验证码提取] 中等可信度模式匹配结果:`, mediumMatches);
+
     if (mediumMatches && mediumMatches.length > 0) {
-        // 返回第一个匹配的6位数字
-        console.log(`[验证码提取] 找到验证码: ${mediumMatches[0]}`);
-        return mediumMatches[0];
+        // 过滤掉邮政编码和地址数字
+        const filteredCodes = [];
+
+        for (const potentialCode of mediumMatches) {
+            // 找到该代码在文本中的位置
+            const codePosition = text.indexOf(potentialCode);
+
+            // 检查是否为邮政编码或地址数字
+            if (!isZipCodeOrAddressNumber(text, potentialCode, codePosition)) {
+                filteredCodes.push(potentialCode);
+                console.log(`[验证码提取] 保留有效验证码: ${potentialCode}`);
+            } else {
+                console.log(`[验证码提取] 过滤掉邮政编码/地址数字: ${potentialCode}`);
+            }
+        }
+
+        // 返回第一个有效的6位数字
+        if (filteredCodes.length > 0) {
+            console.log(`[验证码提取] 找到有效验证码: ${filteredCodes[0]}`);
+            return filteredCodes[0];
+        }
     }
 
     console.log(`[验证码提取] 未找到验证码`);
