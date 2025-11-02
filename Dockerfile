@@ -42,28 +42,29 @@ RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
 server {
     listen 80;
     server_name localhost;
+    root /app;
+
+    # 设置正确的MIME类型
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
 
     # 静态文件服务 - CSS和JS文件
     location /css/ {
-        alias /app/css/;
         expires 1y;
         add_header Cache-Control "public, immutable";
-        add_header Content-Type text/css;
     }
 
     location /js/ {
-        alias /app/js/;
         expires 1y;
         add_header Cache-Control "public, immutable";
-        add_header Content-Type application/javascript;
     }
 
-    # 主页面
+    # 主页面 - 如果不是API请求，返回index.html
     location / {
-        try_files /app/index.html @proxy;
+        try_files $uri $uri/ /index.html @proxy;
     }
 
-    # 代理到Node.js应用
+    # API和WebSocket代理到Node.js应用
     location @proxy {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
