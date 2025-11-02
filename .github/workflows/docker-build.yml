@@ -104,11 +104,8 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=raw,value=prod-latest,enable={{is_default_branch}}
-          type=raw,value=dev-latest,enable={{branch=='develop'}}
-          type=raw,value=simple-latest,enable={{is_default_branch}}
-          type=semver,pattern={{version}},prefix=prod-
-          type=semver,pattern={{version}},prefix=simple-
+          type=raw,value=latest
+          type=semver,pattern={{version}}
         flavor: |
           latest=false
 
