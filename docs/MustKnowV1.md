@@ -6,39 +6,12 @@
 5. 始终先验证当前实际使用的文件和配置，不要基于假设进行分析，也不要重复造轮子
 6. 先验证，再修复 - 假设是调试之敌，实际检查是解决之基
 7. 修复前必先全面检查依赖关系，增量修复优于整体重写，确保所有现有功能完整保留
+8. 代码分支和部署流程（Github Actions）
+   部署流程主要分两步，第一步：推送代码到Github，触发Github Actions，生成镜像；第二部：手动拉取镜像并部署到ClawCloud
+   - 代码推送到main分支，触发production环境镜像构建：标注 docker image tag 为 prod-latest 和 prod-[commitid]
+   - 当打了tag（如v3.0.0），触发production环境镜像构建：标注 docker image tag 为 prod-[tag] 和 prod-[commitid]
+   - 除了main分支外，不要创建额外的分支
 
-# 🚀 快速开始
-
-## Docker 部署（推荐）
-
-```bash
-# 拉取并运行
-docker run -d \
-  --name mailmanager \
-  -p 80:80 \
-  -p 3002:3002 \
-  --restart unless-stopped \
-  ghcr.io/xxrenzhe/mailmanager:prod-latest
-
-# 访问应用
-open http://localhost
-
-# 健康检查
-curl http://localhost/health
-```
-
-## 本地开发
-
-```bash
-# 克隆并运行
-git clone https://github.com/xxrenzhe/mailmanager.git
-cd mailmanager
-npm install
-node balanced-proxy-server.js
-
-# 访问应用
-open http://localhost:3001
-```
 
 # MailManager 邮件管理系统
 
