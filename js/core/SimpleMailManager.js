@@ -45,6 +45,9 @@ class SimpleMailManager {
         // 优先启动WebSocket实时更新
         this.connectWebSocket();
 
+        // 初始化连接状态显示
+        this.updateConnectionStatus('connecting');
+
         this.render();
         this.updateStats();
     }
@@ -88,6 +91,9 @@ class SimpleMailManager {
                 this.wsReconnectAttempts = 0;
                 Utils.showNotification('已连接到WebSocket实时更新服务', 'success');
 
+                // 更新连接状态显示
+                this.updateConnectionStatus('connected');
+
                 // 订阅所有事件类型
                 this.websocket.send(JSON.stringify({
                     type: 'subscribe',
@@ -117,17 +123,20 @@ class SimpleMailManager {
             this.websocket.onclose = () => {
                 console.log('[WebSocket] 连接已断开');
                 this.wsConnected = false;
+                this.updateConnectionStatus('disconnected');
                 this.attemptReconnect();
             };
 
             this.websocket.onerror = (error) => {
                 console.error('[WebSocket] 连接错误:', error);
                 Utils.showNotification('WebSocket连接失败', 'error');
+                this.updateConnectionStatus('failed');
             };
 
         } catch (error) {
             console.error('[WebSocket] 连接失败:', error);
             Utils.showNotification('无法连接WebSocket实时服务，尝试SSE备用方案', 'warning');
+            this.updateConnectionStatus('disconnected');
             this.connectSSE(); // 备用SSE连接
         }
     }
@@ -1070,6 +1079,7 @@ class SimpleMailManager {
                 console.log('[SSE] 实时更新连接成功');
                 this.sseConnected = true;
                 Utils.showNotification('已连接到实时更新服务', 'success');
+                this.updateConnectionStatus('connected');
             };
 
             this.eventSource.onmessage = (event) => {
@@ -1081,11 +1091,15 @@ class SimpleMailManager {
                 }
             };
 
-            this.eventSource.onerror = () => this.reconnectSSE();
+            this.eventSource.onerror = () => {
+                this.updateConnectionStatus('disconnected');
+                this.reconnectSSE();
+            };
 
         } catch (error) {
             console.error('[SSE] 连接失败:', error);
             Utils.showNotification('无法连接实时更新服务', 'error');
+            this.updateConnectionStatus('failed');
         }
     }
 
@@ -2049,6 +2063,88 @@ class SimpleMailManager {
         }
 
         console.log('[MailManager] 系统已销毁');
+    }
+
+    // 连接状态管理
+    updateConnectionStatus(status) {
+        const statusElement = document.getElementById('connectionStatus');
+        if (!statusElement) return;
+
+        let html = '';
+        let className = 'connection-status';
+
+        switch (status) {
+            case 'connected':
+                className += ' connected';
+                html = `
+                    <i class="fas fa-wifi"></i>
+                    <span>连接正常</span>
+                `;
+                break;
+            case 'connecting':
+                className += ' connecting';
+                html = `
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>连接中...</span>
+                `;
+                break;
+            case 'disconnected':
+                className += ' disconnected';
+                html = `
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>重新连接</span>
+                `;
+                statusElement.onclick = () => {
+                    this.reconnectAll();
+                };
+                break;
+            case 'failed':
+                className += ' failed';
+                html = `
+                    <i class="fas fa-times-circle"></i>
+                    <span>连接失败</span>
+                `;
+                statusElement.onclick = () => {
+                    this.reconnectAll();
+                };
+                break;
+            default:
+                className += ' connecting';
+                html = `
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>连接中...</span>
+                `;
+        }
+
+        statusElement.className = className;
+        statusElement.innerHTML = html;
+
+        console.log(`[连接状态] 状态已更新为: ${status}`);
+    }
+
+    // 重新连接所有服务
+    reconnectAll() {
+        console.log('[连接状态] 用户触发重新连接');
+        this.updateConnectionStatus('connecting');
+
+        // 关闭现有连接
+        if (this.websocket) {
+            this.websocket.close();
+        }
+        if (this.eventSource) {
+            this.eventSource.close();
+        }
+
+        // 重置连接状态
+        this.wsConnected = false;
+        this.sseConnected = false;
+        this.wsReconnectAttempts = 0;
+        this.sseReconnectAttempts = 0;
+
+        // 重新连接
+        setTimeout(() => {
+            this.connectWebSocket();
+        }, 1000);
     }
 }
 

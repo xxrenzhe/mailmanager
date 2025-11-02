@@ -377,21 +377,8 @@ function hideImportModal() {
 
 // ==================== 数据刷新函数 ====================
 
-// 刷新数据
-async function refreshData() {
-    if (!window.manager) {
-        Utils.showNotification('系统未初始化完成，请刷新页面重试', 'error');
-        return;
-    }
-
-    try {
-        await window.manager.refreshData();
-        Utils.showNotification('数据刷新成功', 'success');
-    } catch (error) {
-        console.error('刷新数据失败:', error);
-        Utils.showNotification('刷新数据失败: ' + error.message, 'error');
-    }
-}
+// 刷新数据功能已被智能连接状态显示取代
+// 如需重新连接，请点击连接状态按钮
 
 // ==================== 过滤函数 ====================
 
@@ -462,8 +449,8 @@ function deleteAccountConfirm(accountId) {
         <div class="bg-white rounded-lg p-6 max-w-md mx-4">
             <div class="text-center">
                 <i class="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
-                <h3 class="text-lg font-bold text-gray-900 mb-2">确认删除账户</h3>
-                <p class="text-gray-600 mb-6">您确定要删除账户 <strong>${account.email}</strong> 吗？</p>
+                <h3 class="text-lg font-bold text-gray-900 mb-2">确认删除邮箱</h3>
+                <p class="text-gray-600 mb-6">您确定要删除邮箱 <strong>${account.email}</strong> 吗？</p>
                 <p class="text-sm text-gray-500 mb-6">此操作不可撤销，所有相关数据将被永久删除。</p>
                 <div class="flex justify-center gap-3">
                     <button onclick="this.closest('.fixed').remove()"
@@ -495,11 +482,14 @@ async function confirmDeleteAccount(accountId) {
 
     try {
         await window.manager.deleteAccount(accountId);
-        // 关闭确认弹窗
-        const modal = document.querySelector('.fixed.inset-0');
-        if (modal) modal.remove();
+        // 关闭确认弹窗 - 使用更精确的选择器
+        const modals = document.querySelectorAll('.fixed.inset-0');
+        modals.forEach(modal => modal.remove());
     } catch (error) {
         Utils.showNotification('删除账户失败: ' + error.message, 'error');
+        // 即使删除失败也要关闭弹窗
+        const modals = document.querySelectorAll('.fixed.inset-0');
+        modals.forEach(modal => modal.remove());
     }
 }
 
