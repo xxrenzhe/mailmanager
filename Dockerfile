@@ -28,7 +28,7 @@ COPY --from=node-builder /app/node_modules ./node_modules
 
 # 复制应用文件
 COPY --chown=mailmanager:nodejs balanced-proxy-server-simple.js ./proxy-server.js
-COPY --chown=mailmanager:nodejs simple-mail-manager.html ./
+COPY --chown=mailmanager:nodejs index.html ./
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/data /app/etc && \
