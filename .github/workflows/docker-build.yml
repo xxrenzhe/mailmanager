@@ -133,12 +133,12 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Image Details" >> $GITHUB_STEP_SUMMARY
         echo "- **Repository**: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tags**: `prod-latest`, `simple-latest`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tags**: `prod-latest`, `prod-\${{ github.sha }}`" >> $GITHUB_STEP_SUMMARY
         echo "- **Digest**: `${{ steps.build.outputs.digest }}`" >> $GITHUB_STEP_SUMMARY
         echo "- **Platforms**: `linux/amd64, linux/arm64`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Version**: `0.1.0 (email_id refactored)`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: `v3.2.2 (URL转义修复版本)`" >> $GITHUB_STEP_SUMMARY
         echo "- **Architecture**: `Nginx Proxy + Node.js Backend`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Key Feature**: `email_id semantic improvement`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Key Feature**: `nginx API路由优化，静态文件MIME修复`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📋 Build Information" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit**: `${{ github.sha }}`" >> $GITHUB_STEP_SUMMARY
@@ -149,22 +149,22 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔗 Quick Deploy" >> $GITHUB_STEP_SUMMARY
         echo "```bash" >> $GITHUB_STEP_SUMMARY
-        echo "# Pull the MailManager image with Nginx proxy" >> $GITHUB_STEP_SUMMARY
-        echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:simple-latest" >> $GITHUB_STEP_SUMMARY
+        echo "# Pull the latest MailManager production image" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# Run the container (only port 80 exposed)" >> $GITHUB_STEP_SUMMARY
-        echo "docker run -d --name mailmanager -p 80:80 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:simple-latest" >> $GITHUB_STEP_SUMMARY
+        echo "# Run the container (ports 80 and 3002)" >> $GITHUB_STEP_SUMMARY
+        echo "docker run -d --name mailmanager -p 80:80 -p 3002:3002 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "# Access the MailManager" >> $GITHUB_STEP_SUMMARY
-        echo "open http://localhost/simple-mail-manager.html" >> $GITHUB_STEP_SUMMARY
+        echo "open http://localhost" >> $GITHUB_STEP_SUMMARY
         echo "```" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### ✨ Recent Improvements" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Semantic Clarity**: `account_id` → `email_id` refactoring" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Code Quality**: Improved variable naming throughout codebase" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Architecture**: Pure frontend with real-time WebSocket events" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Testing**: Enhanced CI/CD validation" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Documentation**: Updated deployment instructions" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **API路由修复**: 解决405错误，确保API请求正确代理" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **静态文件优化**: 修复CSS/JS MIME类型，完整复制资源文件" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **nginx配置**: 优化路由优先级，API请求优先处理" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **Docker标签**: 符合项目规范，prod-latest用于生产部署" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **CI/CD流程**: 两步部署，GitHub Actions构建 → ClawCloud手动部署" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
         echo "*Generated at: $(date)*" >> $GITHUB_STEP_SUMMARY
@@ -209,12 +209,12 @@ jobs:
         echo ""
         echo "📦 Image Details:"
         echo "  Repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        echo "  Tags: prod-latest, simple-latest"
+        echo "  Tags: prod-latest, prod-${{ github.sha }}"
         echo "  Digest: ${{ needs.build.outputs.digest }}"
-        echo "  Version: 0.1.0 (email_id refactored)"
+        echo "  Version: v3.2.2 (URL转义修复版本)"
         echo "  Architecture: Nginx Proxy + Node.js Backend"
-        echo "  Key Feature: email_id semantic improvement"
-        echo "  Pull Command: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:simple-latest"
+        echo "  Key Feature: nginx API路由优化，静态文件MIME修复"
+        echo "  Pull Command: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest"
         echo ""
         echo "📋 Build Information:"
         echo "  Commit: ${{ github.sha }}"
@@ -225,7 +225,7 @@ jobs:
         echo "  Platforms: linux/amd64,linux/arm64"
         echo ""
         echo "🔗 Quick Deploy:"
-        echo "  docker run -d --name mailmanager -p 80:80 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:simple-latest"
+        echo "  docker run -d --name mailmanager -p 80:80 -p 3002:3002 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest"
         echo ""
         echo "✅ Build completed successfully!"
 
