@@ -951,7 +951,7 @@ class SimpleMailManager {
                                 `<span class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-medium">
                                     等待重新授权
                                 </span>` :
-                                `<button onclick="copyEmailToClipboard('${account.id}')"
+                                `<button onclick="copyEmailOnly('${account.id}')"
                                         class="px-2 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded transition text-base">
                                     复制
                                 </button>`
@@ -1789,6 +1789,25 @@ class SimpleMailManager {
         } catch (error) {
             console.error('[验证码] 复制失败:', error);
             Utils.showNotification('复制失败，请手动复制验证码', 'error');
+        }
+    }
+
+    // 只复制邮箱地址到剪贴板（不启动监控）
+    async copyEmailOnly(accountId) {
+        const account = this.accounts.find(acc => acc.id === accountId);
+        if (!account) {
+            console.error(`[错误] 找不到账户ID: ${accountId}`);
+            Utils.showNotification('找不到对应账户', 'error');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(account.email);
+            Utils.showNotification(`邮箱已复制: ${account.email}`, 'success');
+            console.log(`[复制] 已复制账户邮箱: ${account.email}`);
+        } catch (error) {
+            console.error('[复制] 复制失败:', error);
+            Utils.showNotification('复制失败，请手动复制邮箱地址', 'error');
         }
     }
 
