@@ -29,6 +29,9 @@ COPY --from=node-builder /app/node_modules ./node_modules
 # 复制应用文件
 COPY --chown=mailmanager:nodejs balanced-proxy-server-simple.js ./proxy-server.js
 COPY --chown=mailmanager:nodejs index.html ./
+# 复制静态资源文件
+COPY --chown=mailmanager:nodejs css ./css
+COPY --chown=mailmanager:nodejs js ./js
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/data /app/etc && \
@@ -40,8 +43,28 @@ server {
     listen 80;
     server_name localhost;
 
-    # 主要应用代理
+    # 静态文件服务 - CSS和JS文件
+    location /css/ {
+        alias /app/css/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header Content-Type text/css;
+    }
+
+    location /js/ {
+        alias /app/js/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header Content-Type application/javascript;
+    }
+
+    # 主页面
     location / {
+        try_files /app/index.html @proxy;
+    }
+
+    # 代理到Node.js应用
+    location @proxy {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
