@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MailManager - 文件拆分测试</title>
+
+    <!-- 外部资源 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- 拆分的CSS文件 -->
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/components.css">
+</head>
+<body class="bg-gray-50 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6 text-center">
+            <i class="fas fa-check-circle text-green-500 mr-2"></i>
+            MailManager 文件拆分测试
+        </h1>
+
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">文件结构检查</h2>
+            <div id="fileCheck" class="space-y-2">
+                <div class="flex items-center">
+                    <i class="fas fa-spinner fa-spin mr-2"></i>
+                    正在检查文件结构...
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">JavaScript模块测试</h2>
+            <div id="jsTest" class="space-y-2">
+                <div class="flex items-center">
+                    <i class="fas fa-spinner fa-spin mr-2"></i>
+                    正在测试JavaScript模块...
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">CSS样式测试</h2>
+            <div class="space-y-4">
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <div class="stat-number">123</div>
+                        <div class="stat-label">测试数字</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">456</div>
+                        <div class="stat-label">样式检查</div>
+                    </div>
+                </div>
+
+                <div class="flex space-x-4">
+                    <button class="btn btn-primary">主要按钮</button>
+                    <button class="btn btn-success">成功按钮</button>
+                    <button class="btn btn-warning">警告按钮</button>
+                    <button class="btn btn-danger">危险按钮</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">功能测试</h2>
+            <div class="flex space-x-4">
+                <button onclick="testUtils()" class="btn btn-primary">测试工具函数</button>
+                <button onclick="testModal()" class="btn btn-secondary">测试模态框</button>
+                <button onclick="testManager()" class="btn btn-primary">测试管理器</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript 文件加载 -->
+    <script src="js/core/utils.js"></script>
+    <script src="js/core/SimpleMailManager.js"></script>
+    <script src="js/components/modal.js"></script>
+    <script src="js/global-functions.js"></script>
+
+    <script>
+        // 页面加载完成后运行测试
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(runTests, 1000);
+        });
+
+        function runTests() {
+            checkFiles();
+            testJavaScript();
+        }
+
+        function checkFiles() {
+            const files = [
+                'css/styles.css',
+                'css/components.css',
+                'js/core/utils.js',
+                'js/core/SimpleMailManager.js',
+                'js/components/modal.js',
+                'js/global-functions.js'
+            ];
+
+            const fileCheck = document.getElementById('fileCheck');
+            fileCheck.innerHTML = '';
+
+            files.forEach(file => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                    <span class="font-mono">${file}</span>
+                    <span class="ml-2 text-green-600">✓ 已加载</span>
+                `;
+                fileCheck.appendChild(div);
+            });
+        }
+
+        function testJavaScript() {
+            const jsTest = document.getElementById('jsTest');
+            jsTest.innerHTML = '';
+
+            // 测试工具函数
+            const utilsTests = [
+                { name: 'Utils.deepClone', test: () => typeof Utils.deepClone === 'function' },
+                { name: 'Utils.debounce', test: () => typeof Utils.debounce === 'function' },
+                { name: 'Utils.formatDate', test: () => typeof Utils.formatDate === 'function' },
+                { name: 'Utils.copyToClipboard', test: () => typeof Utils.copyToClipboard === 'function' },
+                { name: 'Utils.parseImportLine', test: () => typeof Utils.parseImportLine === 'function' }
+            ];
+
+            utilsTests.forEach(test => {
+                const div = document.createElement('div');
+                const passed = test.test();
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <i class="fas ${passed ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'} mr-2"></i>
+                    <span>${test.name}: ${passed ? '✓ 通过' : '✗ 失败'}</span>
+                `;
+                jsTest.appendChild(div);
+            });
+
+            // 测试全局函数
+            const globalTests = [
+                { name: 'showImportModal', test: () => typeof showImportModal === 'function' },
+                { name: 'hideImportModal', test: () => typeof hideImportModal === 'function' },
+                { name: 'updateProgress', test: () => typeof updateProgress === 'function' },
+                { name: 'copyEmailToClipboard', test: () => typeof copyEmailToClipboard === 'function' }
+            ];
+
+            globalTests.forEach(test => {
+                const div = document.createElement('div');
+                const passed = test.test();
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <i class="fas ${passed ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'} mr-2"></i>
+                    <span>${test.name}: ${passed ? '✓ 通过' : '✗ 失败'}</span>
+                `;
+                jsTest.appendChild(div);
+            });
+
+            // 测试类
+            const classTests = [
+                { name: 'EmailSequenceManager', test: () => typeof EmailSequenceManager === 'function' },
+                { name: 'SimpleMailManager', test: () => typeof SimpleMailManager === 'function' },
+                { name: 'ModalManager', test: () => typeof ModalManager === 'function' }
+            ];
+
+            classTests.forEach(test => {
+                const div = document.createElement('div');
+                const passed = test.test();
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <i class="fas ${passed ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'} mr-2"></i>
+                    <span>${test.name}: ${passed ? '✓ 通过' : '✗ 失败'}</span>
+                `;
+                jsTest.appendChild(div);
+            });
+        }
+
+        function testUtils() {
+            Utils.showNotification('工具函数测试成功！', 'success');
+
+            // 测试格式化日期
+            const formatted = Utils.formatDate(new Date());
+            console.log('格式化日期测试:', formatted);
+
+            // 测试深拷贝
+            const obj = { test: 'value' };
+            const cloned = Utils.deepClone(obj);
+            console.log('深拷贝测试:', cloned);
+        }
+
+        function testModal() {
+            modalManager.showConfirmDialog({
+                title: '模态框测试',
+                message: '这是一个测试确认对话框，所有功能都正常工作！',
+                onConfirm: () => {
+                    Utils.showNotification('模态框测试成功！', 'success');
+                }
+            });
+        }
+
+        function testManager() {
+            try {
+                const manager = new SimpleMailManager();
+                Utils.showNotification('SimpleMailManager 初始化成功！', 'success');
+                console.log('管理器测试:', manager);
+            } catch (error) {
+                Utils.showNotification('管理器测试失败: ' + error.message, 'error');
+                console.error('管理器测试错误:', error);
+            }
+        }
+    </script>
+</body>
+</html>
