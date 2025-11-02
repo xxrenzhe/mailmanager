@@ -48,24 +48,8 @@ server {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    # 静态文件服务 - CSS和JS文件
-    location /css/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    location /js/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # 主页面 - 如果不是API请求，返回index.html
-    location / {
-        try_files $uri $uri/ /index.html @proxy;
-    }
-
-    # API和WebSocket代理到Node.js应用
-    location @proxy {
+    # API路由 - 优先处理API请求
+    location /api/ {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -81,6 +65,23 @@ server {
         proxy_read_timeout 60s;
     }
 
+    # 静态文件服务 - CSS和JS文件
+    location /css/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location /js/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # 主页面 - 处理根路径和其他请求
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+  
     # WebSocket 代理配置
     location /ws {
         proxy_pass http://127.0.0.1:3002;
