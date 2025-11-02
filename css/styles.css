@@ -1,0 +1,124 @@
+/* MailManager - 主样式文件 */
+
+/* Tailwind CSS 基础样式 */
+@import url('https://cdn.tailwindcss.com');
+
+/* 状态颜色样式 */
+.status-pending {
+    color: #F59E0B;
+}
+
+.status-authorized {
+    color: #10B981;
+}
+
+.status-error {
+    color: #EF4444;
+}
+
+/* 动画效果 */
+.monitoring {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 刷新加载动画 */
+.refresh-loading {
+    animation: spin 1s linear infinite;
+}
+
+/* 验证码徽章样式 */
+.code-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 0.9em;
+}
+
+/* 文本验证码样式 */
+.text-code {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 1em;
+}
+
+/* 搜索过滤器样式 */
+.search-filter {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    width: 200px;
+}
+
+/* 验证码单元格样式 */
+.code-cell {
+    min-width: 120px;
+    white-space: nowrap;
+}
+
+/* 统计行样式 */
+.stats-row {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+    background: #f8fafc;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+/* 统计项样式 */
+.stat-item {
+    text-align: center;
+}
+
+/* 统计数字样式 */
+.stat-number {
+    font-size: 2em;
+    font-weight: bold;
+    color: #1f2937;
+}
+
+/* 统计标签样式 */
+.stat-label {
+    color: #6b7280;
+    font-size: 1.1em;
+    font-weight: 500;
+}
+
+/* 全局变量 */
+:root {
+    --primary-color: #3b82f6;
+    --success-color: #10b981;
+    --warning-color: #F59E0B;
+    --error-color: #EF4444;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+    --border-color: #d1d5db;
+    --background-light: #f8fafc;
+}
+
+/* 响应式设计基础 */
+@media (max-width: 768px) {
+    .stats-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .search-filter {
+        width: 100%;
+    }
+}
