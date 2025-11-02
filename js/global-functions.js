@@ -424,7 +424,7 @@ function changePageSize() {
     if (!window.manager) return;
 
     const pageSize = parseInt(document.getElementById('pageSize')?.value) || 50;
-    window.manager.setPageSize(pageSize);
+    window.manager.changePageSize(pageSize);
 }
 
 // ==================== 复制函数 ====================
@@ -539,4 +539,50 @@ function triggerMonitoringEnd(accountId) {
         });
         Utils.showNotification('测试：监控状态已清除', 'info');
     }
+}
+
+// ==================== 账户选择功能 ====================
+
+// 处理账户选择
+function handleAccountSelection(checkbox) {
+    if (!window.manager) {
+        console.error('Manager not initialized');
+        return;
+    }
+
+    const accountId = checkbox.dataset.accountId; // 使用字符串ID，不转换为数字
+    if (checkbox.checked) {
+        manager.selectedAccounts.add(accountId);
+    } else {
+        manager.selectedAccounts.delete(accountId);
+    }
+    console.log('已选中的账户:', Array.from(manager.selectedAccounts));
+}
+
+// 复制邮箱地址到剪贴板
+async function copyEmailOnly(accountId) {
+    if (!window.manager) {
+        Utils.showNotification('系统未初始化，请刷新页面重试', 'error');
+        return;
+    }
+
+    try {
+        await window.manager.copyEmailOnly(accountId);
+    } catch (error) {
+        console.error('复制邮箱地址失败:', error);
+        Utils.showNotification('复制失败，请手动复制邮箱地址', 'error');
+    }
+}
+
+// 跳转到第一页
+function goToFirstPage() {
+    if (!window.manager) return;
+    window.manager.goToPage(1);
+}
+
+// 跳转到最后一页
+function goToLastPage() {
+    if (!window.manager) return;
+    const totalPages = Math.ceil(window.manager.filteredAccounts.length / window.manager.pageSize);
+    window.manager.goToPage(totalPages);
 }

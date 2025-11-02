@@ -984,9 +984,9 @@ class SimpleMailManager {
 
         let paginationHTML = '';
 
-        // 上一页按钮
+        // 第一页按钮
         const prevDisabled = this.currentPage === 1 ? 'disabled' : '';
-        paginationHTML += `<button class="page-btn" onclick="changePage(-1)" ${prevDisabled}>上一页</button>`;
+        paginationHTML += `<button class="page-btn" onclick="goToFirstPage()" ${prevDisabled}>第一页</button>`;
 
         // 页码按钮
         if (totalPages <= 7) {
@@ -1026,9 +1026,9 @@ class SimpleMailManager {
             }
         }
 
-        // 下一页按钮
+        // 最后一页按钮
         const nextDisabled = this.currentPage === totalPages ? 'disabled' : '';
-        paginationHTML += `<button class="page-btn" onclick="changePage(1)" ${nextDisabled}>下一页</button>`;
+        paginationHTML += `<button class="page-btn" onclick="goToLastPage()" ${nextDisabled}>最后一页</button>`;
 
         pagination.innerHTML = paginationHTML;
 
