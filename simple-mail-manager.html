@@ -3089,12 +3089,28 @@
                 }
             }
 
-            // 高效异步导入验证系统 - 使用批量API优化
-            async startAsyncImportValidation() {
-                const pendingAccounts = this.accounts.filter(acc => acc.status === 'pending');
-                if (pendingAccounts.length === 0) return;
 
-                console.log(`[批量导入] 开始批量处理 ${pendingAccounts.length} 个待验证账户`);
+            // KISS原则：统一的批量导入函数 - 处理新导入和待验证账户
+            async batchImportEmails(emailDataList = null) {
+                // 确定输入数据源
+                let sourceAccounts;
+                let isNewImport = false;
+
+                if (emailDataList && emailDataList.length > 0) {
+                    // 新导入的邮箱数据
+                    sourceAccounts = emailDataList;
+                    isNewImport = true;
+                    console.log(`[批量导入] 开始新导入 ${sourceAccounts.length} 个邮箱`);
+                } else {
+                    // 处理已有的待验证账户
+                    sourceAccounts = this.accounts.filter(acc => acc.status === 'pending');
+                    console.log(`[批量导入] 开始验证 ${sourceAccounts.length} 个待验证账户`);
+                }
+
+                if (sourceAccounts.length === 0) {
+                    console.log(`[批量导入] 没有需要处理的邮箱`);
+                    return;
+                }
 
                 try {
                     // 确保sessionId存在
@@ -3109,17 +3125,58 @@
                         console.log(`[批量导入] 会话ID: ${this.sessionId}`);
                     }
 
-                    // 准备批量导入数据（使用后端已实现的batch-import接口格式）
-                    const emailsData = pendingAccounts.map(account => ({
-                        email: account.email,
-                        password: account.email, // 密码字段，后端需要但不实际使用
-                        client_id: account.client_id,
-                        refresh_token: account.refresh_token
-                    }));
+                    // KISS原则：谁存储数据，谁生成ID（前端存储，所以前端生成ID）
+                    if (isNewImport) {
+                        console.log(`[批量导入] 前端创建 ${sourceAccounts.length} 个账户记录（前端负责ID）`);
 
-                    console.log(`[批量导入] 调用后端batch-import接口，处理 ${emailsData.length} 个账户`);
+                        for (let i = 0; i < sourceAccounts.length; i++) {
+                            const data = sourceAccounts[i];
 
-                    // 调用后端的batch-import接口（已完整实现授权、取件、提取验证码）
+                            // 前端生成唯一ID
+                            const accountId = `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                            data.id = accountId;
+
+                            // 创建账户记录
+                            const account = {
+                                id: accountId,
+                                email: data.email,
+                                client_id: data.client_id,
+                                refresh_token: data.refresh_token,
+                                access_token: '',
+                                status: 'pending',
+                                created_at: new Date().toISOString(),
+                                last_checked: new Date().toISOString(),
+                                email_count: 0,
+                                verification_code: null,
+                                sequence: i + 1,
+                                monitoring_enabled: false,
+                                codes: [],
+                                emails: []
+                            };
+
+                            this.accounts.push(account);
+                        }
+
+                        // 立即保存账户数据
+                        this.saveAccounts();
+                        this.filteredAccounts = [...this.accounts];
+                        this.currentPage = 1;
+                        console.log(`[批量导入] 前端已创建并保存 ${sourceAccounts.length} 个账户（含ID）`);
+                    }
+
+                    // 准备发送给后端的数据（使用前端生成的ID）
+                    const emailsData = sourceAccounts.map(data => {
+                        return {
+                            id: data.id, // 前端生成的ID
+                            email: data.email,
+                            password: data.password,
+                            client_id: data.client_id,
+                            refresh_token: data.refresh_token
+                        };
+                    });
+
+                    // 发送批量导入请求到后端
+                    console.log(`[批量导入] 发送导入请求到后端，共 ${emailsData.length} 个邮箱`);
                     const response = await fetch('/api/accounts/batch-import', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -3134,161 +3191,13 @@
                     }
 
                     const result = await response.json();
-                    console.log(`[批量导入] 后端处理完成:`, result);
+                    console.log(`[批量导入] 后端已接收处理请求:`, result);
 
-                    // 更新前端账户状态
-                    let successCount = 0;
-                    let failureCount = 0;
-
-                    result.results.forEach(importResult => {
-                        const account = this.accounts.find(acc => acc.email === importResult.email);
-                        if (account) {
-                            if (importResult.success) {
-                                // 更新账户ID（后端生成的新ID）
-                                account.id = importResult.email_id;
-                                account.status = 'authorized';
-                                account.sequence = importResult.sequence;
-                                account.last_check = new Date().toISOString();
-                                successCount++;
-                                console.log(`[批量导入] 账户 ${account.email} 导入成功，序列号: ${importResult.sequence}`);
-                            } else {
-                                account.status = 'failed';
-                                account.error = importResult.error;
-                                failureCount++;
-                                console.log(`[批量导入] 账户 ${account.email} 导入失败: ${importResult.error}`);
-                            }
-                        }
-                    });
-
-                    // 更新UI和存储
-                    this.updateStats();
-                    this.saveAccounts();
-                    this.render();
-
-                    // 显示通知
-                    if (successCount > 0) {
-                        this.showNotification(
-                            `批量导入完成: ${successCount} 成功${failureCount > 0 ? `, ${failureCount} 失败` : ''}。验证码将在后台异步提取。`,
-                            successCount === result.results.length ? 'success' : 'warning'
-                        );
-                    }
-
-                    console.log(`[批量导入] 完成统计: ${successCount} 成功, ${failureCount} 失败`);
-                    console.log(`[批量导入] 后端正在异步处理取件和验证码提取，请等待SSE事件通知`);
-
-                } catch (error) {
-                    console.error(`[批量导入] 处理失败:`, error);
-                    this.showNotification(`批量导入失败: ${error.message}`, 'error');
-
-                    // 将所有pending账户标记为error
-                    pendingAccounts.forEach(account => {
-                        account.status = 'error';
-                        account.error = error.message;
-                    });
-                    this.saveAccounts();
-                    this.render();
-                }
-            }
-
-            // 新的批量导入函数 - 直接调用后端创建账户，避免重复创建
-            async startAsyncBatchImport(emailDataList) {
-                if (!emailDataList || emailDataList.length === 0) return;
-
-                console.log(`[批量导入] 开始前端快速导入 ${emailDataList.length} 个邮箱`);
-
-                try {
-                    // 确保sessionId存在
-                    if (!this.sessionId) {
-                        const savedSessionId = localStorage.getItem('mail_manager_session_id');
-                        if (savedSessionId) {
-                            this.sessionId = savedSessionId;
-                        } else {
-                            this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                            localStorage.setItem('mail_manager_session_id', this.sessionId);
-                        }
-                        console.log(`[批量导入] 会话ID: ${this.sessionId}`);
-                    }
-
-                    // 准备批量导入数据（使用后端batch-import接口格式）
-                    const emailsData = emailDataList.map(data => ({
-                        email: data.email,
-                        password: data.email, // 密码字段，后端需要但不实际使用
-                        client_id: data.client_id,
-                        refresh_token: data.refresh_token
-                    }));
-
-                    console.log(`[批量导入] 发送导入请求到后端，共 ${emailsData.length} 个邮箱`);
-
-                    // 快速显示导入进度
-                    for (let i = 0; i < emailsData.length; i++) {
-                        updateProgress(i + 1, emailsData.length, `正在导入 ${emailsData[i].email}...`);
-
-                        // 添加短暂延迟显示进度效果
-                        if (i % 10 === 0) {
-                            await new Promise(resolve => setTimeout(resolve, 50));
-                        }
-                    }
-
-                    // 发送批量导入请求到后端（不等待完成）
-                    fetch('/api/accounts/batch-import', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            sessionId: this.sessionId,
-                            emails: emailsData
-                        })
-                    }).then(response => {
-                        if (!response.ok) {
-                            console.error(`批量导入请求失败: ${response.status}`);
-                            return null;
-                        }
-                        return response.json();
-                    }).then(result => {
-                        if (result) {
-                            console.log(`[批量导入] 后端已接收处理请求:`, result);
-                        }
-                    }).catch(error => {
-                        console.error(`[批量导入] 后端处理请求出错:`, error);
-                    });
-
-                    // 前端快速创建账户记录（显示导入进度）
-                    console.log(`[批量导入] 前端快速创建 ${emailsData.length} 个账户记录`);
-
-                    let createdCount = 0;
-                    for (let i = 0; i < emailsData.length; i++) {
-                        const data = emailsData[i];
-
-                        // 创建基础账户记录（后端会自动更新状态）
-                        const account = {
-                            id: 'account_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                            email: data.email,
-                            client_id: data.client_id,
-                            refresh_token: data.refresh_token,
-                            access_token: '',
-                            status: 'pending', // 后端处理状态
-                            created_at: new Date().toISOString(),
-                            last_checked: new Date().toISOString(),
-                            email_count: 0,
-                            verification_code: null,
-                            sequence: i + 1,
-                            monitoring_enabled: false,
-                            codes: [],
-                            emails: []
-                        };
-
-                        this.accounts.push(account);
-                        createdCount++;
-                    }
-
-                    // 保存账户数据
-                    this.saveAccounts();
-
-                    // 更新过滤账户列表以包含新导入的账户
-                    this.filteredAccounts = [...this.accounts];
-                    this.currentPage = 1; // 回到第一页显示新导入的账户
+                    // 显示完成消息
+                    this.showNotification(`已提交 ${emailsData.length} 个邮箱到后端处理`, 'success');
 
                     // 显示导入完成，快速刷新页面
-                    updateProgress(emailsData.length, emailsData.length, `✅ 已导入 ${createdCount} 个邮箱，正在刷新页面...`);
+                    updateProgress(emailsData.length, emailsData.length, `✅ 已提交 ${emailsData.length} 个邮箱到后端处理，正在刷新页面...`);
 
                     // 短暂延迟后刷新页面显示结果
                     setTimeout(() => {
@@ -4008,7 +3917,7 @@
                     updateProgress(0, validEmailData.length, '正在批量处理邮箱...');
 
                     setTimeout(() => {
-                        manager.startAsyncBatchImport(validEmailData);
+                        manager.batchImportEmails(validEmailData);
                     }, 1000);
                 } else {
                     // 没有有效数据，显示完成状态
