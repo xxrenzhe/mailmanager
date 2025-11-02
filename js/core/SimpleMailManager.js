@@ -30,6 +30,10 @@ class SimpleMailManager {
 
         // 会话ID管理
         this.sessionId = null;
+        this.importCompletionShown = false; // 防止重复显示导入完成状态
+
+        // 新验证码视觉提示定时器
+        this.codeDisplayTimer = null;
 
         this.init();
     }
@@ -200,8 +204,11 @@ class SimpleMailManager {
                 break;
 
             case 'monitoring_started':
+                this.handleMonitoringStarted(data);
+                break;
+
             case 'monitoring_ended':
-                this.handleMonitoringEvent(data);
+                this.handleMonitoringEnded(data);
                 break;
 
             default:
@@ -209,92 +216,184 @@ class SimpleMailManager {
         }
     }
 
-    // 处理验证码发现事件
+    // 处理验证码发现��件
     handleVerificationCodeFound(data) {
-        console.log(`[验证码] 发现验证码: ${data.email} -> ${data.verification_code}`);
+        console.log(`[验证码] 发现验证码: ${data.email} -> ${data.code}`);
 
-        let account = this.accounts.find(acc => acc.email === data.email);
-        if (account) {
-            // 确保有codes数组
-            if (!account.codes) {
-                account.codes = [];
-            }
+        // KISS：前端已经创建了账户，直接查找即可
+        let account = this.accounts.find(acc => acc.id === data.email_id);
 
-            // 添加新验证码
-            account.codes.push({
-                code: data.verification_code,
-                received_at: data.received_at || new Date().toISOString(),
-                subject: data.subject || '',
-                from: data.from || ''
-            });
-
-            // 更新最新验证码时间
-            account.latest_code_time = data.received_at || new Date().toISOString();
-
-            // 保存并更新界面
-            this.saveAccounts();
-            this.render();
-            this.updateStats();
-
-            Utils.showNotification(`发现验证码: ${data.verification_code}`, 'success');
-        } else {
-            console.warn(`[验证码] 未找到对应账户: ${data.email}`);
+        if (!account) {
+            console.warn(`[验证码] 找不到账户 ${data.email} (ID: ${data.email_id})`);
+            console.warn(`[验证码] 这不应该发生，前端应该已经创建了账户`);
+            return;
         }
+
+        console.log(`[验证码] 处理账户: ${account.email} (ID: ${account.id})`);
+
+        // 现在account一定存在，继续处理验证码
+        // 确保有codes数组
+        if (!account.codes) {
+            account.codes = [];
+        }
+
+        // 添加新验证码 - 验证码时间统一为邮件收件时间
+        // 🔧 重要：received_at应该是邮件的收件时间，不是当前时间
+        const emailReceivedTime = data.received_at || new Date().toISOString();
+
+        // 设置监控标记时间戳（用于新验证码判断）
+        account.last_monitoring_code_id = new Date().toISOString();
+
+        account.codes.push({
+            code: data.code,
+            received_at: emailReceivedTime, // 邮件收件时间（固定）
+            subject: data.subject || '',
+            sender: data.sender || '',
+            from: data.sender || ''
+        });
+
+        // 更新最新验证码时间 - 🔧 使用后端发送的基准时间
+        account.last_code_time = data.last_code_time || emailReceivedTime;
+
+        // 只更新当前账户的界面显示，不重新渲染整个表格
+        this.updateSingleAccountDisplay(account.id);
+        this.updateStats();
+
+        // 启动新验证码视觉提示定时器（1分钟后刷新显示）
+        this.startNewCodeVisualTimer(account.id);
+
+        Utils.showNotification(`发现验证码: ${data.code}`, 'success');
     }
 
     // 处理账户状态变更事件
     handleAccountStatusChanged(data) {
-        console.log(`[状态变更] ${data.email}: ${data.old_status} -> ${data.new_status}`);
-
-        let account = this.accounts.find(acc => acc.email === data.email);
+        // 优先使用email_id匹配，如果没有则使用email匹配
+        let account = this.accounts.find(acc => acc.id === data.email_id) ||
+                    this.accounts.find(acc => acc.email === data.email);
         if (account) {
-            account.status = data.new_status;
+            // 🔧 兼容新旧事件格式：支持 status 和 new_status 字段
+            const newStatus = data.new_status || data.status;
+            const oldStatus = data.old_status || account.status;
+
+            console.log(`[状态变更] ${data.email}: ${oldStatus} -> ${newStatus}`);
+
+            account.status = newStatus;
             account.email_count = data.email_count || account.email_count;
             account.last_checked = new Date().toISOString();
 
-            // 保存并更新界面
-            this.saveAccounts();
-            this.render();
+            // 处理进度更新（批量导入时使用）
+            if (data.progress && data.progress.current !== undefined && data.progress.total) {
+                console.log(`[进度更新] ${data.email}: ${data.progress.current}/${data.progress.total}`);
+                if (window.updateProgress) {
+                    window.updateProgress(
+                        data.progress.current,
+                        data.progress.total,
+                        `正在处理第 ${data.progress.current} 个账户... (${data.email})`
+                    );
+                }
+            }
+
+            // 只更新单个账户显示，避免重新渲染整个表格
+            this.updateSingleAccountDisplay(data.email_id);
             this.updateStats();
 
-            Utils.showNotification(`${data.email} 状态变更为: ${Utils.getStatusText(data.new_status)}`, 'info');
+            Utils.showNotification(`${data.email} 状态变更为: ${Utils.getStatusText(newStatus)}`, 'info');
         }
     }
 
     // 处理手动取件完成事件
     handleManualFetchComplete(data) {
         console.log(`[手动取件] 完成: ${data.email}`);
+        console.log(`[手动取件] 收到验证码: ${data.verification_code}`);
+        console.log(`[手动取件] 事件数据:`, data);
         Utils.showNotification(`${data.email} 邮件收取完成`, 'success');
 
-        // 刷新账户数据
-        this.refreshData();
+        // 清除手动监控状态
+        if (data.email_id) {
+            const account = this.accounts.find(acc => acc.id === data.email_id);
+            if (account) {
+                account.is_monitoring = false;
+                delete account.monitoring_type;
+                console.log(`[手动取件] 清除账户 ${account.email} 的手动监控状态`);
+            }
+        }
+
+        // 标记手动获取的验证码为新验证码
+        if (data.email_id && data.verification_code) {
+            const account = this.accounts.find(acc => acc.id === data.email_id);
+            if (account && account.codes) {
+                // 🔧 优化验证码查找逻辑：优先查找最新时间戳的验证码
+                const latestCode = account.codes
+                    .filter(code => code.code === data.verification_code)
+                    .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())[0];
+
+                if (latestCode) {
+                    // 添加手动取件时间戳
+                    latestCode.manual_fetch_timestamp = new Date().toISOString();
+                    // 🔧 更新时间基准
+                    account.last_code_time = latestCode.received_at;
+                    console.log(`[手动取件] 标记新验证码: ${latestCode.code} for ${data.email}`);
+                    console.log(`[手动取件] 验证码信息 - 接收时间: ${latestCode.received_at}, 手动取件时间: ${latestCode.manual_fetch_timestamp}`);
+                    console.log(`[手动取件] 更新时间基准: ${account.last_code_time}`);
+
+                    // 启动新验证码显示定时器
+                    this.startNewCodeVisualTimer(account.id);
+
+                    // 立即更新显示
+                    this.updateSingleAccountDisplay(data.email_id);
+                } else {
+                    console.warn(`[手动取件] 找不到匹配的验证码: ${data.verification_code} for ${data.email}`);
+                    console.log(`[手动取件] 当前账户验证码列表:`, account.codes.map(c => ({ code: c.code, received_at: c.received_at })));
+                }
+            }
+        }
+
+        // 更新统计信息
+        this.updateStats();
     }
 
     // 处理手动取件错误事件
     handleManualFetchError(data) {
         console.error(`[手动取件] 错误: ${data.email}`, data.error);
         Utils.showNotification(`${data.email} 邮件收取失败: ${data.error}`, 'error');
-    }
 
-    // 处理监控事件
-    handleMonitoringEvent(data) {
-        console.log(`[监控] ${data.type}: ${data.email}`);
-
-        let account = this.accounts.find(acc => acc.email === data.email);
-        if (account) {
-            if (data.type === 'monitoring_started') {
-                account.monitoring = true;
-            } else {
-                account.monitoring = false;
+        // 清除手动监控状态
+        if (data.email_id) {
+            const account = this.accounts.find(acc => acc.id === data.email_id);
+            if (account) {
+                account.is_monitoring = false;
+                delete account.monitoring_type;
+                console.log(`[手动取件] 清除账户 ${account.email} 的手动监控状态（错误情况）`);
             }
-
-            this.saveAccounts();
-            this.render();
-            this.updateStats();
         }
+
+        // 刷新UI以反映监控状态清除
+        this.render();
+        this.updateStats();
     }
 
-    // 处理导入进度事件
+    // 🔧 统一监控系统 - 处理监控开始事件
+    handleMonitoringStarted(data) {
+        console.log('[监控] 监控开始:', data);
+
+        // 更新账户监控状态
+        if (data.email_id) {
+            const account = this.accounts.find(acc => acc.id === data.email_id);
+            if (account) {
+                console.log(`[监控] 设置账户 ${account.email} is_monitoring = true`);
+                account.is_monitoring = true;
+                this.debouncedSave();
+                this.updateStats();
+                this.render();
+            } else {
+                console.error(`[监控] handleMonitoringStarted找不到账户ID: ${data.email_id}`);
+            }
+        }
+
+        Utils.showNotification(data.message || '监控已开始', 'info');
+    }
+
+    // 统一处理导入进度事件（合并批量导入和单个导入进度）
     handleImportProgress(data) {
         if (data.message) {
             console.log(`[导入进度] ${data.message}`);
@@ -319,29 +418,75 @@ class SimpleMailManager {
                 account = this.accounts.find(acc => acc.email === data.email && acc.status === 'pending');
             }
 
+            // KISS：前端已经创建了账户，只需要更新状态
             if (account) {
                 const oldStatus = account.status;
                 account.status = data.status;
                 account.email_count = data.email_count || 0;
                 account.last_checked = new Date().toISOString();
 
-                this.saveAccounts();
-                this.render();
+                // 如果账户状态变为已授权且有验证码，标记为导入时获取的新验证码
+                // 🔧 支持多种已授权状态，确保批量导入的验证码显示为新验证码
+                if ((data.status === 'authorized' || data.status === 'active') && account.codes && account.codes.length > 0) {
+                    // 为所有验证码设置导入时的时间戳标记
+                    const importTimestamp = new Date().toISOString();
+                    // 🔧 注意：批量导入时不要设置last_monitoring_code_id，避免与监控逻辑混淆
+
+                    // 更新所有验证码的时间戳，使其符合新验证码的条件
+                    account.codes.forEach((code, index) => {
+                        if (!code.import_timestamp) {
+                            code.import_timestamp = importTimestamp;
+                            console.log(`[导入进度] 设置验证码${index}导入时间戳: ${code.code}, 时间: ${importTimestamp}`);
+                        }
+                    });
+
+                    // 🔧 更新时间基准为最新验证码的收件时间
+                    if (account.codes.length > 0) {
+                        const latestCode = account.codes[0]; // 假设已按时间排序
+                        account.last_code_time = latestCode.received_at;
+                        console.log(`[导入进度] 更新时间基准: ${account.last_code_time}`);
+                    }
+
+                    console.log(`[导入进度] 标记导入验证码为新的: ${account.email}, 验证码数量: ${account.codes.length}`);
+
+                    // 启动新验证码视觉提示定时器
+                    this.startNewCodeVisualTimer(account.id);
+                }
+
+                this.updateSingleAccountDisplay(data.email_id);
                 this.updateStats();
 
                 console.log(`[导入进度] 状态更新完成: ${data.email} (${oldStatus} -> ${data.status})`);
+            } else {
+                console.warn(`[导入进度] 找不到账户 ${data.email} (ID: ${data.email_id})`);
+                console.warn(`[导入进度] 这不应该发生，前端应该已经创建了账户`);
             }
         }
 
-        // 处理导入完成
-        if (data.stage === 'completed' && data.message) {
-            console.log(`[导入进度] 批量导入完成: ${data.message}`);
+        // 统一处理导入完成（避免重复显示）
+        if (data.stage === 'completed' || data.stage === 'batch_completed') {
+            console.log(`[导入进度] 批量导入完成: ${data.message || '所有账户处理完成'}`);
 
-            if (window.hideProgressModal) {
-                window.hideProgressModal();
+            // 添加防重复标志，避免多次调用完成显示
+            if (!this.importCompletionShown) {
+                this.importCompletionShown = true;
+
+                if (window.hideProgressModal) {
+                    window.hideProgressModal();
+                }
+
+                // 使用详细的导入完成反馈
+                this.showDetailedImportSummary();
+            } else {
+                console.log(`[导入进度] 完成状态已显示，跳过重复显示`);
             }
-            Utils.showNotification(data.message, 'success');
         }
+    }
+
+    // 兼容性方法：保留旧的批量导入处理方法，委托给统一处理器
+    handleBulkImportProgress(data) {
+        console.log(`[批量导入] 委托给统一导入进度处理器`);
+        this.handleImportProgress(data);
     }
 
     // 数据持久化方法
@@ -350,6 +495,25 @@ class SimpleMailManager {
             const stored = localStorage.getItem('mailmanager_accounts');
             if (stored) {
                 this.accounts = JSON.parse(stored);
+
+                // 迁移旧格式账户ID
+                let migratedCount = 0;
+                this.accounts = this.accounts.map(account => {
+                    if (account.id && !account.id.startsWith('account_')) {
+                        // 旧格式：生成新格式ID
+                        const oldId = account.id;
+                        account.id = `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                        console.log(`[数据] 迁移账户ID: ${account.email} ${oldId} -> ${account.id}`);
+                        migratedCount++;
+                    }
+                    return account;
+                });
+
+                if (migratedCount > 0) {
+                    await this.saveAccounts();
+                    console.log(`[数据] 迁移了 ${migratedCount} 个账户ID格式`);
+                }
+
                 this.filteredAccounts = [...this.accounts];
                 console.log(`[数据] 加载了 ${this.accounts.length} 个账户`);
             }
@@ -363,7 +527,6 @@ class SimpleMailManager {
     async saveAccounts() {
         try {
             localStorage.setItem('mailmanager_accounts', JSON.stringify(this.accounts));
-            console.log(`[数据] 保存了 ${this.accounts.length} 个账户`);
         } catch (error) {
             console.error('[数据] 保存账户数据失败:', error);
         }
@@ -372,8 +535,8 @@ class SimpleMailManager {
     // 账户操作方法
     async addAccount(accountData) {
         try {
-            // 生成唯一ID（使用simple-mail-manager.html的方式）
-            accountData.id = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+            // 生成唯一ID（匹配后端格式）
+            accountData.id = `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             accountData.created_at = new Date().toISOString();
             accountData.status = 'pending';
             accountData.email_count = 0;
@@ -440,6 +603,15 @@ class SimpleMailManager {
                 throw new Error('账户不存在');
             }
 
+            // 设置账户为手动监控状态
+            account.is_monitoring = true;
+            account.monitoring_type = 'manual'; // 标记为手动监控
+            console.log(`[手动取件] 设置账户 ${account.email} 为手动监控状态`);
+
+            // 立即更新UI显示监控状态
+            this.render();
+            this.updateStats();
+
             const requestData = {
                 email_id: accountId,
                 email: account.email,
@@ -462,6 +634,11 @@ class SimpleMailManager {
 
             const result = await response.json();
             if (!response.ok) {
+                // 如果请求失败，清除监控状态
+                account.is_monitoring = false;
+                delete account.monitoring_type;
+                this.render();
+                this.updateStats();
                 throw new Error(result.details || result.message || '自动取件失败');
             }
 
@@ -549,7 +726,7 @@ class SimpleMailManager {
         const authorizedAccounts = this.accounts.filter(acc => acc.status === 'authorized').length;
         const pendingAccounts = this.accounts.filter(acc => acc.status === 'pending').length;
         const failedAccounts = this.accounts.filter(acc => acc.status === 'error').length;
-        const monitoringAccounts = this.accounts.filter(acc => acc.monitoring).length;
+        const monitoringAccounts = this.accounts.filter(acc => acc.is_monitoring).length;
 
         // 安全地更新统计信息，添加空值检查
         const totalAccountsEl = document.getElementById('totalAccounts');
@@ -609,9 +786,12 @@ class SimpleMailManager {
             let bVal = b[field];
 
             // 处理特殊字段
-            if (field === 'latest_code_time') {
+            if (field === 'last_code_time') {
                 aVal = aVal ? new Date(aVal).getTime() : 0;
                 bVal = bVal ? new Date(bVal).getTime() : 0;
+            } else if (field === 'last_sender') {
+                aVal = aVal || '';
+                bVal = bVal || '';
             } else if (field === 'email_from') {
                 aVal = aVal || '';
                 bVal = bVal || '';
@@ -713,7 +893,7 @@ class SimpleMailManager {
             const statusText = statusConfig.text;
 
             html += `
-                <tr class="hover:bg-gray-50 transition-colors">
+                <tr class="hover:bg-gray-50 transition-colors" data-account-id="${account.id}">
                     <td class="px-3 py-3 whitespace-nowrap text-center w-16">
                         <span class="text-base font-medium text-gray-900 bg-gray-100 px-2 py-1 rounded">
                             ${account.sequence || account.import_seq || '-'}
@@ -1032,22 +1212,21 @@ class SimpleMailManager {
     
     // 验证码显示逻辑 - 只显示纯数字验证码（从simple-mail-manager.html复制）
     getVerificationCodeDisplay(account) {
-        console.log(`[验证码显示] 账户 ${account.email} 数据检查:`, {
-            codes: account.codes,
-            codesLength: account.codes?.length || 0,
-            last_sync: account.last_sync,
-            emailsLength: account.emails?.length || 0,
-            monitoring_codes_only: account.monitoring_codes_only
-        });
+        console.log(`[验证码显示] 账户 ${account.email} - is_monitoring: ${account.is_monitoring}, monitoring_codes_only: ${account.monitoring_codes_only}, codes数量: ${account.codes?.length || 0}`);
+
+        // 如果账户正在监控中，显示"监控中..."
+        if (account.is_monitoring) {
+            console.log(`[验证码显示] 账户 ${account.email} 显示"监控中..." - 原因: is_monitoring = true`);
+            return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
+        }
 
         // 如果账户设置了只显示监控期间的验证码，但还没有新验证码，显示"监控中..."
         if (account.monitoring_codes_only && (!account.codes || account.codes.length === 0)) {
-            console.log(`[验证码显示] 账户 ${account.email} 监控中，等待新验证码`);
+            console.log(`[验证码显示] 账户 ${account.email} 显示"监控中..." - 原因: monitoring_codes_only = true 且无验证码`);
             return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
         }
 
         if (!account.codes || account.codes.length === 0) {
-            console.log(`[验证码显示] 账户 ${account.email} 无验证码数据`);
             return '<span class="text-gray-400 text-base">无</span>';
         }
 
@@ -1072,24 +1251,22 @@ class SimpleMailManager {
         // 如果账户有last_sync时间戳，说明进行过邮件同步
         const hasBeenSynced = !!account.last_sync;
 
-        console.log(`[验证码显示] 账户 ${account.email} 同步状态:`, {
-            hasEmailData,
-            hasBeenSynced,
-            last_sync: account.last_sync
-        });
-
         // 简化验证码显示逻辑：只要有验证码数据就显示
         // 后端已经成功提取了验证码，应该立即显示
-        console.log(`[验证码显示] 账户 ${account.email} 将显示验证码，跳过同步检查`);
 
         // 检查是否为纯数字验证码
         const isNumericCode = /^\d+$/.test(latestCode.code);
 
         if (isNumericCode) {
+            // 检查是否为新验证码（1分钟内）
+            const isNewCode = this.isNewVerificationCode(account, latestCode);
+            const bgClass = isNewCode ? 'bg-blue-500 text-white' : 'bg-green-500 text-white';
+            const titleText = isNewCode ? '新验证码（1分钟内获取）- 点击复制' : '点击复制验证码';
+
             // 是纯数字验证码
             return `
                 <div class="flex items-center gap-2">
-                    <span class="text-code cursor-pointer" onclick="copyLatestCode('${account.id}')" title="点击复制验证码">
+                    <span class="text-code cursor-pointer px-2 py-1 rounded ${bgClass}" onclick="copyLatestCode('${account.id}')" title="${titleText}">
                         ${latestCode.code}
                         <i class="fas fa-copy ml-1 text-xs"></i>
                     </span>
@@ -1099,6 +1276,50 @@ class SimpleMailManager {
             // 不是纯数字验证码，显示为"无"
             return '<span class="text-gray-400 text-base">无</span>';
         }
+    }
+
+    // 🔧 新验证码判断工具 - 基于存储时间基准的判断逻辑
+    isNewVerificationCode(account, code) {
+        if (!code || !code.received_at) {
+            return false;
+        }
+
+        const currentTime = new Date().getTime();
+        const receivedTime = new Date(code.received_at).getTime();
+
+        // 获取账户之前存储的最新验证码时间基准
+        const baselineTime = account.last_code_time ? new Date(account.last_code_time).getTime() : 0;
+
+        // 判断逻辑：新获取的验证码收件时间必须晚于存储的基准时间
+        const isNewCode = receivedTime > baselineTime;
+        const timeDiff = Math.round((currentTime - receivedTime) / 1000);
+        const baselineDiff = baselineTime > 0 ? Math.round((receivedTime - baselineTime) / 1000) : 0;
+
+        // 详细调试信息
+        console.log(`[新验证码检查] ${account.email}:`);
+        console.log(`  新验证码: ${code.code} (${timeDiff}秒前)`);
+        console.log(`  基准时间: ${baselineTime > 0 ? new Date(baselineTime).toISOString() : '无'}`);
+        console.log(`  时间差: ${baselineDiff > 0 ? `比基准晚${baselineDiff}秒` : '无基准或更早'}`);
+        console.log(`  判断结果: ${isNewCode ? '新验证码' : '历史验证码'}`);
+
+        return isNewCode;
+    }
+
+    // 启动新验证码视觉提示定时器
+    startNewCodeVisualTimer(accountId) {
+        // 清除现有定时器
+        if (this.codeDisplayTimer) {
+            clearTimeout(this.codeDisplayTimer);
+        }
+
+        console.log(`[视觉提示] 启动新验证码视觉提示定时器: ${accountId}`);
+
+        // 1分钟后刷新显示，从蓝色背景恢复到绿色背景
+        this.codeDisplayTimer = setTimeout(() => {
+            console.log(`[视觉提示] 1分钟结束，刷新验证码显示: ${accountId}`);
+            this.updateSingleAccountDisplay(accountId);
+            this.codeDisplayTimer = null;
+        }, 60 * 1000); // 1分钟
     }
 
     // 获取状态图标（从simple-mail-manager.html复制）
@@ -1206,6 +1427,34 @@ class SimpleMailManager {
     // 处理监控事件
     handleMonitoringStarted(data) {
         console.log('[监控] 监控开始:', data);
+
+        // 🔧 调试：检查所有账户的当前状态
+        console.log(`[调试] handleMonitoringStarted执行前所有账户监控状态:`);
+        this.accounts.forEach(acc => {
+            console.log(`[调试] 账户 ${acc.email}: is_monitoring=${acc.is_monitoring}, monitoring_codes_only=${acc.monitoring_codes_only}`);
+        });
+
+        // 更新账户监控状态
+        if (data.email_id) {
+            const account = this.accounts.find(acc => acc.id === data.email_id);
+            if (account) {
+                console.log(`[监控] 设置账户 ${account.email} is_monitoring = true`);
+                account.is_monitoring = true;
+
+                console.log(`[调试] handleMonitoringStarted设置is_monitoring后:`);
+                this.accounts.forEach(acc => {
+                    console.log(`[调试] 账户 ${acc.email}: is_monitoring=${acc.is_monitoring}, monitoring_codes_only=${acc.monitoring_codes_only}`);
+                });
+
+                this.debouncedSave();
+                this.updateStats();
+                // 立即更新单个账户的UI显示
+                this.updateSingleAccountDisplay(data.email_id);
+            } else {
+                console.error(`[监控] handleMonitoringStarted找不到账户ID: ${data.email_id}`);
+            }
+        }
+
         Utils.showNotification(data.message || '监控已开始', 'info');
     }
 
@@ -1214,8 +1463,35 @@ class SimpleMailManager {
         Utils.showNotification(data.message || '监控进行中...', 'info');
     }
 
+    // 🔧 统一监控系统 - 处理监控结束事件
     handleMonitoringEnded(data) {
         console.log('[监控] 监控结束:', data);
+
+        // 更新账户监控状态
+        if (data.email_id) {
+            const account = this.accounts.find(acc => acc.id === data.email_id);
+            if (account) {
+                console.log(`[监控] 清除账户 ${account.email} 的所有监控状态`);
+
+                // 🔧 统一清除所有监控相关状态
+                account.is_monitoring = false;
+                account.monitoring_codes_only = false;
+
+                console.log(`[监控] 已清除 - is_monitoring: ${account.is_monitoring}, monitoring_codes_only: ${account.monitoring_codes_only}`);
+
+                // 保存状态
+                this.debouncedSave();
+
+                // 强制更新单个账户UI，避免全量渲染
+                this.updateSingleAccountDisplay(account.id);
+                this.updateStats();
+
+                console.log(`[监控] 账户 ${account.email} 监控状态已清除，验证码数量: ${account.codes?.length || 0}`);
+            } else {
+                console.error(`[监控] 找不到账户ID: ${data.email_id}`);
+            }
+        }
+
         Utils.showNotification(data.message || '监控已结束', 'info');
     }
 
@@ -1410,30 +1686,128 @@ class SimpleMailManager {
     // 开始监控单个账户（从simple-mail-manager.html复制）
     async startMonitoringForAccount(account) {
         try {
-            console.log(`[监控] 开始监控账户: ${account.email}`);
-
-            const response = await fetch('/api/monitoring/start', {
+            const response = await fetch('/api/monitor/copy-trigger', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                },
                 body: JSON.stringify({
+                    sessionId: this.sessionId,
                     email_id: account.id,
-                    email: account.email
+                    email: account.email,
+                    client_id: account.client_id,
+                    refresh_token: account.refresh_token,
+                    current_status: account.status,
+                    access_token: account.access_token,
+                    // 新增：传递历史邮件数据用于时间过滤
+                    codes: account.codes || [],
+                    emails: account.emails || [],
+                    latest_code_received_at: account.latest_code_received_at || null,
+                    last_active_at: account.last_active_at || null
                 })
             });
 
             if (response.ok) {
-                account.monitoring = true;
-                account.status = 'monitoring';
-                await this.saveAccounts();
-                this.render();
+                const result = await response.json();
+                Utils.showNotification('已启动1分钟监控，系统将自动处理授权并检查新邮件', 'success');
+                console.log('[监控] 已为账户', account.email, '启动监控，后端将自动检查授权和获取邮件');
 
-                Utils.showNotification(`开始监控账户: ${account.email}`, 'info');
+                // 更新账户监控状态
+                account.is_monitoring = true;
+                account.last_active_at = new Date().toISOString();
+                this.debouncedSave();
+                this.updateStats();
+                this.render();
             } else {
-                throw new Error('启动监控失败');
+                console.warn('[监控] 启动监控失败:', response.statusText);
+                Utils.showNotification('监控启动失败，请稍后重试', 'error');
             }
+        } catch (monitorError) {
+            console.warn('[监控] 启动监控失败:', monitorError);
+            Utils.showNotification('监控启动失败，请稍后重试', 'error');
+        }
+    }
+
+    // 🔧 统一监控系统 - 复制邮箱地址并自动启动监控
+    async copyEmailToClipboard(accountId) {
+        const account = this.accounts.find(acc => acc.id === accountId);
+        if (!account) {
+            console.error(`[错误] 找不到账户ID: ${accountId}`);
+            return;
+        }
+
+        // 🔧 调试：输出账户实际状态
+        console.log(`[调试] 账户 ${account.email} 当前状态: ${account.status} (显示为: ${Utils.getStatusConfig(account.status).text})`);
+
+        try {
+            await navigator.clipboard.writeText(account.email);
+            Utils.showNotification('邮箱已复制: ' + account.email, 'success');
+
+            // 🔧 统一监控状态设置
+            console.log(`[监控] 开始为账户 ${account.email} 启动监控`);
+
+            // 设置监控标志（不设置is_monitoring，等待WebSocket事件设置）
+            account.monitoring_codes_only = true;
+            account.last_sync = null;
+
+            // 保存状态并启动监控
+            this.debouncedSave();
+            await this.startMonitoringForAccount(account);
+
         } catch (error) {
-            console.error('[监控] 启动监控失败:', error);
-            Utils.showNotification('启动监控失败: ' + error.message, 'error');
+            console.warn('[监控] 启动监控失败:', error);
+            Utils.showNotification('启动监控失败，请稍后重试', 'error');
+        }
+    }
+
+    // 复制最新验证码到剪贴板
+    async copyLatestCode(accountId) {
+        const account = this.accounts.find(acc => acc.id === accountId);
+        if (!account) {
+            console.error(`[错误] 找不到账户ID: ${accountId}`);
+            Utils.showNotification('找不到对应账户', 'error');
+            return;
+        }
+
+        // 检查是否有验证码
+        if (!account.codes || account.codes.length === 0) {
+            Utils.showNotification('该账户暂无验证码', 'warning');
+            return;
+        }
+
+        // 获取最新的验证码
+        const latestCode = account.codes[0]; // 假设codes按时间倒序排列
+        if (!latestCode || !latestCode.code) {
+            Utils.showNotification('该账户暂无可用验证码', 'warning');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(latestCode.code);
+            Utils.showNotification(`验证码已复制: ${latestCode.code}`, 'success');
+            console.log(`[验证码] 已复制账户 ${account.email} 的最新验证码: ${latestCode.code}`);
+        } catch (error) {
+            console.error('[验证码] 复制失败:', error);
+            Utils.showNotification('复制失败，请手动复制验证码', 'error');
+        }
+    }
+
+    // 显示详细的导入完成摘要
+    showDetailedImportSummary() {
+        const totalCount = this.accounts.length;
+        const authorizedCount = this.accounts.filter(acc => acc.status === 'authorized').length;
+        const reauthCount = this.accounts.filter(acc => acc.status === 'reauth_needed').length;
+        const failedCount = this.accounts.filter(acc => acc.status === 'failed').length;
+        const totalCodes = this.accounts.reduce((sum, acc) => sum + (acc.codes?.length || 0), 0);
+
+        // 如果全局函数存在则使用，否则使用简单通知
+        if (typeof window.showDetailedImportComplete === 'function') {
+            window.showDetailedImportComplete(totalCount, totalCount, authorizedCount, reauthCount, failedCount);
+        } else {
+            // 回退到简单通知
+            const message = `导入完成: ${totalCount} 个账户，其中 ${authorizedCount} 个完全就绪`;
+            const messageType = failedCount > 0 ? 'warning' : (authorizedCount === totalCount ? 'success' : 'info');
+            Utils.showNotification(message, messageType);
         }
     }
 
@@ -1490,6 +1864,145 @@ class SimpleMailManager {
         }
     }
 
+    // 只更新单个账户的显示，避免重新渲染整个表格
+    updateSingleAccountDisplay(accountId) {
+        console.log(`[UI更新] 开始更新单个账户显示: ${accountId}`);
+        const row = document.querySelector(`[data-account-id="${accountId}"]`);
+        console.log(`[UI更��] 找到表格行: ${!!row}`);
+        if (row) {
+            const account = this.accounts.find(acc => acc.id === accountId);
+            console.log(`[UI更新] 找到账户数据: ${!!account}, 账户邮箱: ${account?.email}`);
+            if (account) {
+                // 更新验证码列 - 修复CSS类名匹配
+                const codeCell = row.querySelector('.code-cell');
+                console.log(`[UI更新] 找到验证码单元格: ${!!codeCell}`);
+                if (codeCell) {
+                    const displayContent = this.getVerificationCodeDisplay(account);
+                    console.log(`[UI更新] 验证码显示内容: ${displayContent.substring(0, 50)}...`);
+                    codeCell.innerHTML = `<div class="flex flex-col ${account.is_new_code ? 'bg-blue-50 border border-blue-300 rounded' : ''}">${displayContent}</div>`;
+                    console.log(`[UI更新] 验证码单元格已更新`);
+                }
+
+                // 更新验证码时间列 (第6列)
+                const timeCell = row.cells && row.cells[5]; // 第6列是验证码时间列，添加安全检查
+                if (timeCell) {
+                    timeCell.innerHTML = this.getActiveTimeDisplay(account);
+                }
+
+                // 更新发件人列 (第7列)
+                const senderCell = row.cells && row.cells[6]; // 第7列是发件人列，添加安全检查
+                if (senderCell) {
+                    senderCell.innerHTML = this.getEmailSenderDisplay(account);
+                }
+
+                // 延迟保存，避免频繁写入
+                this.debouncedSave();
+            }
+        }
+    }
+
+    // 防抖保存，避免频繁写入localStorage
+    debouncedSave() {
+        if (this.saveTimeout) {
+            clearTimeout(this.saveTimeout);
+        }
+        this.saveTimeout = setTimeout(() => {
+            this.saveAccounts();
+        }, 500); // 500ms延迟
+    }
+
+    // KISS批量导入方法
+    async batchImportEmails(emailDataList) {
+        console.log(`[批量导入] 开始处理 ${emailDataList.length} 个邮箱`);
+
+        // 重置导入完成标志，允许新的导入显示完成状态
+        this.importCompletionShown = false;
+
+        // 1. 前端创建账户记录（并发处理提高效率）
+        const newAccounts = await Promise.all(emailDataList.map(async (data, i) => {
+            // 生成唯一ID
+            const accountId = `account_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            data.id = accountId;
+
+            const account = {
+                id: accountId,
+                email: data.email,
+                client_id: data.client_id,
+                refresh_token: data.refresh_token,
+                access_token: '',
+                status: 'pending',
+                created_at: new Date().toISOString(),
+                last_checked: new Date().toISOString(),
+                email_count: 0,
+                verification_code: null,
+                sequence: i + 1,
+                monitoring_enabled: false,
+                codes: [],
+                emails: []
+            };
+
+            return account;
+        }));
+
+        // 批量添加到账户列表
+        this.accounts.push(...newAccounts);
+
+        // 2. 立即保存到localStorage并更新界面
+        this.saveAccounts();
+        this.filteredAccounts = [...this.accounts];
+        this.currentPage = 1;
+        this.render();
+        this.updateStats();
+
+        console.log(`[批量导入] 已创建并保存 ${newAccounts.length} 个账户到前端`);
+
+        // 3. 准备发送给后端的数据
+        const emailsData = emailDataList.map(data => ({
+            id: data.id, // 前端生成的ID
+            email: data.email,
+            password: data.password,
+            client_id: data.client_id,
+            refresh_token: data.refresh_token
+        }));
+
+        // 4. 发送到后端处理
+        try {
+            // 确保sessionId存在
+            if (!this.sessionId) {
+                const savedSessionId = localStorage.getItem('mail_manager_session_id');
+                if (savedSessionId) {
+                    this.sessionId = savedSessionId;
+                } else {
+                    this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('mail_manager_session_id', this.sessionId);
+                }
+                console.log(`[批量导��] 会话ID: ${this.sessionId}`);
+            }
+
+            const response = await fetch('/api/accounts/batch-import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sessionId: this.sessionId,
+                    emails: emailsData
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            console.log(`[批量导入] 后端响应:`, result);
+
+            return result;
+
+        } catch (error) {
+            console.error(`[批量导入] 请求失败:`, error);
+            throw error;
+        }
+    }
+
     // 销毁方法
     destroy() {
         // 关闭WebSocket连接
@@ -1508,6 +2021,12 @@ class SimpleMailManager {
         }
         if (this.sseReconnectTimer) {
             clearTimeout(this.sseReconnectTimer);
+        }
+
+        // 清除验证码视觉提示定时器
+        if (this.codeDisplayTimer) {
+            clearTimeout(this.codeDisplayTimer);
+            this.codeDisplayTimer = null;
         }
 
         console.log('[MailManager] 系统已销毁');

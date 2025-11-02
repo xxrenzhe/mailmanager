@@ -316,23 +316,38 @@ const Utils = {
         };
     },
 
+    // 🔧 新验证码判断工具 - 基于存储时间基准的判断逻辑
+    isNewVerificationCodeForScenario(account, code, scenario) {
+        if (!code || !code.received_at) {
+            return false;
+        }
+
+        const receivedTime = new Date(code.received_at).getTime();
+
+        // 获取账户之前存储的最新验证码时间基准
+        const baselineTime = account.last_code_time ? new Date(account.last_code_time).getTime() : 0;
+
+        // 判断逻辑：新获取的验证码收件时间必须晚于存储的基准时间
+        const isNewCode = receivedTime > baselineTime;
+
+        console.log(`[新验证码检查-${scenario}] ${account.email}: ${code.code} → ${isNewCode ? '新验证码' : '历史验证码'}`);
+
+        return isNewCode;
+    },
+
     // 解析导入行数据 - 从 simple-mail-manager.html 复制的工作版本
     parseImportLine(line) {
-        console.log(`[Parse Debug] 解析行:`, line);
         // 预处理：移除行首行尾空白
         line = line.trim();
         if (!line) {
-            console.warn(`[Parse] 空行，跳过`);
             return null;
         }
         // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
         let parts = line.split('----');
-        console.log(`[Parse Debug] 第一次分割结果:`, parts, `字段数: ${parts.length}`);
         if (parts.length !== 4) {
             // 如果不是4个字段，尝试智能重构
             const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
             const uuidMatch = line.match(uuidRegex);
-            console.log(`[Parse Debug] UUID匹配结果:`, uuidMatch);
             if (uuidMatch) {
                 const uuidIndex = line.indexOf(uuidMatch[0]);
                 const beforeUuid = line.substring(0, uuidIndex).trim();
@@ -345,8 +360,7 @@ const Utils = {
                         uuidMatch[0],
                         afterUuid.replace(/^-+/, '')
                     ];
-                    console.log(`[Parse Debug] 智能重构结果:`, parts);
-                }
+                                    }
             }
         }
         if (parts.length < 4) {
@@ -374,14 +388,7 @@ const Utils = {
             client_id: client_id.trim(),
             refresh_token: refresh_token_enc.trim()
         };
-        console.log(`[Parse Debug] 最终解析结果:`, {
-            email: result.email,
-            hasClientId: !!result.client_id,
-            clientIdLength: result.client_id.length,
-            hasRefreshToken: !!result.refresh_token,
-            refreshTokenLength: result.refresh_token.length
-        });
-        return result;
+                return result;
     },
 
     // 显示通知

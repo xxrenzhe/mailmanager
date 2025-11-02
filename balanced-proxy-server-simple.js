@@ -1,6 +1,7 @@
 /**
  * 简化版代理服务器 - 纯前端架构
  * 只提供API代理功能，不存储任何数据
+ * Version: 20251102-33 - 精确主体词提取算法
  */
 
 const express = require('express');
@@ -13,6 +14,125 @@ const querystring = require('querystring');
 const app = express();
 const PORT = process.env.PROXY_PORT || 3001;
 const WS_PORT = process.env.WS_PORT || 3002;
+
+// 🔧 新增：全局未捕获异常处理，防止进程退出
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[未捕获的Promise拒绝]', reason);
+    // 不要退出进程，记录错误并继续
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('[未捕获的异常]', error);
+    // 不要退出进程，记录错误并继续
+});
+
+// 🔧 新增：进程优雅退出处理
+process.on('SIGTERM', () => {
+    console.log('[进程] 收到SIGTERM信号，开始优雅退出...');
+    process.exit(0);
+});
+
+process.on('SIGINT', () => {
+    console.log('[进程] 收到SIGINT信号，开始优雅退出...');
+    process.exit(0);
+});
+
+// 🔧 新增：速率限制管理器
+class RateLimiter {
+    constructor() {
+        this.requestTimes = [];
+        this.maxRequestsPerSecond = 2; // Microsoft API 限制：每秒最多2个请求
+        this.maxRequestsPerMinute = 30; // 每分钟最多30个请求
+        this.minInterval = 500; // 请求间最小间隔 500ms
+    }
+
+    async waitForSlot() {
+        const now = Date.now();
+
+        // 清理1分钟前的请求记录
+        this.requestTimes = this.requestTimes.filter(time => now - time < 60000);
+
+        // 检查速率限制
+        if (this.requestTimes.length >= this.maxRequestsPerMinute) {
+            const oldestRequest = Math.min(...this.requestTimes);
+            const waitTime = 60000 - (now - oldestRequest) + 100; // 100ms buffer
+            console.log(`[速率限制] 达到每分钟限制，等待 ${waitTime}ms`);
+            await this.sleep(waitTime);
+            return this.waitForSlot(); // 递归重试
+        }
+
+        // 检查最小间隔
+        if (this.requestTimes.length > 0) {
+            const lastRequest = Math.max(...this.requestTimes);
+            const timeSinceLastRequest = now - lastRequest;
+            if (timeSinceLastRequest < this.minInterval) {
+                const waitTime = this.minInterval - timeSinceLastRequest;
+                console.log(`[速率限制] 请求间隔过短，等待 ${waitTime}ms`);
+                await this.sleep(waitTime);
+            }
+        }
+
+        this.requestTimes.push(now);
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
+// 全局速率限制器
+const globalRateLimiter = new RateLimiter();
+
+// 🔧 新增：重试机制配置
+const RETRY_CONFIG = {
+    maxRetries: 3,
+    baseDelay: 1000, // 1秒基础延迟
+    maxDelay: 10000, // 最大10秒延迟
+    backoffMultiplier: 2,
+    retryableErrors: ['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+    retryableStatusCodes: [429, 502, 503, 504]
+};
+
+// 🔧 新增：指数退避重试函数
+async function retryWithBackoff(operation, context = '') {
+    let lastError;
+
+    for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+
+            // 检查是否可重试
+            const isRetryableError = RETRY_CONFIG.retryableErrors.some(code =>
+                error.code && error.code.includes(code)
+            );
+            const isRetryableStatus = RETRY_CONFIG.retryableStatusCodes.includes(
+                parseInt(error.message?.match(/\d{3}/)?.[0])
+            );
+
+            if (!isRetryableError && !isRetryableStatus) {
+                console.log(`[重试] 不可重试错误 (${context}):`, error.message);
+                throw error;
+            }
+
+            if (attempt === RETRY_CONFIG.maxRetries) {
+                console.log(`[重试] 达到最大重试次数 (${context}):`, error.message);
+                throw error;
+            }
+
+            // 计算延迟时间（指数退避 + 随机抖动）
+            const baseDelay = RETRY_CONFIG.baseDelay * Math.pow(RETRY_CONFIG.backoffMultiplier, attempt - 1);
+            const jitter = Math.random() * 1000; // 0-1秒随机抖动
+            const delay = Math.min(baseDelay + jitter, RETRY_CONFIG.maxDelay);
+
+            console.log(`[重试] 第${attempt}次尝试失败 (${context})，${delay}ms后重试:`, error.message);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    throw lastError;
+}
 
 // 基础中间件
 app.use(cors());
@@ -121,9 +241,9 @@ function startMonitoring(sessionId, account, duration = 60000) {
 
                 console.log(`[Token刷新] Token刷新成功: ${account.email}`);
 
-                // 获取邮件（带重试机制）
+                // 获取邮件（带时间过滤和重试机制）
                 console.log(`[邮件获取] 开始获取邮件: ${account.email}`);
-                const emails = await fetchEmailsWithRetry(tokenResult.access_token);
+                const emails = await fetchEmailsWithTimeFilter(tokenResult.access_token, account.last_check_time);
 
                 if (emails && emails.length > 0) {
                     console.log(`[邮件] 获取到 ${emails.length} 封邮件`);
@@ -137,34 +257,48 @@ function startMonitoring(sessionId, account, duration = 60000) {
                     if (verificationCodes.length > 0) {
                         const latestCode = verificationCodes[0]; // 已经按时间排序
                         console.log(`[验证码] 发现验证码: ${latestCode.code} (发件人: ${latestCode.sender})`);
+                        console.log(`[验证码] 验证码时间: ${latestCode.received_time}`);
+                        console.log(`[验证码] 基准时间: ${account.last_check_time}`);
 
-                        // 更新账户信息
-                        account.verification_code = latestCode;
-                        account.last_checked = new Date().toISOString();
-                        account.email_count = emails.length;
-                        accountStore.set(account.id, account);
+                        // 检查验证码是否比基准时间更新（关键修复）
+                        const isCodeNewer = account.last_check_time ?
+                            new Date(latestCode.received_time) > new Date(account.last_check_time) : true;
 
-                        // 发送验证码发现事件
-                        emitEvent({
-                            type: 'verification_code_found',
-                            sessionId: sessionId,
-                            email_id: account.id,
-                            email: account.email,
-                            code: latestCode.code,
-                            sender: latestCode.sender,
-                            subject: latestCode.subject,
-                            received_at: latestCode.received_time,
-                            timestamp: new Date().toISOString()
-                        });
+                        if (isCodeNewer) {
+                            console.log(`[验证码] ✅ 发现新验证码，停止监控: ${account.email}`);
 
-                        // 发现验证码后停止监控
-                        console.log(`[监控] 发现验证码，停止监控: ${account.email}`);
-                        stopMonitoring(monitorId, '已获取验证码');
+                            // 更新账户信息
+                            account.verification_code = latestCode;
+                            account.last_checked = new Date().toISOString();
+                            account.email_count = emails.length;
+                            account.last_check_time = latestCode.received_time; // 更新基准时间
+                            accountStore.set(account.id, account);
+
+                            // 发送验证码发现事件 - 🔧 添加last_code_time字段用于前端判断
+                            emitEvent({
+                                type: 'verification_code_found',
+                                sessionId: sessionId,
+                                email_id: account.id,
+                                email: account.email,
+                                code: latestCode.code,
+                                sender: latestCode.sender,
+                                subject: latestCode.subject,
+                                received_at: latestCode.received_time,
+                                last_code_time: latestCode.received_time, // 🔧 新增：发送给前端的时间基准
+                                timestamp: new Date().toISOString()
+                            });
+
+                            // 发现新验证码后停止监控
+                            stopMonitoring(monitorId);
+                            return;
+                        } else {
+                            console.log(`[验证码] ⚠️ 验证码不是新的，继续监控: ${latestCode.code} (${latestCode.received_time} <= ${account.last_check_time})`);
+                        }
                     } else {
-                        console.log(`[验证码] 未找到验证码: ${account.email}`);
+                        console.log(`[验证码] 未找到验证码，继续监控`);
                     }
                 } else {
-                    console.log(`[邮件] 未获取到邮件: ${account.email}`);
+                    console.log(`[邮件] 未找到新邮件，继续监控`);
                 }
             } catch (error) {
                 console.error(`[监控检查] 错误: ${account.email}`, error.message);
@@ -396,9 +530,9 @@ async function refreshToken(refreshToken, clientId, clientSecret) {
     return new Promise((resolve, reject) => {
         const postData = querystring.stringify({
             client_id: clientId,
-            client_secret: clientSecret,
             refresh_token: refreshToken,
             grant_type: 'refresh_token'
+            // 注意：Microsoft public client不需要client_secret
         });
 
         const options = {
@@ -472,19 +606,31 @@ app.post('/api/accounts/batch-import', async (req, res) => {
             });
         }
 
-        const AUTH_BATCH_SIZE = 30; // 30个并发授权（扩大1倍处理能力）
+        const AUTH_BATCH_SIZE = 5; // 🔧 减少并发数量：从30降到5，避免API速率限制
         const results = [];
         let successCount = 0;
         let failureCount = 0;
 
-        // 分批高并发处理邮箱授权和取件
+        // 🔧 改进：分批处理邮箱授权和取件，增加批次间延迟
         for (let i = 0; i < emails.length; i += AUTH_BATCH_SIZE) {
             const batch = emails.slice(i, i + AUTH_BATCH_SIZE);
             console.log(`[批量导入] 处理批次 ${Math.floor(i / AUTH_BATCH_SIZE) + 1}/${Math.ceil(emails.length / AUTH_BATCH_SIZE)} (${batch.length} 个邮箱)`);
 
-            // 高并发处理当前批次的邮箱授权
-            const authPromises = batch.map(async (emailData) => {
+            // 🔧 新增：批次间延迟，避免API速率限制
+            if (i > 0) {
+                const batchDelay = Math.min(2000, Math.max(500, batch.length * 200)); // 500ms-2s动态延迟
+                console.log(`[批量导入] 批次间延迟 ${batchDelay}ms，避免API限制`);
+                await new Promise(resolve => setTimeout(resolve, batchDelay));
+            }
+
+            // 🔧 改进：使用Promise.allSettled处理并发，避免单个失败影响整批
+            const authPromises = batch.map(async (emailData, index) => {
                 try {
+                    // 🔧 新增：请求间延迟，避免并发冲突
+                    if (index > 0) {
+                        const individualDelay = 300 + Math.random() * 200; // 300-500ms随机延迟
+                        await new Promise(resolve => setTimeout(resolve, individualDelay));
+                    }
                     // 支持两种格式：字符串或对象
                     let accountData;
                     if (typeof emailData === 'string') {
@@ -499,12 +645,15 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         throw new Error('邮箱数据解析失败');
                     }
 
-                    const { email, client_id, refresh_token } = accountData;
+                    const { email, client_id, refresh_token, id: frontendId } = accountData;
 
-                    // 为accountData添加唯一ID
-                    accountData.id = `email_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    // KISS原则：使用前端提供的ID（前端存储数据，前端生成ID）
+                    if (!frontendId) {
+                        throw new Error('前端未提供账户ID');
+                    }
+                    accountData.id = frontendId;
 
-                    console.log(`[批量导入] 开始授权: ${email}`);
+                    console.log(`[批量导入] KISS模式：使用前端ID ${email} -> ${frontendId}`);
 
                     // 1. 验证授权凭证并获取access_token
                     const tokenResult = await refreshToken(refresh_token, client_id, '');
@@ -550,7 +699,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         last_checked: new Date().toISOString(),
                         email_count: emailsResult.length,
                         verification_code: latestCode,
-                        sequence: i + batch.indexOf(emailString) + 1,
+                        sequence: i + batch.indexOf(emailData) + 1,
                         monitoring_enabled: false,
                         emails: emailsResult // 包含邮件数据
                     };
@@ -614,14 +763,14 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     };
 
                 } catch (error) {
-                    console.error(`[批量导入] 处理失败 ${accountData.email || emailData}:`, error.message);
+                    console.error(`[批量导入] 处理失败 ${emailData?.email || emailData}:`, error.message);
                     failureCount++;
 
                     // 发送单个账户导入失败事件
                     emitEvent({
                         type: 'import_progress',
                         sessionId: sessionId,
-                        email: accountData.email || (typeof emailData === 'string' ? emailData : 'unknown'),
+                        email: emailData?.email || (typeof emailData === 'string' ? emailData : 'unknown'),
                         status: 'failed',
                         error: error.message,
                         progress: {
@@ -634,7 +783,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
 
                     return {
                         success: false,
-                        email: accountData.email || (typeof emailData === 'string' ? emailData : 'unknown'),
+                        email: emailData?.email || (typeof emailData === 'string' ? emailData : 'unknown'),
                         error: error.message,
                         status: 'failed'
                     };
@@ -747,15 +896,15 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         // 账户状态检查和处理
         let finalStatus = current_status;
 
-        if (current_status === 'reauth_required') {
-            console.log(`[监控触发] 账户 ${email} 状态为 reauth_required，将尝试重新授权`);
+        if (current_status === 'pending' || current_status === 'reauth_required') {
+            console.log(`[监控触发] 账户 ${email} 状态为 ${current_status}，将尝试重新授权`);
 
             // 尝试重新授权（刷新token）
             try {
                 const tokenResult = await refreshToken(refresh_token, client_id, '');
                 if (tokenResult && tokenResult.access_token) {
-                    finalStatus = 'active';
-                    console.log(`[监控触发] 账户 ${email} 重新授权成功，状态更新为 active`);
+                    finalStatus = 'authorized';
+                    console.log(`[监控触发] 账户 ${email} 重新授权成功，状态更新为 authorized`);
 
                     // 通知前端重新授权成功
                     emitEvent({
@@ -763,7 +912,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
                         sessionId: sessionId,
                         email_id: email_id,
                         email: email,
-                        status: 'active',
+                        status: 'authorized',
                         message: '账户重新授权成功'
                     });
                 } else {
@@ -859,6 +1008,43 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
 });
 
 // 增强的邮件获取重试机制
+// 获取邮件并按时间过滤（用于监控场景）
+async function fetchEmailsWithTimeFilter(accessToken, timeFilter = null) {
+    try {
+        const emails = await fetchEmailsFromMicrosoft(accessToken);
+
+        if (!timeFilter) {
+            // 如果没有时间基准，返回所有邮件
+            return emails;
+        }
+
+        console.log(`[邮件过滤] 基准时间: ${timeFilter}`);
+
+        // 过滤出比基准时间更新的邮件
+        const filteredEmails = emails.filter(email => {
+            const emailTime = new Date(email.ReceivedDateTime);
+            const filterTime = new Date(timeFilter);
+            const isAfter = emailTime > filterTime;
+
+            if (isAfter) {
+                console.log(`[邮件过滤] ✅ 新邮件: ${email.Subject} (${email.ReceivedDateTime})`);
+            } else {
+                console.log(`[邮件过滤] ❌ 旧邮件: ${email.Subject} (${email.ReceivedDateTime})`);
+            }
+
+            return isAfter;
+        });
+
+        console.log(`[邮件过滤] 过滤结果: ${filteredEmails.length}/${emails.length} 封新邮件`);
+        return filteredEmails;
+
+    } catch (error) {
+        console.error('[邮件过滤] 过滤失败:', error.message);
+        // 如果过滤失败，回退到普通获取
+        return fetchEmailsWithRetry(accessToken);
+    }
+}
+
 async function fetchEmailsWithRetry(accessToken, maxRetries = 5) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -960,66 +1146,209 @@ function stripHtmlTags(html) {
     return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-// 发件人提取函数 - 从主题中提取关键词
+// 🎯 精确主体词提取算法 - 只提取主语品牌名
 function extractSenderEmail(email) {
     if (!email || !email.Subject) return 'unknown';
 
     try {
-        const subject = email.Subject.toLowerCase();
+        const subject = email.Subject.trim();
+        console.log(`[主体词提取] 分析主题: "${subject}"`);
 
-        // 定义常见服务关键词映射
-        const serviceKeywords = {
-            'comet': 'Comet',
-            'perplexity': 'Perplexity',
-            'openai': 'OpenAI',
-            'chatgpt': 'ChatGPT',
-            'claude': 'Claude',
-            'anthropic': 'Anthropic',
+        // 🎯 定义知名品牌和服务名称（单个词）
+        const knownBrands = new Set([
+            'Google', 'Microsoft', 'Apple', 'Amazon', 'Meta', 'Facebook', 'Twitter', 'Instagram',
+            'LinkedIn', 'Netflix', 'Spotify', 'Discord', 'Slack', 'Telegram', 'WhatsApp', 'Zoom',
+            'Dropbox', 'Notion', 'Figma', 'GitHub', 'Adobe', 'Oracle', 'Salesforce', 'Shopify',
+            'Comet', 'Perplexity', 'OpenAI', 'ChatGPT', 'Claude', 'Anthropic', 'D', 'B',
+            'Dub', 'Partners', 'Commission', 'Verification', 'Payment', 'Notification', 'Alert'
+        ]);
+
+        // 🎯 模式1: "You just made a commission via [Service Name]!" - 保留完整服务名
+        const commissionViaPattern = /^You just made a commission via\s+([A-Za-z0-9\s&']+?)\s*!?\s*$/i;
+        let match = subject.match(commissionViaPattern);
+        if (match) {
+            let serviceName = match[1].trim();
+            serviceName = serviceName.replace(/\s+/g, ' ');
+            console.log(`[主体词提取] Commission via 模式: "${serviceName}"`);
+            return serviceName;
+        }
+
+        // 🎯 模式2: "[Brand] + [业务类型]" - 提取品牌部分
+        const brandBusinessPatterns = [
+            /\b(Google|Microsoft|Apple|Amazon|Meta|Comet|Perplexity|OpenAI|Anthropic|Dub)\s+(verification|code|notification|alert|payment|commission|welcome|confirm|activate)\b/gi,
+            /\b(Your\s+)?(Google|Microsoft|Apple|Amazon|Meta|Comet|Perplexity|OpenAI|Anthropic|Dub)\s+(verification|code|notification|alert|payment|commission)\b/gi
+        ];
+
+        for (const pattern of brandBusinessPatterns) {
+            const matches = [...subject.matchAll(pattern)];
+            if (matches.length > 0) {
+                let brandName = matches[0][2] || matches[0][1]; // 适配不同捕获组
+                brandName = brandName.charAt(0).toUpperCase() + brandName.slice(1).toLowerCase();
+                console.log(`[主体词提取] 品牌+业务模式: "${brandName}"`);
+                return brandName;
+            }
+        }
+
+        // 🎯 模式3: "Welcome to [Brand]" - 提取品牌名
+        const welcomeToPattern = /(?:Welcome\s+to|Join|Start\s+using)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi;
+        match = subject.match(welcomeToPattern);
+        if (match) {
+            let brandName = match[1].trim();
+            // 如果是多词组合，尝试找到主要品牌词
+            if (brandName.includes(' ')) {
+                const words = brandName.split(' ');
+                for (const word of words) {
+                    if (knownBrands.has(word) && word.length > 2) {
+                        console.log(`[主体词提取] Welcome to 模式（多词提取）: "${word}"`);
+                        return word;
+                    }
+                }
+                // 如果没有找到已知品牌，使用第一个词
+                brandName = words[0];
+            }
+            console.log(`[主体词提取] Welcome to 模式: "${brandName}"`);
+            return brandName;
+        }
+
+        // 🎯 模式4: via/from/through + [Brand] - 提取品牌名
+        const viaPattern = /\b(via|from|through)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/gi;
+        const viaMatches = [...subject.matchAll(viaPattern)];
+        if (viaMatches.length > 0) {
+            let brandName = viaMatches[0][2].trim();
+            // 如果是多词组合，只取第一个主要词
+            if (brandName.includes(' ')) {
+                const words = brandName.split(' ');
+                for (const word of words) {
+                    if (knownBrands.has(word) && word.length > 2) {
+                        console.log(`[主体词提取] Via 模式（多词提取）: "${word}"`);
+                        return word;
+                    }
+                }
+                brandName = words[0];
+            }
+            console.log(`[主体词提取] Via 模式: "${brandName}"`);
+            return brandName;
+        }
+
+        // 🎯 模式5: 查找所有大写词汇，选择最可能的品牌名
+        const capitalizedWords = [...subject.matchAll(/\b([A-Z][a-z]+)\b/g)];
+        if (capitalizedWords.length > 0) {
+            // 过滤掉常见词汇
+            const commonWords = new Set(['You', 'Your', 'This', 'That', 'With', 'From', 'Have', 'Has', 'Been', 'Made', 'Just', 'Now', 'Welcome', 'Please', 'Click', 'Here', 'Link', 'Button']);
+
+            // 按优先级选择：已知品牌 > 长度 > 位置
+            let candidates = capitalizedWords.map(m => m[1])
+                .filter(word => !commonWords.has(word) && word.length > 2)
+                .sort((a, b) => {
+                    // 已知品牌优先
+                    if (knownBrands.has(a) && !knownBrands.has(b)) return -1;
+                    if (!knownBrands.has(a) && knownBrands.has(b)) return 1;
+                    // 长度优先
+                    return b.length - a.length;
+                });
+
+            if (candidates.length > 0) {
+                const selected = candidates[0];
+                console.log(`[主体词提取] 大写词汇选择: "${selected}" (候选: [${candidates.slice(0, 3).join(', ')}])`);
+                return selected;
+            }
+        }
+
+        // 🎯 回退到发件人邮箱识别
+        if (email.From && email.From.EmailAddress && email.From.EmailAddress.Address) {
+            const realEmail = email.From.EmailAddress.Address;
+            const senderName = email.From.EmailAddress.Name || '';
+
+            console.log(`[主体词提取] 真实发件人信息: 邮箱="${realEmail}", 姓名="${senderName}"`);
+
+            // 优先使用发件人姓名（提取主要品牌词）
+            if (senderName && senderName !== 'Mail' && senderName !== 'noreply' && senderName !== 'no-reply') {
+                if (senderName.length > 2 && !/^\d+$/.test(senderName)) {
+                    // 提取发件人姓名中的主要词汇
+                    const nameWords = senderName.split(/\s+/);
+                    for (const word of nameWords) {
+                        const capitalizedWord = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+                        if (knownBrands.has(capitalizedWord) && capitalizedWord.length > 2) {
+                            console.log(`[主体词提取] 发件人姓名品牌词: "${capitalizedWord}"`);
+                            return capitalizedWord;
+                        }
+                    }
+                    // 如果没有找到品牌词，使用第一个有意义的词
+                    const firstWord = nameWords[0];
+                    if (firstWord && firstWord.length > 2) {
+                        const formattedName = firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+                        console.log(`[主体词提取] 发件人姓名首词: "${formattedName}"`);
+                        return formattedName;
+                    }
+                }
+            }
+
+            // 使用邮箱域名
+            const domain = realEmail.split('@')[1];
+            if (domain) {
+                const domainParts = domain.split('.');
+                let domainName = domainParts[0];
+
+                // 处理常见邮箱服务商
+                const commonEmailProviders = {
+                    'gmail': 'Gmail',
+                    'outlook': 'Outlook',
+                    'hotmail': 'Hotmail',
+                    'yahoo': 'Yahoo',
+                    'qq': 'QQ Mail',
+                    '163': '163 Mail',
+                    '126': '126 Mail',
+                    'icloud': 'iCloud',
+                    'protonmail': 'ProtonMail',
+                    'zoho': 'Zoho Mail'
+                };
+
+                if (commonEmailProviders[domainName]) {
+                    console.log(`[主体词提取] 邮箱服务商: ${commonEmailProviders[domainName]}`);
+                    return commonEmailProviders[domainName];
+                }
+
+                // 对于非通用域名，提取有意义的名称
+                if (domainName.length > 2 && !/^\d+$/.test(domainName)) {
+                    const formattedDomain = domainName.charAt(0).toUpperCase() + domainName.slice(1);
+                    console.log(`[主体词提取] 邮箱域名: "${formattedDomain}"`);
+                    return formattedDomain;
+                }
+            }
+        }
+
+        // 🎯 最后回退：查找已知品牌关键词
+        const subjectLower = subject.toLowerCase();
+        const brandKeywords = {
             'google': 'Google',
             'microsoft': 'Microsoft',
-            'github': 'GitHub',
             'apple': 'Apple',
             'amazon': 'Amazon',
             'meta': 'Meta',
             'facebook': 'Facebook',
-            'twitter': 'Twitter',
-            'linkedin': 'LinkedIn',
-            'netflix': 'Netflix',
-            'spotify': 'Spotify',
-            'discord': 'Discord',
-            'slack': 'Slack',
-            'telegram': 'Telegram',
-            'whatsapp': 'WhatsApp',
-            'zoom': 'Zoom',
-            'dropbox': 'Dropbox',
-            'notion': 'Notion',
-            'figma': 'Figma'
+            'comet': 'Comet',
+            'perplexity': 'Perplexity',
+            'openai': 'OpenAI',
+            'anthropic': 'Anthropic',
+            'dub': 'Dub',
+            'verification': 'Verification',
+            'commission': 'Commission',
+            'payment': 'Payment',
+            'notification': 'Notification'
         };
 
-        // 在主题中查找关键词
-        for (const [keyword, serviceName] of Object.entries(serviceKeywords)) {
-            if (subject.includes(keyword)) {
-                console.log(`[发件人识别] 从主题提取服务: ${serviceName} (关键词: ${keyword})`);
-                return serviceName;
+        for (const [keyword, brand] of Object.entries(brandKeywords)) {
+            if (subjectLower.includes(keyword)) {
+                console.log(`[主体词提取] 关键词匹配: "${brand}"`);
+                return brand;
             }
         }
 
-        // 如果没找到关键词，尝试使用真实发件人邮箱域名
-        if (email.From && email.From.EmailAddress && email.From.EmailAddress.Address) {
-            const realEmail = email.From.EmailAddress.Address;
-            const domain = realEmail.split('@')[1];
-            if (domain) {
-                const domainName = domain.split('.')[0];
-                console.log(`[发件人识别] 使用邮箱域名: ${domainName} (完整邮箱: ${realEmail})`);
-                return domainName.charAt(0).toUpperCase() + domainName.slice(1);
-            }
-        }
-
-        // 最后备用：使用unknown
-        console.log(`[发件人识别] 未识别发件人，主题: ${email.Subject}`);
+        // 默认返回
+        console.log(`[主体词提取] 未能识别主体词，返回默认 "unknown"`);
         return 'unknown';
     } catch (error) {
-        console.error('[错误] 提取发件人失败:', error);
+        console.error('[主体词提取] 提取失败:', error);
         return 'unknown';
     }
 }
@@ -1163,7 +1492,7 @@ function extractVerificationCodes(emails) {
             codes.push({
                 code: code,
                 sender: senderName,
-                received_time: receivedTime,
+                received_at: receivedTime, // 🔧 统一字段名为received_at
                 subject: subject
             });
         }
