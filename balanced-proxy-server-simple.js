@@ -18,7 +18,14 @@ const WS_PORT = process.env.WS_PORT || 3002;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// 静态文件服务 - 优先服务新的拆分结构
 app.use(express.static(__dirname));
+
+// 默认路由 - 指向新的index.html
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/index.html');
+});
 
 // WebSocket服务器（仅用于前端事件通知）
 const wss = new WebSocket.Server({ port: WS_PORT });
@@ -103,17 +110,29 @@ function startMonitoring(sessionId, account, duration = 60000) {
             }
 
             try {
+                console.log(`[Token刷新] 开始刷新Token: ${account.email}`);
+
                 // 获取access token
                 const tokenResult = await refreshToken(account.refresh_token, account.client_id, '');
 
-                // 获取邮件
-                const emails = await fetchEmailsFromMicrosoft(tokenResult.access_token);
+                if (!tokenResult || !tokenResult.access_token) {
+                    throw new Error('Token刷新失败��未获取到有效的access_token');
+                }
+
+                console.log(`[Token刷新] Token刷新成功: ${account.email}`);
+
+                // 获取邮件（带重试机制）
+                console.log(`[邮件获取] 开始获取邮件: ${account.email}`);
+                const emails = await fetchEmailsWithRetry(tokenResult.access_token);
 
                 if (emails && emails.length > 0) {
                     console.log(`[邮件] 获取到 ${emails.length} 封邮件`);
 
                     // 提取验证码
+                    console.log(`[验证码提取] 开始提取验证码: ${account.email}`);
                     const verificationCodes = extractVerificationCodes(emails);
+
+                    console.log(`[验证码提取] 提取结果: ${verificationCodes.length} 个验证码`);
 
                     if (verificationCodes.length > 0) {
                         const latestCode = verificationCodes[0]; // 已经按时间排序
@@ -129,7 +148,7 @@ function startMonitoring(sessionId, account, duration = 60000) {
                         emitEvent({
                             type: 'verification_code_found',
                             sessionId: sessionId,
-                            account_id: account.id,
+                            email_id: account.id,
                             email: account.email,
                             code: latestCode.code,
                             sender: latestCode.sender,
@@ -141,10 +160,25 @@ function startMonitoring(sessionId, account, duration = 60000) {
                         // 发现验证码后停止监控
                         console.log(`[监控] 发现验证码，停止监控: ${account.email}`);
                         stopMonitoring(monitorId, '已获取验证码');
+                    } else {
+                        console.log(`[验证码] 未找到验证码: ${account.email}`);
                     }
+                } else {
+                    console.log(`[邮件] 未获取到邮件: ${account.email}`);
                 }
             } catch (error) {
                 console.error(`[监控检查] 错误: ${account.email}`, error.message);
+                console.error(`[监控检查] 错误详情: ${account.email}`, error.stack);
+
+                // 发送监控错误事件
+                emitEvent({
+                    type: 'monitoring_error',
+                    sessionId: sessionId,
+                    email_id: account.id,
+                    email: account.email,
+                    error: error.message,
+                    timestamp: new Date().toISOString()
+                });
             }
         }, 5000) // 每5秒检查一次
     };
@@ -164,7 +198,7 @@ function stopMonitoring(monitorId, reason = '监控结束') {
         emitEvent({
             type: 'monitoring_ended',
             sessionId: monitorTask.sessionId,
-            account_id: monitorTask.account.id,
+            email_id: monitorTask.account.id,
             email: monitorTask.account.email,
             reason: reason,
             timestamp: new Date().toISOString()
@@ -224,6 +258,48 @@ app.get('/oauth/callback', async (req, res) => {
         </body>
         </html>
     `);
+});
+
+// 认证回调API
+app.post('/api/auth/callback', async (req, res) => {
+    try {
+        const { code, state, client_id, client_secret, redirect_uri } = req.body;
+
+        if (!code) {
+            return res.status(400).json({
+                error: '缺少授权码'
+            });
+        }
+
+        console.log(`[认证回调] 处理OAuth回调，state: ${state}`);
+
+        // 交换授权码获取访问令牌
+        const tokenData = await exchangeCodeForToken(code, client_id, client_secret, redirect_uri);
+
+        if (!tokenData || !tokenData.access_token) {
+            throw new Error('授权码交换失败：未获取到有效访问令牌');
+        }
+
+        console.log(`[认证回调] 授权码交换成功`);
+
+        res.json({
+            success: true,
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token,
+            expires_in: tokenData.expires_in,
+            token_type: tokenData.token_type || 'Bearer',
+            scope: tokenData.scope,
+            state: state,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('[认证回调] OAuth回调处理失败:', error.message);
+        res.status(500).json({
+            error: 'OAuth回调处理失败',
+            message: error.message
+        });
+    }
 });
 
 // 3. Token交换代理
@@ -396,7 +472,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
             });
         }
 
-        const AUTH_BATCH_SIZE = 10; // 10个并发授权（避免API限制）
+        const AUTH_BATCH_SIZE = 30; // 30个并发授权（扩大1倍处理能力）
         const results = [];
         let successCount = 0;
         let failureCount = 0;
@@ -409,7 +485,24 @@ app.post('/api/accounts/batch-import', async (req, res) => {
             // 高并发处理当前批次的邮箱授权
             const authPromises = batch.map(async (emailData) => {
                 try {
-                    const { email, client_id, refresh_token } = emailData;
+                    // 支持两种格式：字符串或对象
+                    let accountData;
+                    if (typeof emailData === 'string') {
+                        accountData = parseImportLine(emailData);
+                    } else if (typeof emailData === 'object' && emailData.email) {
+                        accountData = emailData;
+                    } else {
+                        throw new Error('邮箱数据格式错误');
+                    }
+
+                    if (!accountData) {
+                        throw new Error('邮箱数据解析失败');
+                    }
+
+                    const { email, client_id, refresh_token } = accountData;
+
+                    // 为accountData添加唯一ID
+                    accountData.id = `email_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
                     console.log(`[批量导入] 开始授权: ${email}`);
 
@@ -421,18 +514,33 @@ app.post('/api/accounts/batch-import', async (req, res) => {
 
                     console.log(`[批量导入] 授权成功: ${email}`);
 
-                    // 2. 获取邮件
+                    // 2. 获取邮件（带重试机制）
                     console.log(`[批量导入] 获取邮件: ${email}`);
-                    const emailsResult = await fetchEmailsFromMicrosoft(tokenResult.access_token);
+                    const emailsResult = await fetchEmailsWithRetry(tokenResult.access_token);
 
                     // 3. 提取验证码
+                    console.log(`[批量导入] 开始提取验证码，邮件数量: ${emailsResult.length}`);
+                    if (emailsResult.length > 0) {
+                        console.log(`[批量导入] 第一封邮件完整数据:`, JSON.stringify(emailsResult[0], null, 2));
+                        console.log(`[批量导入] 第一封邮件主题: "${emailsResult[0].Subject || emailsResult[0].subject || ''}"`);
+                        console.log(`[批量导入] 第一封邮件发件人: ${emailsResult[0].From?.emailAddress?.Address || emailsResult[0].from?.emailAddress?.address || 'unknown'}`);
+                        // 添加更详细的From字段调试
+                        console.log(`[调试] From字段完整结构:`, JSON.stringify(emailsResult[0].From || {}, null, 2));
+                        // 检查其他可能的发件人字段
+                        console.log(`[调试] Sender字段:`, JSON.stringify(emailsResult[0].Sender || {}, null, 2));
+                        console.log(`[调试] InternetMessageId: ${emailsResult[0].InternetMessageId || 'none'}`);
+                        // 检查所有可用字段
+                        const allFields = Object.keys(emailsResult[0]);
+                        console.log(`[调试] 所有可用字段:`, allFields.join(', '));
+                    }
+
                     const verificationCodes = extractVerificationCodes(emailsResult);
                     const latestCode = verificationCodes.length > 0 ? verificationCodes[0] : null;
 
                     console.log(`[批量导入] 找到验证码: ${email} -> ${latestCode ? latestCode.code : '无'}`);
 
-                    const accountData = {
-                        id: 'account_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                    const processedAccountData = {
+                        id: 'email_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
                         email: email,
                         client_id: client_id,
                         refresh_token: refresh_token,
@@ -442,16 +550,63 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         last_checked: new Date().toISOString(),
                         email_count: emailsResult.length,
                         verification_code: latestCode,
-                        sequence: i + batch.indexOf(emailData) + 1,
+                        sequence: i + batch.indexOf(emailString) + 1,
                         monitoring_enabled: false,
                         emails: emailsResult // 包含邮件数据
                     };
 
                     successCount++;
+
+                    // 1. 首先发送状态更新事件（立即发送，不等待验证码处理）
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: sessionId,
+                        email_id: accountData.id,
+                        email: email,
+                        status: 'authorized',
+                        email_count: emailsResult.length,
+                        progress: {
+                            current: successCount + failureCount,
+                            total: emails.length,
+                            success: successCount,
+                            failed: failureCount
+                        }
+                    });
+
+                    // 2. 如果有验证码，立即发送验证码发现事件（独立并发）
+                    if (latestCode) {
+                        emitEvent({
+                            type: 'verification_code_found',
+                            sessionId: sessionId,
+                            email_id: accountData.id,
+                            email: email,
+                            code: latestCode.code,
+                            sender: latestCode.sender || 'Unknown',
+                            received_time: latestCode.received_time || new Date().toISOString()
+                        });
+                    }
+
+                    // 3. 发送导入进度事件（用于进度条）
+                    emitEvent({
+                        type: 'import_progress',
+                        sessionId: sessionId,
+                        email: email,
+                        email_id: accountData.id,
+                        status: 'authorized',
+                        email_count: emailsResult.length,
+                        has_verification_code: !!latestCode,
+                        progress: {
+                            current: successCount + failureCount,
+                            total: emails.length,
+                            success: successCount,
+                            failed: failureCount
+                        }
+                    });
+
                     return {
                         success: true,
                         email: email,
-                        account_id: accountData.id,
+                        email_id: accountData.id,
                         status: 'authorized',
                         verification_code: latestCode,
                         email_count: emailsResult.length,
@@ -459,12 +614,27 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     };
 
                 } catch (error) {
-                    console.error(`[批量导入] 处理失败 ${emailData.email}:`, error.message);
+                    console.error(`[批量导入] 处理失败 ${accountData.email || emailData}:`, error.message);
                     failureCount++;
+
+                    // 发送单个账户导入失败事件
+                    emitEvent({
+                        type: 'import_progress',
+                        sessionId: sessionId,
+                        email: accountData.email || (typeof emailData === 'string' ? emailData : 'unknown'),
+                        status: 'failed',
+                        error: error.message,
+                        progress: {
+                            current: successCount + failureCount,
+                            total: emails.length,
+                            success: successCount,
+                            failed: failureCount
+                        }
+                    });
 
                     return {
                         success: false,
-                        email: emailData.email,
+                        email: accountData.email || (typeof emailData === 'string' ? emailData : 'unknown'),
                         error: error.message,
                         status: 'failed'
                     };
@@ -486,13 +656,48 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                 }
             });
 
-            // 批次间短暂延迟，避免API限制
-            if (i + AUTH_BATCH_SIZE < emails.length) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+            // 发送批次完成事件
+            const currentBatch = Math.floor(i / AUTH_BATCH_SIZE) + 1;
+            const totalBatches = Math.ceil(emails.length / AUTH_BATCH_SIZE);
+
+            emitEvent({
+                type: 'bulk_import_progress',
+                sessionId: sessionId,
+                batch: {
+                    current: currentBatch,
+                    total: totalBatches,
+                    size: batch.length
+                },
+                progress: {
+                    processed: successCount + failureCount,
+                    total: emails.length,
+                    success: successCount,
+                    failed: failureCount
+                },
+                stage: 'batch_completed'
+            });
+
+            // 取消批次间延迟，最大化处理效率
+            // if (i + AUTH_BATCH_SIZE < emails.length) {
+            //     await new Promise(resolve => setTimeout(resolve, 500));
+            // }
         }
 
         console.log(`[批量导入] 完成处理: ${successCount} 成功, ${failureCount} 失败`);
+
+        // 发送批量导入完成事件
+        emitEvent({
+            type: 'bulk_import_progress',
+            sessionId: sessionId,
+            progress: {
+                processed: emails.length,
+                total: emails.length,
+                success: successCount,
+                failed: failureCount
+            },
+            stage: 'completed',
+            message: `批量导入完成: ${successCount} 成功${failureCount > 0 ? `, ${failureCount} 失败` : ''}`
+        });
 
         res.json({
             success: true,
@@ -518,7 +723,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
     try {
         const {
             sessionId,
-            account_id,
+            email_id,
             email,
             client_id,
             refresh_token,
@@ -536,7 +741,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
             });
         }
 
-        console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${account_id} (会话: ${sessionId})`);
+        console.log(`[监控触发] 复制邮箱: ${email}, 账户ID: ${email_id} (会话: ${sessionId})`);
         console.log(`[监控触发] 账户状态: ${current_status}`);
 
         // 账户状态检查和处理
@@ -556,7 +761,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
                     emitEvent({
                         type: 'account_status_changed',
                         sessionId: sessionId,
-                        account_id: account_id,
+                        email_id: email_id,
                         email: email,
                         status: 'active',
                         message: '账户重新授权成功'
@@ -571,7 +776,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
                 emitEvent({
                     type: 'account_status_changed',
                     sessionId: sessionId,
-                    account_id: account_id,
+                    email_id: email_id,
                     email: email,
                     status: 'reauth_required',
                     message: 'Token已失效，请重新获取授权信息',
@@ -604,7 +809,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
 
         // 创建账户对象
         const account = {
-            id: account_id,
+            id: email_id,
             email: email,
             client_id: client_id,
             refresh_token: refresh_token,
@@ -619,7 +824,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         console.log(`[监控检查] 账户 ${email} 将获取比 ${timeFilter} 更新的邮件`);
 
         // 存储账户
-        accountStore.set(account_id, account);
+        accountStore.set(email_id, account);
 
         // 启动1分钟监控
         startMonitoring(sessionId, account, 60000);
@@ -628,7 +833,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         emitEvent({
             type: 'monitoring_started',
             sessionId: sessionId,
-            account_id: account_id,
+            email_id: email_id,
             email: email,
             duration: 60000,
             time_filter: timeFilter,
@@ -638,7 +843,7 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         res.json({
             success: true,
             message: '已启动1分钟监控，将自动检查新邮件',
-            account_id: account_id,
+            email_id: email_id,
             email: email,
             duration: 60000,
             time_filter: timeFilter
@@ -652,6 +857,34 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         });
     }
 });
+
+// 增强的邮件获取重试机制
+async function fetchEmailsWithRetry(accessToken, maxRetries = 5) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const emails = await fetchEmailsFromMicrosoft(accessToken);
+            return emails;
+        } catch (error) {
+            console.error(`[邮件重试] 第${attempt}次尝试失败: ${error.message}`);
+
+            // 可重试的错误类型：503、超时、429限流、网络错误
+            const retryableErrors = ['503', '超时', '429', 'ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND'];
+            const isRetryable = retryableErrors.some(err => error.message.includes(err));
+
+            if (isRetryable && attempt < maxRetries) {
+                // 更长的指数退避：1s, 2s, 4s, 8s, 10s (最大10秒)
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                console.log(`[邮件重试] 等待${delay}ms后重试...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+
+            // 非可重试错误或已达最大重试次数
+            console.error(`[邮件重试] 最终失败: ${error.message} (已尝试${attempt}次)`);
+            throw error;
+        }
+    }
+}
 
 // 辅助函数：获取Microsoft邮件（使用现有的正确实现）
 async function fetchEmailsFromMicrosoft(accessToken) {
@@ -694,6 +927,12 @@ async function fetchEmailsFromMicrosoft(accessToken) {
                             reject(new Error(`邮件获取失败: 401 - 未授权，token已过期`));
                         } else if (res.statusCode === 403) {
                             reject(new Error(`邮件获取失败: 403 - 禁止访问，权限不足`));
+                        } else if (res.statusCode === 503) {
+                            // 503服务不可用，使用指数退避重试
+                            reject(new Error(`邮件获取失败: 503 - 服务暂时不可用`));
+                        } else if (res.statusCode === 429) {
+                            // 429请求过于频繁，使用指数退避重试
+                            reject(new Error(`邮件获取失败: 429 - 请求过于频繁`));
                         } else {
                             reject(new Error(`邮件获取失败: ${res.statusCode}`));
                         }
@@ -707,39 +946,226 @@ async function fetchEmailsFromMicrosoft(accessToken) {
         });
 
         req.on('error', (error) => reject(error));
-        req.setTimeout(30000, () => {
+        req.setTimeout(60000, () => {
             req.destroy();
-            reject(new Error('邮件获取超时'));
+            reject(new Error('邮件获取超��'));
         });
         req.end();
     });
 }
 
-// 辅助函数：提取验证码
+// HTML标签清理函数
+function stripHtmlTags(html) {
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// 发件人提取函数 - 从主题中提取关键词
+function extractSenderEmail(email) {
+    if (!email || !email.Subject) return 'unknown';
+
+    try {
+        const subject = email.Subject.toLowerCase();
+
+        // 定义常见服务关键词映射
+        const serviceKeywords = {
+            'comet': 'Comet',
+            'perplexity': 'Perplexity',
+            'openai': 'OpenAI',
+            'chatgpt': 'ChatGPT',
+            'claude': 'Claude',
+            'anthropic': 'Anthropic',
+            'google': 'Google',
+            'microsoft': 'Microsoft',
+            'github': 'GitHub',
+            'apple': 'Apple',
+            'amazon': 'Amazon',
+            'meta': 'Meta',
+            'facebook': 'Facebook',
+            'twitter': 'Twitter',
+            'linkedin': 'LinkedIn',
+            'netflix': 'Netflix',
+            'spotify': 'Spotify',
+            'discord': 'Discord',
+            'slack': 'Slack',
+            'telegram': 'Telegram',
+            'whatsapp': 'WhatsApp',
+            'zoom': 'Zoom',
+            'dropbox': 'Dropbox',
+            'notion': 'Notion',
+            'figma': 'Figma'
+        };
+
+        // 在主题中查找关键词
+        for (const [keyword, serviceName] of Object.entries(serviceKeywords)) {
+            if (subject.includes(keyword)) {
+                console.log(`[发件人识别] 从主题提取服务: ${serviceName} (关键词: ${keyword})`);
+                return serviceName;
+            }
+        }
+
+        // 如果没找到关键词，尝试使用真实发件人邮箱域名
+        if (email.From && email.From.EmailAddress && email.From.EmailAddress.Address) {
+            const realEmail = email.From.EmailAddress.Address;
+            const domain = realEmail.split('@')[1];
+            if (domain) {
+                const domainName = domain.split('.')[0];
+                console.log(`[发件人识别] 使用邮箱域名: ${domainName} (完整邮箱: ${realEmail})`);
+                return domainName.charAt(0).toUpperCase() + domainName.slice(1);
+            }
+        }
+
+        // 最后备用：使用unknown
+        console.log(`[发件人识别] 未识别发件人，主题: ${email.Subject}`);
+        return 'unknown';
+    } catch (error) {
+        console.error('[错误] 提取发件人失败:', error);
+        return 'unknown';
+    }
+}
+
+// 验证码提取算法（优化版 - 6位纯数字 + HTML清理）
+function extractVerificationCode(subject, body) {
+    if (!subject && !body) return null;
+
+    // 清理HTML标签
+    const cleanSubject = subject || '';
+    const cleanBody = stripHtmlTags(body || '');
+    const text = `${cleanSubject} ${cleanBody}`;
+
+    // 添加调试日志
+    console.log(`[验证码提取] 邮件主题: "${cleanSubject}"`);
+    console.log(`[验证码提取] 邮件正文前100字符: "${cleanBody.substring(0, 100)}..."`);
+    console.log(`[验证码提取] 合并文本前200字符: "${text.substring(0, 200)}..."`);
+
+    // 高可信度模式 - 必须包含验证码相关关键词
+    const highPatterns = [
+        /(?:verification code|验证码|验证码为|code is|your code is|安全码|安全验证|verification|authenticate)[\s:：\n\-]*(\d{6})/gi,
+        /(?:confirm|activate|verify|authenticate)[\s\S]{0,50}?(\d{6})/gi
+    ];
+
+    // 中等可信度模式 - 6位纯数字
+    const mediumPatterns = [
+        /\b(\d{6})\b/g  // 6位数字
+    ];
+
+    // 先尝试高可信度模式
+    console.log(`[验证码提取] 尝试高可信度模式匹配...`);
+    for (const pattern of highPatterns) {
+        const matches = text.match(pattern);
+        console.log(`[验证码提取] 高可信度模式匹配结果:`, matches);
+        if (matches && matches.length > 0) {
+            for (const match of matches) {
+                const code = match.match(/(\d{6})/);
+                if (code && code[1]) {
+                    console.log(`[验证码提取] 找到验证码: ${code[1]}`);
+                    return code[1];
+                }
+            }
+        }
+    }
+
+    // 再尝试中等可信度模式
+    console.log(`[验证码提取] 尝试中等可信度模式匹配...`);
+    const mediumMatches = text.match(mediumPatterns[0]);
+    console.log(`[验证码提取] 中等可信度模式匹配结果:`, mediumMatches);
+    if (mediumMatches && mediumMatches.length > 0) {
+        // 返回第一个匹配的6位数字
+        console.log(`[验证码提取] 找到验证码: ${mediumMatches[0]}`);
+        return mediumMatches[0];
+    }
+
+    console.log(`[验证码提取] 未找到验证码`);
+    return null;
+}
+
+// 辅助函数：提取验证码（兼容旧版本）
+// 邮箱导入行解析函数（与前端Utils.parseImportLine完全一致）
+function parseImportLine(line) {
+    console.log(`[Parse Debug] 解析行:`, line);
+    // 预处理：移除行首行尾空白
+    line = line.trim();
+    if (!line) {
+        console.warn(`[Parse] 空行，跳过`);
+        return null;
+    }
+    // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
+    let parts = line.split('----');
+    console.log(`[Parse Debug] 第一次分割结果:`, parts, `字段数: ${parts.length}`);
+    if (parts.length !== 4) {
+        // 如果不是4个字段，尝试智能重构
+        const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+        const uuidMatch = line.match(uuidRegex);
+        console.log(`[Parse Debug] UUID匹配结果:`, uuidMatch);
+        if (uuidMatch) {
+            const uuidIndex = line.indexOf(uuidMatch[0]);
+            const beforeUuid = line.substring(0, uuidIndex).trim();
+            const afterUuid = line.substring(uuidIndex + uuidMatch[0].length).trim();
+            const beforeParts = beforeUuid.split(/-+/);
+            if (beforeParts.length >= 2) {
+                parts = [
+                    beforeParts[0],
+                    beforeParts[1],
+                    uuidMatch[0],
+                    afterUuid.replace(/^-+/, '')
+                ];
+                console.log(`[Parse Debug] 智能重构结果:`, parts);
+            }
+        }
+    }
+    if (parts.length < 4) {
+        console.warn(`[Parse] 无效数据格式，期望4个字段，实际${parts.length}个:`, line);
+        console.warn(`[Parse] 字段详情:`, parts.map((p, i) => `字段${i+1}: "${p}"`));
+        return null;
+    }
+    const [email, password, client_id, refresh_token_enc] = parts;
+    // 验证每个字段
+    if (!email || !email.includes('@')) {
+        console.warn(`[Parse] 无效的邮箱地址: "${email}"`);
+        return null;
+    }
+    if (!client_id || client_id.length < 10) {
+        console.warn(`[Parse] 无效的client_id: "${client_id}"`);
+        return null;
+    }
+    if (!refresh_token_enc || refresh_token_enc.length < 10) {
+        console.warn(`[Parse] 无效的refresh_token: "${refresh_token_enc?.substring(0, 20)}..."`);
+        return null;
+    }
+    const result = {
+        email: email.trim(),
+        password: password ? password.trim() : '',
+        client_id: client_id.trim(),
+        refresh_token: refresh_token_enc.trim()
+    };
+    console.log(`[Parse Debug] 最终解析结果:`, {
+        email: result.email,
+        hasClientId: !!result.client_id,
+        clientIdLength: result.client_id.length,
+        hasRefreshToken: !!result.refresh_token,
+        refreshTokenLength: result.refresh_token.length
+    });
+    return result;
+}
+
 function extractVerificationCodes(emails) {
     const codes = [];
     emails.forEach(email => {
-        const body = email.body?.content || '';
-        const subject = email.subject || '';
+        // 处理Microsoft Graph API的Pascal命名��和camelCase命名法
+        const subject = email.Subject || email.subject || '';
+        const bodyContent = email.Body?.Content || email.body?.content || '';
+        // 从邮件主题中提取发件人关键词作为显示名称
+        const senderName = extractSenderEmail(email);
+        const receivedTime = email.ReceivedDateTime || email.receivedDateTime;
 
-        // 多种验证码匹配模式
-        const patterns = [
-            /(?:验证码|verification code|code|验证)[\s:：]*(\d{4,8})/i,
-            /(\d{6})/i,
-            /(\d{4,8})/
-        ];
-
-        for (const pattern of patterns) {
-            const match = body.match(pattern) || subject.match(pattern);
-            if (match) {
-                codes.push({
-                    code: match[1],
-                    sender: email.from?.emailAddress?.address || 'unknown',
-                    received_time: email.receivedDateTime,
-                    subject: subject
-                });
-                break; // 找到第一个匹配就停止
-            }
+        const code = extractVerificationCode(subject, bodyContent);
+        if (code) {
+            codes.push({
+                code: code,
+                sender: senderName,
+                received_time: receivedTime,
+                subject: subject
+            });
         }
     });
     return codes;
@@ -773,7 +1199,7 @@ app.post('/api/microsoft/token', async (req, res) => {
 // 手动获取邮件API
 app.post('/api/manual-fetch-emails', async (req, res) => {
     try {
-        const { sessionId, account_id, email, client_id, refresh_token, current_status } = req.body;
+        const { sessionId, email_id, email, client_id, refresh_token, current_status } = req.body;
 
         if (!sessionId) {
             return res.status(400).json({
@@ -782,7 +1208,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             });
         }
 
-        console.log(`[手动取件] 开始取件: ${email}, 账户ID: ${account_id} (会话: ${sessionId})`);
+        console.log(`[手动取件] 开始取件: ${email}, 账户ID: ${email_id} (会话: ${sessionId})`);
 
         let tokenResult;
         try {
@@ -806,7 +1232,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
 
         // 更新账户信息
         const account = {
-            id: account_id,
+            id: email_id,
             email: email,
             client_id: client_id,
             refresh_token: refresh_token,
@@ -818,13 +1244,13 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             emails: emails
         };
 
-        accountStore.set(account_id, account);
+        accountStore.set(email_id, account);
 
         // 发送事件通知
         emitEvent({
             type: 'manual_fetch_complete',
             sessionId: sessionId,
-            account_id: account_id,
+            email_id: email_id,
             email: email,
             email_count: emails.length,
             verification_code: latestCode,
@@ -845,6 +1271,39 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
         res.status(500).json({
             success: false,
             error: error.message
+        });
+    }
+});
+
+// 验证码提取API
+app.post('/api/extract-verification-codes', async (req, res) => {
+    try {
+        const { emails } = req.body;
+
+        if (!emails || !Array.isArray(emails)) {
+            return res.status(400).json({
+                error: '缺少emails参数或格式不正确'
+            });
+        }
+
+        console.log(`[验证码提取] 收到提取请求，邮件数量: ${emails.length}`);
+
+        const verificationCodes = extractVerificationCodes(emails);
+
+        console.log(`[验证码提取] 提取结果: ${verificationCodes.length} 个验证码`);
+
+        res.json({
+            success: true,
+            verification_codes: verificationCodes,
+            count: verificationCodes.length,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('[验证码提取] 提取失败:', error);
+        res.status(500).json({
+            error: '验证码提取失败',
+            message: error.message
         });
     }
 });
@@ -870,7 +1329,7 @@ app.post('/api/accounts/verify-sync', async (req, res) => {
         if (Array.isArray(accounts)) {
             for (const accountData of accounts) {
                 try {
-                    const { account_id, email, client_id, refresh_token } = accountData;
+                    const { email_id, email, client_id, refresh_token } = accountData;
 
                     // 验证token
                     const tokenResult = await refreshToken(refresh_token, client_id, '');
@@ -878,7 +1337,7 @@ app.post('/api/accounts/verify-sync', async (req, res) => {
                     if (tokenResult && tokenResult.access_token) {
                         successCount++;
                         results.push({
-                            account_id: account_id,
+                            email_id: email_id,
                             email: email,
                             success: true,
                             status: 'active',
@@ -887,7 +1346,7 @@ app.post('/api/accounts/verify-sync', async (req, res) => {
                     } else {
                         failureCount++;
                         results.push({
-                            account_id: account_id,
+                            email_id: email_id,
                             email: email,
                             success: false,
                             status: 'reauth_required'
@@ -896,7 +1355,7 @@ app.post('/api/accounts/verify-sync', async (req, res) => {
                 } catch (error) {
                     failureCount++;
                     results.push({
-                        account_id: accountData.account_id,
+                        email_id: accountData.email_id,
                         email: accountData.email,
                         success: false,
                         status: 'failed',
@@ -919,6 +1378,46 @@ app.post('/api/accounts/verify-sync', async (req, res) => {
         res.status(500).json({
             success: false,
             error: error.message
+        });
+    }
+});
+
+// 直接刷新Token API
+app.post('/api/accounts/refresh-token-direct', async (req, res) => {
+    try {
+        const { email, client_id, refresh_token } = req.body;
+
+        if (!email || !client_id || !refresh_token) {
+            return res.status(400).json({
+                error: '缺少必需参数: email, client_id, refresh_token'
+            });
+        }
+
+        console.log(`[直接Token刷新] 开始刷新Token: ${email}`);
+
+        const tokenResult = await refreshToken(refresh_token, client_id, '');
+
+        if (!tokenResult || !tokenResult.access_token) {
+            throw new Error('Token刷新失败：未获取到有效访问令牌');
+        }
+
+        console.log(`[直接Token刷新] Token刷新成功: ${email}`);
+
+        res.json({
+            success: true,
+            email: email,
+            access_token: tokenResult.access_token,
+            refresh_token: tokenResult.refresh_token || refresh_token,
+            expires_in: tokenResult.expires_in,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('[直接Token刷新] Token刷新失败:', error.message);
+        res.status(500).json({
+            error: 'Token刷新失败',
+            message: error.message,
+            email: req.body.email
         });
     }
 });
@@ -982,6 +1481,59 @@ app.get('/api/stats', (req, res) => {
             timestamp: new Date().toISOString()
         }
     });
+});
+
+// 事件触发API
+app.post('/api/events/trigger', async (req, res) => {
+    try {
+        const { sessionId, type, data } = req.body;
+
+        if (!type) {
+            return res.status(400).json({
+                error: '缺少事件类型'
+            });
+        }
+
+        console.log(`[事件触发] 触发事件: ${type}, sessionId: ${sessionId || 'none'}`);
+
+        const eventData = {
+            type: type,
+            sessionId: sessionId,
+            data: data || {},
+            timestamp: new Date().toISOString()
+        };
+
+        // 发送WebSocket事件
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify(eventData));
+            }
+        });
+
+        // 发送SSE事件
+        const sessions = eventConnections.get(sessionId);
+        if (sessions && sessions.length > 0) {
+            const eventDataStr = `data: ${JSON.stringify(eventData)}\n\n`;
+            sessions.forEach(res => {
+                if (!res.destroyed) {
+                    res.write(eventDataStr);
+                }
+            });
+        }
+
+        res.json({
+            success: true,
+            message: '事件触发成功',
+            event: eventData
+        });
+
+    } catch (error) {
+        console.error('[事件触发] 事件触发失败:', error);
+        res.status(500).json({
+            error: '事件触发失败',
+            message: error.message
+        });
+    }
 });
 
 // 事件流API (Server-Sent Events)

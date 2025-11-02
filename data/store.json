@@ -28,7 +28,7 @@
   "codes": [
     {
       "id": 1,
-      "account_id": 1,
+      "email_id": 1,
       "code": "directly",
       "source": null,
       "subject": "Sign in to Perplexity",
@@ -39,7 +39,7 @@
     },
     {
       "id": 2,
-      "account_id": 1,
+      "email_id": 1,
       "code": "503481",
       "source": null,
       "subject": "Sign in to Perplexity",
@@ -50,7 +50,7 @@
     },
     {
       "id": 3,
-      "account_id": 1,
+      "email_id": 1,
       "code": "503481",
       "source": null,
       "subject": "Sign in to Perplexity",
@@ -61,7 +61,7 @@
     },
     {
       "id": 4,
-      "account_id": 1,
+      "email_id": 1,
       "code": "503481",
       "source": null,
       "subject": "Sign in to Perplexity",
@@ -74,7 +74,7 @@
   "messages": [
     {
       "id": 1,
-      "account_id": 1,
+      "email_id": 1,
       "message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutQAAAA==",
       "received_at": "2025-10-28T02:25:34Z",
       "subject": "Sign in to Perplexity",
@@ -84,7 +84,7 @@
     },
     {
       "id": 2,
-      "account_id": 2,
+      "email_id": 2,
       "message_id": "AQMkADAwATNiZmYAZS1hMWFiLWZhODUtMDACLTAwCgBGAAADjiDHIM6ljUygn2V063LMtQcAVVZdJbz5z0qnbJeb7H8UhQAAAgEMAAAAVVZdJbz5z0qnbJeb7H8UhQAAABNidqkAAAA=",
       "received_at": "2025-10-29T20:14:35Z",
       "subject": "Welcome to Comet",
@@ -94,7 +94,7 @@
     },
     {
       "id": 3,
-      "account_id": 1,
+      "email_id": 1,
       "message_id": "AQMkADAwATM3ZmYBLWExYjEtMDI2OS0wMAItMDAKAEYAAANZ32LMP6C-RanbIFfAbo1yBwAmi2kA524tSpb9VpTvuCdtAAACAQwAAAAmi2kA524tSpb9VpTvuCdtAAAAEXQutwAAAA==",
       "received_at": "2025-10-29T21:52:36Z",
       "subject": "Welcome to Comet",

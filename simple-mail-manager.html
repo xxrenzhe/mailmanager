@@ -869,7 +869,7 @@
 
             // 处理监控开始事件
             handleMonitoringStarted(data) {
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                const account = this.accounts.find(acc => acc.id === data.email_id);
                 if (account) {
                     account.is_monitoring = true;
                     this.saveAccounts();
@@ -891,7 +891,7 @@
                 console.log('[SSE] 监控结束:', data);
 
                 // 更新账户监控状态
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                const account = this.accounts.find(acc => acc.id === data.email_id);
                 if (account) {
                     account.is_monitoring = false;
                     // 监控结束时清除只显示监控验证码的标记
@@ -912,7 +912,7 @@
                 console.error('[SSE] 监控错误:', data);
 
                 // 更新账户监控状态
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                const account = this.accounts.find(acc => acc.id === data.email_id);
                 if (account) {
                     account.is_monitoring = false;
                     this.saveAccounts();
@@ -926,13 +926,13 @@
             // 处理发现验证码事件
             handleVerificationCodeFound(data) {
                 console.log('[WebSocket] 收到验证码事件:', data);
-                let account = this.accounts.find(acc => acc.id === data.account_id);
+                let account = this.accounts.find(acc => acc.id === data.email_id);
 
                 // 如果通过ID找不到，尝试通过邮箱地址匹配
                 if (!account && data.email) {
                     account = this.accounts.find(acc => acc.email === data.email);
                     if (account) {
-                        console.log('[WebSocket] 通过邮箱地址匹配到账户:', account.email, 'ID不匹配 - 期望ID:', data.account_id, '实际ID:', account.id);
+                        console.log('[WebSocket] 通过邮箱地址匹配到账户:', account.email, 'ID不匹配 - 期望ID:', data.email_id, '实际ID:', account.id);
                     }
                 }
 
@@ -966,14 +966,14 @@
                     this.showNotification(`收到新验证码: ${data.code} (${data.sender})`, 'success');
                     console.log('[WebSocket] 验证码已更新到账户，重新渲染完成');
                 } else {
-                    console.log('[WebSocket] 未找到账户，ID:', data.account_id, '邮箱:', data.email);
+                    console.log('[WebSocket] 未找到账户，ID:', data.email_id, '邮箱:', data.email);
                     console.log('[WebSocket] 当前账户列表:', this.accounts.map(acc => ({ id: acc.id, email: acc.email })));
                 }
             }
 
             // 处理账户状态变化事件
             handleAccountStatusChanged(data) {
-                let account = this.accounts.find(acc => acc.id === data.account_id);
+                let account = this.accounts.find(acc => acc.id === data.email_id);
 
                 if (account) {
                     // 更新现有账户
@@ -1014,11 +1014,11 @@
                 } else {
                     // 批量导入时创建新账户（后端已创建，前端同步）
                     if (data.email && (data.status === 'authorized' || data.status === 'failed')) {
-                        console.log(`[批量导入] 创建新账户: ${data.email} (${data.account_id})`);
+                        console.log(`[批量导入] 创建新账户: ${data.email} (${data.email_id})`);
 
                         // 从批量导入的account_status_changed事件中获取基本信息
                         account = {
-                            id: data.account_id,
+                            id: data.email_id,
                             email: data.email,
                             password: '', // 批量导入时前端不需要密码
                             client_id: '', // 批量导入时前端不需要client_id
@@ -1044,7 +1044,7 @@
                         const statusMessage = data.status === 'authorized' ? '账户授权成功' : '账户授权失败';
                         this.showNotification(`${account.email}: ${statusMessage}`, data.status === 'authorized' ? 'success' : 'error');
                     } else {
-                        console.warn(`[账户状态变更] 未找到账户且无法创建: ID=${data.account_id}, 邮箱=${data.email}, 状态=${data.status}`);
+                        console.warn(`[账户状态变更] 未找到账户且无法创建: ID=${data.email_id}, 邮箱=${data.email}, 状态=${data.status}`);
                     }
                 }
             }
@@ -1053,8 +1053,8 @@
             handleEmailsProcessed(data) {
                 console.log('[邮件处理完成] 收到批量导入完成事件:', data);
 
-                if (data.account_id) {
-                    const account = this.accounts.find(acc => acc.id === data.account_id);
+                if (data.email_id) {
+                    const account = this.accounts.find(acc => acc.id === data.email_id);
                     if (account) {
                         // 只有在状态发生变化或失败时才需要保存数据
                         const needsSave = account.status !== (data.status || 'unknown') || data.status === 'failed';
@@ -1101,12 +1101,12 @@
                         console.log(`[邮件处理完成] 账户 ${account.email} 状态已更新为: ${account.status}, 需要保存: ${needsSave}`);
                     } else {
                         // 批量导入时账户可能不存在于前端，需要创建
-                        if (data.email && data.account_id) {
-                            console.log(`[邮件处理完成] 创建新账户: ${data.email} (${data.account_id})`);
+                        if (data.email && data.email_id) {
+                            console.log(`[邮件处理完成] 创建新账户: ${data.email} (${data.email_id})`);
 
                             // 创建新账户（包括失败账户）
                             const newAccount = {
-                                id: data.account_id,
+                                id: data.email_id,
                                 email: data.email,
                                 password: '', // 批量导入时前端不需要密码
                                 client_id: '', // 批量导入时前端不需要client_id
@@ -1164,7 +1164,7 @@
                         }
                     }
                 } else {
-                    console.warn(`[邮件处理完成] 事件数据缺少 account_id:`, data);
+                    console.warn(`[邮件处理完成] 事件数据缺少 email_id:`, data);
                 }
             }
 
@@ -1300,7 +1300,7 @@
                     }
 
                     const requestData = {
-                        account_id: accountId,
+                        email_id: accountId,
                         email: account.email,
                         client_id: account.client_id,
                         refresh_token: account.refresh_token,
@@ -1335,7 +1335,7 @@
 
             // 处理手动取件完成事件
             handleManualFetchComplete(data) {
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                const account = this.accounts.find(acc => acc.id === data.email_id);
                 if (account) {
                     // 更新账户最后检查时间
                     account.last_check = new Date().toISOString();
@@ -1374,7 +1374,7 @@
 
             // 处理手动取件错��事件
             handleManualFetchError(data) {
-                const account = this.accounts.find(acc => acc.id === data.account_id);
+                const account = this.accounts.find(acc => acc.id === data.email_id);
                 if (account) {
                     const errorMessage = data.error || '收取失败';
                     this.showNotification(`${account.email}: ${errorMessage}`, 'error');
@@ -2836,7 +2836,7 @@
                         },
                         body: JSON.stringify({
                             sessionId: this.sessionId,
-                            account_id: account.id,
+                            email_id: account.id,
                             email: account.email,
                             client_id: account.client_id,
                             refresh_token: account.refresh_token,
@@ -3145,7 +3145,7 @@
                         if (account) {
                             if (importResult.success) {
                                 // 更新账户ID（后端生成的新ID）
-                                account.id = importResult.account_id;
+                                account.id = importResult.email_id;
                                 account.status = 'authorized';
                                 account.sequence = importResult.sequence;
                                 account.last_check = new Date().toISOString();
@@ -3323,7 +3323,7 @@
                 console.log(`[Token刷新] 开始处理 ${invalidAccounts.length} 个失效账户`);
 
                 for (const invalid of invalidAccounts) {
-                    const account = this.accounts.find(acc => acc.id === invalid.account_id);
+                    const account = this.accounts.find(acc => acc.id === invalid.email_id);
                     if (account) {
                         try {
                             console.log(`[Token刷新] 直接刷新账户 ${account.email} 的Token`);
@@ -3388,7 +3388,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            account_id: account.id,
+                            email_id: account.id,
                             email: account.email,
                             client_id: account.client_id,
                             refresh_token: account.refresh_token,
@@ -3454,7 +3454,7 @@
                 this.showNotification(`正在为 ${failedAccounts.length} 个账户生成重新授权链接...`, 'info');
 
                 await this.handleReauthorization(failedAccounts.map(acc => ({
-                    account_id: acc.id,
+                    email_id: acc.id,
                     email: acc.email,
                     status: acc.status,
                     message: acc.error || '需要重新授权'
@@ -3538,7 +3538,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             code: code,
-                            account_id: accountData.account_id,
+                            email_id: accountData.email_id,
                             email: accountData.email
                         })
                     });
@@ -3552,7 +3552,7 @@
                     console.log('[OAuth回调] Token兑换成功:', result);
 
                     // 更新账户Token信息
-                    await this.updateAccountToken(accountData.account_id, result);
+                    await this.updateAccountToken(accountData.email_id, result);
 
                     // 清理URL参数
                     this.clearOAuthCallbackParams();
@@ -3562,7 +3562,7 @@
                     // 自动继续邮件验证流程
                     console.log(`[OAuth回调] 账户 ${accountData.email} 重新授权成功，自动继续邮件验证`);
                     setTimeout(() => {
-                        this.continueValidationAfterReauth(accountData.account_id);
+                        this.continueValidationAfterReauth(accountData.email_id);
                     }, 1000);
 
                 } catch (error) {
@@ -3626,7 +3626,7 @@
                 try {
                     // 构建state参数
                     const stateData = {
-                        account_id: account.id,
+                        email_id: account.id,
                         email: account.email,
                         timestamp: Date.now()
                     };
@@ -4094,7 +4094,7 @@
                 }
 
                 const requestData = {
-                    account_id: id,
+                    email_id: id,
                     email: account.email,
                     client_id: account.client_id,
                     refresh_token: account.refresh_token,

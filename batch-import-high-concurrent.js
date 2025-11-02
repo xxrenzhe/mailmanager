@@ -77,7 +77,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         emitEvent({
                             type: 'emails_processed',
                             sessionId: sessionId,
-                            account_id: failedAccount.id,
+                            email_id: failedAccount.id,
                             email: email,
                             status: 'failed',
                             message: `授权验证失败: ${error.message}`,
@@ -91,7 +91,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                             success: false,
                             email: email,
                             error: `授权验证失败: ${error.message}`,
-                            account_id: failedAccount.id,
+                            email_id: failedAccount.id,
                             status: 'failed'
                         };
                     }
@@ -121,7 +121,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     emitEvent({
                         type: 'account_status_changed',
                         sessionId: sessionId,
-                        account_id: account.id,
+                        email_id: account.id,
                         email: account.email,
                         status: 'authorized',
                         message: '邮箱授权成功',
@@ -161,7 +161,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                         emitEvent({
                                             type: 'verification_code_found',
                                             sessionId: sessionId,
-                                            account_id: account.id,
+                                            email_id: account.id,
                                             email: account.email,
                                             code: code,
                                             sender: senderEmail,
@@ -182,7 +182,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                     emitEvent({
                                         type: 'emails_processed',
                                         sessionId: sessionId,
-                                        account_id: account.id,
+                                        email_id: account.id,
                                         email: account.email,
                                         status: 'authorized',
                                         message: '邮箱授权成功，已发现验证码',
@@ -197,7 +197,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                     emitEvent({
                                         type: 'emails_processed',
                                         sessionId: sessionId,
-                                        account_id: account.id,
+                                        email_id: account.id,
                                         email: account.email,
                                         status: 'authorized',
                                         message: '邮箱授权成功，未发现验证码',
@@ -210,7 +210,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                                 emitEvent({
                                     type: 'emails_processed',
                                     sessionId: sessionId,
-                                    account_id: account.id,
+                                    email_id: account.id,
                                     email: account.email,
                                     status: 'authorized',
                                     message: '邮箱授权成功，未找到邮件',
@@ -224,7 +224,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                             emitEvent({
                                 type: 'emails_processed',
                                 sessionId: sessionId,
-                                account_id: account.id,
+                                email_id: account.id,
                                 email: account.email,
                                 status: 'authorized',
                                 message: '邮箱授权成功，取件失败',
@@ -240,7 +240,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         success: true,
                         email: email,
                         sequence: sequence,
-                        account_id: account.id,
+                        email_id: account.id,
                         status: 'authorized'
                     };
 

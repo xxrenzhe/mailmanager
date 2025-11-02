@@ -28,18 +28,41 @@ USER mailmanager
 # 暴露端口
 EXPOSE 3001 3002
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+# 健康检查 - 同时检查HTTP和WebSocket服务
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "
+    const http = require('http');
+    const WebSocket = require('ws');
+
+    // 检查HTTP服务
+    http.get('http://localhost:3001/api/health', (res) => {
+      if (res.statusCode !== 200) process.exit(1);
+
+      // 检查WebSocket服务
+      const ws = new WebSocket('ws://localhost:3002');
+      ws.on('open', () => {
+        ws.close();
+        process.exit(0);
+      });
+      ws.on('error', () => {
+        process.exit(1);
+      });
+    }).on('error', () => {
+      process.exit(1);
+    });
+  "
 
 # 启动命令
 CMD ["node", "balanced-proxy-server-simple.js"]
 
 # 标签信息
-LABEL version="3.0.0" \
-      description="KISS MailManager - 极简邮件管理系统" \
+LABEL version="0.1.0" \
+      description="MailManager - 邮件验证码管理系统" \
       maintainer="mailmanager" \
       code.lines="364" \
       code.reduction="89%" \
       architecture="nodejs" \
-      principles="KISS (Keep It Simple, Stupid)"
+      principles="KISS (Keep It Simple, Stupid)" \
+      feature="email_id semantic refactoring" \
+      services="http,websocket" \
+      ports="3001,3002"
