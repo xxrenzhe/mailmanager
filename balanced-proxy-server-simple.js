@@ -302,12 +302,12 @@ function startMonitoring(sessionId, account, duration = 60000) {
                     if (verificationCodes.length > 0) {
                         const latestCode = verificationCodes[0]; // 已经按时间排序
                         console.log(`[验证码] 发现验证码: ${latestCode.code} (发件人: ${latestCode.sender})`);
-                        console.log(`[验证码] 验证码时间: ${latestCode.received_time}`);
+                        console.log(`[验证码] 验证码时间: ${latestCode.received_at}`);
                         console.log(`[验证码] 基准时间: ${account.last_check_time}`);
 
                         // 检查验证码是否比基准时间更新（关键修复）
                         const isCodeNewer = account.last_check_time ?
-                            new Date(latestCode.received_time) > new Date(account.last_check_time) : true;
+                            new Date(latestCode.received_at) > new Date(account.last_check_time) : true;
 
                         if (isCodeNewer) {
                             console.log(`[验证码] ✅ 发现新验证码，停止监控: ${account.email}`);
@@ -316,7 +316,7 @@ function startMonitoring(sessionId, account, duration = 60000) {
                             account.verification_code = latestCode;
                             account.last_checked = new Date().toISOString();
                             account.email_count = emails.length;
-                            account.last_check_time = latestCode.received_time; // 更新基准时间
+                            account.last_check_time = latestCode.received_at; // 更新基准时间
                             accountStore.set(account.id, account);
 
                             // 发送验证码发现事件 - 🔧 添加last_code_time字段用于前端判断
@@ -328,8 +328,8 @@ function startMonitoring(sessionId, account, duration = 60000) {
                                 code: latestCode.code,
                                 sender: latestCode.sender,
                                 subject: latestCode.subject,
-                                received_at: latestCode.received_time,
-                                last_code_time: latestCode.received_time, // 🔧 新增：发送给前端的时间基准
+                                received_at: latestCode.received_at,
+                                last_code_time: latestCode.received_at, // 🔧 新增：发送给前端的时间基准
                                 timestamp: new Date().toISOString()
                             });
 
@@ -337,7 +337,7 @@ function startMonitoring(sessionId, account, duration = 60000) {
                             stopMonitoring(monitorId);
                             return;
                         } else {
-                            console.log(`[验证码] ⚠️ 验证码不是新的，继续监控: ${latestCode.code} (${latestCode.received_time} <= ${account.last_check_time})`);
+                            console.log(`[验证码] ⚠️ 验证码不是新的，继续监控: ${latestCode.code} (${latestCode.received_at} <= ${account.last_check_time})`);
                         }
                     } else {
                         console.log(`[验证码] 未找到验证码，继续监控`);
@@ -732,6 +732,14 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     const latestCode = verificationCodes.length > 0 ? verificationCodes[0] : null;
 
                     console.log(`[批量导入] 找到验证码: ${email} -> ${latestCode ? latestCode.code : '无'}`);
+                    if (latestCode) {
+                        console.log(`[批量导入] 验证码详情:`, {
+                            code: latestCode.code,
+                            received_at: latestCode.received_at,
+                            sender: latestCode.sender,
+                            subject: latestCode.subject
+                        });
+                    }
 
                     const processedAccountData = {
                         id: 'email_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -776,7 +784,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                             email: email,
                             code: latestCode.code,
                             sender: latestCode.sender || 'Unknown',
-                            received_time: latestCode.received_time || new Date().toISOString()
+                            received_at: latestCode.received_at // 🔧 修复：移除import time fallback，确保使用邮件接收时间
                         });
                     }
 
@@ -998,7 +1006,9 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         } else if (latest_code_received_at) {
             console.log(`[验证码基准] 使用最新验证码邮件时间: ${timeFilter}`);
         } else {
-            console.log(`[验证码基准] 无验证码邮件时间，将获取最新5封邮件`);
+            // 🔧 修复：首次导入无验证码时，设置基准时间为2000-01-01 UTC
+            timeFilter = '2000-01-01T00:00:00Z';
+            console.log(`[验证码基准] 首次导入无验证码，设置基准时间为: ${timeFilter}`);
         }
 
         // 创建账户对象
@@ -1240,10 +1250,10 @@ function extractSenderEmail(email) {
         }
 
         // 🎯 模式3: "Welcome to [Brand]" - 提取品牌名
-        const welcomeToPattern = /(?:Welcome\s+to|Join|Start\s+using)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi;
+        const welcomeToPattern = /(?:Welcome\s+to|Join|Start\s+using)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i;
         match = cleanSubject.match(welcomeToPattern);
-        if (match) {
-            let brandName = match[1].trim();
+        if (match && match.length > 1) {
+            let brandName = match[1] ? match[1].trim() : '';
             // 如果是多词组合，尝试找到主要品牌词
             if (brandName.includes(' ')) {
                 const words = brandName.split(' ');
@@ -1630,6 +1640,12 @@ function extractVerificationCodes(emails) {
 
         const code = extractVerificationCode(subject, bodyContent);
         if (code) {
+            // 🔧 调试：记录时间数据以诊断时间显示问题
+            console.log(`[验证码提取] 提取到验证码: ${code}`);
+            console.log(`[验证码提取] 邮件接收时间: ${receivedTime}`);
+            console.log(`[验证码提取] 邮件主题: ${subject}`);
+            console.log(`[验证码提取] 发件人: ${senderName}`);
+
             codes.push({
                 code: code,
                 sender: senderName,
