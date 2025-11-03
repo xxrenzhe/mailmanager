@@ -15,6 +15,33 @@ const app = express();
 const PORT = process.env.PROXY_PORT || 3001;
 const WS_PORT = process.env.WS_PORT || 3002;
 
+// CORS配置 - 支持Cloudflare CDN
+const corsOptions = {
+    origin: function (origin, callback) {
+        // 允许的域名列表
+        const allowedOrigins = [
+            process.env.DOMAIN_URL || 'http://localhost:3001', // 生产环境域名
+            'https://mailmanager.dev',  // 示例域名
+            'https://www.mailmanager.dev',
+            'http://localhost:3001',    // 开发环境
+            'http://127.0.0.1:3001'
+        ];
+
+        // 允许无origin的请求(如移动应用)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.log('[CORS] 拒绝来源:', origin);
+            callback(new Error('不被CORS策略允许'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
 // 🔧 新增：全局未捕获异常处理，防止进程退出
 process.on('unhandledRejection', (reason, promise) => {
     console.error('[未捕获的Promise拒绝]', reason);
@@ -134,8 +161,26 @@ async function retryWithBackoff(operation, context = '') {
     throw lastError;
 }
 
+// Cloudflare专用中间件 - 获取真实客户端IP
+app.use((req, res, next) => {
+    // 获取Cloudflare转发的真实IP
+    const cfConnectingIp = req.headers['cf-connecting-ip'];
+    const cfRay = req.headers['cf-ray'];
+    const cfCountry = req.headers['cf-country'];
+    const cfIpcountry = req.headers['cf-ipcountry'];
+
+    if (cfConnectingIp) {
+        req.realIp = cfConnectingIp;
+        req.cfRay = cfRay;
+        req.cfCountry = cfCountry || cfIpcountry;
+        console.log(`[Cloudflare] 请求来源 - IP: ${cfConnectingIp}, Ray: ${cfRay}, 国家: ${req.cfCountry}`);
+    }
+
+    next();
+});
+
 // 基础中间件
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

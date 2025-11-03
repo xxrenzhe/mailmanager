@@ -37,12 +37,40 @@ COPY --chown=mailmanager:nodejs js ./js
 RUN mkdir -p /app/data /app/etc && \
     chown -R mailmanager:nodejs /app/data
 
-# 创建 nginx 配置（支持WebSocket代理）
+# 创建 nginx 配置（支持Cloudflare CDN和WebSocket代理）
 RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
+# 域名重定向服务器 - 将mailmanager.dev重定向到www
 server {
     listen 80;
-    server_name localhost;
+    server_name mailmanager.dev;
+
+    # 301永久重定向到www域名
+    return 301 https://www.mailmanager.dev$request_uri;
+}
+
+# 主域名服务器 - 处理www.mailmanager.dev的请求
+server {
+    listen 80;
+    server_name www.mailmanager.dev;
     root /app;
+
+    # Cloudflare真实IP设置
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    real_ip_header CF-Connecting-IP;
 
     # 设置正确的MIME类型
     include /etc/nginx/mime.types;

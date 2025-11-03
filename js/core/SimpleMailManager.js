@@ -74,12 +74,16 @@ class SimpleMailManager {
         try {
             console.log('[WebSocket] 正在连接实时更新服务...');
             let wsUrl;
-            if (window.location.protocol === 'https:') {
-                wsUrl = `wss://${window.location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
-            } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                // 开发环境：直连WebSocket服务器
                 wsUrl = `ws://localhost:3002?sessionId=${encodeURIComponent(this.sessionId)}`;
+                console.log('[WebSocket] 开发环境，使用直连');
             } else {
-                wsUrl = `ws://${window.location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
+                // 生产环境：通过CDN代理连接WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                wsUrl = `${protocol}://${window.location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
+                console.log('[WebSocket] 生产环境，通过CDN连接');
             }
 
             console.log(`[WebSocket] 连接URL: ${wsUrl}`);
