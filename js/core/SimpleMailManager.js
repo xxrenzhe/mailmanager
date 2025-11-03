@@ -1494,12 +1494,7 @@ class SimpleMailManager {
     handleMonitoringStarted(data) {
         console.log('[监控] 监控开始:', data);
 
-        // 🔧 调试：检查所有账户的当前状态
-        console.log(`[调试] handleMonitoringStarted执行前所有账户监控状态:`);
-        this.accounts.forEach(acc => {
-            console.log(`[调试] 账户 ${acc.email}: is_monitoring=${acc.is_monitoring}, monitoring_codes_only=${acc.monitoring_codes_only}`);
-        });
-
+  
         // 更新账户监控状态
         if (data.email_id) {
             const account = this.accounts.find(acc => acc.id === data.email_id);
@@ -1507,11 +1502,7 @@ class SimpleMailManager {
                 console.log(`[监控] 设置账户 ${account.email} is_monitoring = true`);
                 account.is_monitoring = true;
 
-                console.log(`[调试] handleMonitoringStarted设置is_monitoring后:`);
-                this.accounts.forEach(acc => {
-                    console.log(`[调试] 账户 ${acc.email}: is_monitoring=${acc.is_monitoring}, monitoring_codes_only=${acc.monitoring_codes_only}`);
-                });
-
+  
                 this.debouncedSave();
                 this.updateStats();
                 // 立即更新单个账户的UI显示
@@ -1802,9 +1793,7 @@ class SimpleMailManager {
             return;
         }
 
-        // 🔧 调试：输出账户实际状态
-        console.log(`[调试] 账户 ${account.email} 当前状态: ${account.status} (显示为: ${Utils.getStatusConfig(account.status).text})`);
-
+  
         try {
             await navigator.clipboard.writeText(account.email);
             Utils.showNotification('邮箱已复制: ' + account.email, 'success');
@@ -1846,6 +1835,41 @@ class SimpleMailManager {
         if (!latestCode || !latestCode.code) {
             Utils.showNotification('该账户暂无可用验证码', 'warning');
             return;
+        }
+
+        // 🔧 调试：显示账户验证码数据状态
+        console.log(`[复制验证码调试] 账户 ${account.email} 数据状态:`);
+        console.log(`  验证码总数: ${account.codes?.length || 0}`);
+        console.log(`  所有验证码:`, account.codes?.map((c, i) => ({
+            index: i,
+            code: c.code,
+            received_at: c.received_at,
+            subject: c.subject?.substring(0, 30) + '...'
+        })));
+        console.log(`  最新验证码(通过getLatestVerificationCode获取):`, latestCode);
+
+        // 🔧 临时修复：强制从存储重新读取账户数据，确保获取最新数据
+        const storedAccounts = localStorage.getItem('mailmanager_accounts');
+        if (storedAccounts) {
+            try {
+                const parsedAccounts = JSON.parse(storedAccounts);
+                const storedAccount = parsedAccounts.find(acc => acc.id === accountId);
+                if (storedAccount && storedAccount.codes && storedAccount.codes.length > 0) {
+                    console.log(`[复制验证码调试] 从localStorage重新读取到账户数据:`);
+                    console.log(`  存储的验证码数量: ${storedAccount.codes.length}`);
+                    console.log(`  存储的最新验证码:`, storedAccount.codes[0]);
+
+                    // 如果存储的数据中有更新的验证码，使用存储的数据
+                    const storedLatestCode = this.getLatestVerificationCode(storedAccount);
+                    if (storedLatestCode && storedLatestCode.code !== latestCode.code) {
+                        console.log(`[复制验证码修复] 发现存储数据更新，使用存储的验证码: ${storedLatestCode.code}`);
+                        latestCode.code = storedLatestCode.code;
+                        latestCode.received_at = storedLatestCode.received_at;
+                    }
+                }
+            } catch (error) {
+                console.error('[复制验证码调试] 读取存储数据失败:', error);
+            }
         }
 
         try {
