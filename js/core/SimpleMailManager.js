@@ -438,10 +438,11 @@ class SimpleMailManager {
                 account.email_count = data.email_count || 0;
                 account.last_checked = new Date().toISOString();
 
-                // 🔧 关键修复：处理导入时发现的验证码
+                // 🔧 关键修��：处理导入时发现的验证码
                 if (data.data && data.data.verification_code) {
                     const verificationCode = data.data.verification_code;
                     console.log(`[导入进度] 处理导入时发现的验证码: ${account.email} -> ${verificationCode.code}`);
+                    console.log(`[导入进度] 验证码完整数据:`, JSON.stringify(verificationCode, null, 2));
 
                     // 确保有codes数组
                     if (!account.codes) {
@@ -454,7 +455,7 @@ class SimpleMailManager {
                         code: verificationCode.code,
                         sender: verificationCode.sender || 'Unknown',
                         subject: verificationCode.subject || 'Imported during bulk import',
-                        received_at: verificationCode.received_time || verificationCode.received_at || new Date().toISOString(),
+                        received_at: verificationCode.received_at || new Date().toISOString(),
                         import_timestamp: importTimestamp
                     };
 
