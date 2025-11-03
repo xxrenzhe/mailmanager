@@ -485,7 +485,7 @@ class SimpleMailManager {
 
                     // 🔧 更新时间基准为最新验证码的收件时间
                     if (account.codes.length > 0) {
-                        const latestCode = account.codes[0]; // 假设已按时间排序
+                        const latestCode = this.getLatestVerificationCode(account);
                         account.last_code_time = latestCode.received_at;
                         console.log(`[导入进度] 更新时间基准: ${account.last_code_time}`);
                     }
@@ -1265,7 +1265,23 @@ class SimpleMailManager {
         }
     }
 
-    
+    // 🔧 新增：统一的获取最新验证码工具函数
+    getLatestVerificationCode(account) {
+        if (!account.codes || account.codes.length === 0) {
+            return null;
+        }
+
+        // 使用安全的排序逻辑，确保获取真正最新的验证码
+        const sortedCodes = [...account.codes].sort((a, b) => {
+            const timeA = a.received_at ? new Date(a.received_at).getTime() : 0;
+            const timeB = b.received_at ? new Date(b.received_at).getTime() : 0;
+            // 如果时间解析失败，使用0作为默认值
+            return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA); // 降序，最新的在前
+        });
+
+        return sortedCodes[0];
+    }
+
     // 验证码显示逻辑 - 只显示纯数字验证码（从simple-mail-manager.html复制）
     getVerificationCodeDisplay(account) {
         console.log(`[验证码显示] 账户 ${account.email} - is_monitoring: ${account.is_monitoring}, monitoring_codes_only: ${account.monitoring_codes_only}, codes数量: ${account.codes?.length || 0}`);
@@ -1286,15 +1302,9 @@ class SimpleMailManager {
             return '<span class="text-gray-400 text-base">无</span>';
         }
 
-        // 🔧 修复：安全排序，确保显示真正最新的验证码
-        const sortedCodes = [...account.codes].sort((a, b) => {
-            const timeA = new Date(a.received_at).getTime();
-            const timeB = new Date(b.received_at).getTime();
-            return timeB - timeA; // 降序，最新的在前
-        });
-
-        const latestCode = sortedCodes[0];
-        console.log(`[验证码显示] 账户 ${account.email} 排序后最新验证码:`, latestCode);
+        // 🔧 修复：使用统一的工具函数获取最新验证码
+        const latestCode = this.getLatestVerificationCode(account);
+        console.log(`[验证码显示] 账户 ${account.email} 最新验证码:`, latestCode);
         console.log(`[验证码显示] 账户 ${account.email} 验证码总数: ${account.codes.length}`);
 
         // 验证码显示逻辑：只要是从最近5封邮件中提取的验证码就显示
@@ -1399,7 +1409,7 @@ class SimpleMailManager {
             return '<span class="text-gray-400 text-base">无</span>';
         }
 
-        const latestCode = account.codes[0];
+        const latestCode = this.getLatestVerificationCode(account);
 
         // 检查是否是纯数字验证码（只有纯数字验证码才显示时间）
         const isNumericCode = /^\d+$/.test(latestCode.code);
@@ -1421,7 +1431,7 @@ class SimpleMailManager {
             return '<span class="text-gray-400 text-base">无</span>';
         }
 
-        const latestCode = account.codes[0];
+        const latestCode = this.getLatestVerificationCode(account);
         if (!latestCode || !latestCode.sender) {
             return '<span class="text-gray-400 text-base">无</span>';
         }
@@ -1831,8 +1841,8 @@ class SimpleMailManager {
             return;
         }
 
-        // 获取最新的验证码
-        const latestCode = account.codes[0]; // 假设codes按时间倒序排列
+        // 🔧 修复：使用统一的工具函数获取最新验证码
+        const latestCode = this.getLatestVerificationCode(account);
         if (!latestCode || !latestCode.code) {
             Utils.showNotification('该账户暂无可用验证码', 'warning');
             return;
