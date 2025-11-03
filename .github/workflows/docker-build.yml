@@ -278,7 +278,7 @@ jobs:
         echo "### 🔗 Quick Access" >> $GITHUB_STEP_SUMMARY
         echo "- **Web Interface**: [Open MailManager](${{ steps.deploy.outputs.url }})" >> $GITHUB_STEP_SUMMARY
         echo "- **Health Check**: [API Health](${{ steps.deploy.outputs.url }}/api/health)" >> $GITHUB_STEP_SUMMARY
-        echo "- **WebSocket**: ws://${{ steps.deploy.outputs.url | replace('https://', '') | replace('http://', '') }}/ws" >> $GITHUB_STEP_SUMMARY
+        echo "- **WebSocket**: Use wss:// protocol with the same domain as web interface" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
         echo "*Deployed at: $(date)*" >> $GITHUB_STEP_SUMMARY
