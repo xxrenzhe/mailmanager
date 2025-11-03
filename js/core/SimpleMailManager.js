@@ -923,23 +923,37 @@ class SimpleMailManager {
         const endIndex = Math.min(startIndex + this.pageSize, this.filteredAccounts.length);
         const pageAccounts = this.filteredAccounts.slice(startIndex, endIndex);
 
-        // 生成表格HTML - 使用simple-mail-manager.html的结构和样式
+        // 生成表格HTML - 统一使用localStorage数据源
         let html = '';
+        const storedAccounts = localStorage.getItem('mailmanager_accounts');
+        let parsedAccounts = [];
+        if (storedAccounts) {
+            try {
+                parsedAccounts = JSON.parse(storedAccounts);
+            } catch (error) {
+                console.error('渲染时读取localStorage失败:', error);
+                parsedAccounts = this.accounts; // 降级使用内存数据
+            }
+        }
+
         pageAccounts.forEach(account => {
-            const statusConfig = Utils.getStatusConfig(account.status);
-            const latestCode = account.codes && account.codes.length > 0 ?
-                account.codes[account.codes.length - 1] : null;
+            // ✅ 统一数据源：从localStorage获取账户数据
+            const localStorageAccount = parsedAccounts.find(acc => acc.id === account.id) || account;
+
+            const statusConfig = Utils.getStatusConfig(localStorageAccount.status);
+            const latestCode = localStorageAccount.codes && localStorageAccount.codes.length > 0 ?
+                localStorageAccount.codes[localStorageAccount.codes.length - 1] : null;
 
             // 获取状态类和图标（使用simple-mail-manager.html的方式）
-            const statusClass = Utils.getStatusColorClass(account.status);
-            const statusIcon = this.getStatusIcon(account.status);
+            const statusClass = Utils.getStatusColorClass(localStorageAccount.status);
+            const statusIcon = this.getStatusIcon(localStorageAccount.status);
             const statusText = statusConfig.text;
 
             html += `
-                <tr class="hover:bg-gray-50 transition-colors" data-account-id="${account.id}">
+                <tr class="hover:bg-gray-50 transition-colors" data-account-id="${localStorageAccount.id}">
                     <td class="px-3 py-3 whitespace-nowrap text-center w-16">
                         <span class="text-base font-medium text-gray-900 bg-gray-100 px-2 py-1 rounded">
-                            ${account.sequence || account.import_seq || '-'}
+                            ${localStorageAccount.sequence || localStorageAccount.import_seq || '-'}
                         </span>
                     </td>
                     <td class="px-3 py-3 whitespace-nowrap w-20">
@@ -952,22 +966,22 @@ class SimpleMailManager {
                         <div class="flex items-center">
                             <i class="fas fa-envelope text-gray-400 mr-3 text-base"></i>
                             <span class="text-base font-medium text-gray-900 cursor-pointer hover:text-blue-600 transition truncate"
-                                  onclick="copyEmailToClipboard('${account.id}')"
-                                  title="${account.email}">
-                                ${account.email}
+                                  onclick="copyEmailToClipboard('${localStorageAccount.id}')"
+                                  title="${localStorageAccount.email}">
+                                ${localStorageAccount.email}
                             </span>
                         </div>
                     </td>
                     <td class="px-3 py-3 whitespace-nowrap text-center w-14">
                         <input type="checkbox"
                                class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                               data-account-id="${account.id}"
-                               ${this.selectedAccounts.has(account.id) ? 'checked' : ''}
+                               data-account-id="${localStorageAccount.id}"
+                               ${this.selectedAccounts.has(localStorageAccount.id) ? 'checked' : ''}
                                onchange="handleAccountSelection(this)">
                     </td>
                     <td class="px-3 py-3 whitespace-nowrap w-32 code-cell">
-                        <div class="flex flex-col ${account.is_new_code ? 'bg-blue-50 border border-blue-300 rounded' : ''}">
-                            ${this.getVerificationCodeDisplay(account)}
+                        <div class="flex flex-col ${localStorageAccount.is_new_code ? 'bg-blue-50 border border-blue-300 rounded' : ''}">
+                            ${this.getVerificationCodeDisplay(localStorageAccount)}
                         </div>
                     </td>
                     <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-28">
@@ -1282,7 +1296,7 @@ class SimpleMailManager {
         return sortedCodes[0];
     }
 
-    // 验证码显示逻辑 - 只显示纯数字验证码（从simple-mail-manager.html复制）
+    // 验证码显示逻辑 - 简化版本，直接使用内存数据
     getVerificationCodeDisplay(account) {
         console.log(`[验证码显示] 账户 ${account.email} - is_monitoring: ${account.is_monitoring}, monitoring_codes_only: ${account.monitoring_codes_only}, codes数量: ${account.codes?.length || 0}`);
 
@@ -1302,7 +1316,7 @@ class SimpleMailManager {
             return '<span class="text-gray-400 text-base">无</span>';
         }
 
-        // 🔧 修复：使用统一的工具函数获取最新验证码
+        // 🔧 使用统一的工具函数获取最新验证码
         const latestCode = this.getLatestVerificationCode(account);
         console.log(`[验证码显示] 账户 ${account.email} 最新验证码:`, latestCode);
         console.log(`[验证码显示] 账户 ${account.email} 验证码总数: ${account.codes.length}`);
@@ -1310,15 +1324,6 @@ class SimpleMailManager {
         // 验证码显示逻辑：只要是从最近5封邮件中提取的验证码就显示
         // 这包括导入时自动获取的验证码和手动同步获取的验证码
         // 不基于时间判断，基于数据来源判断（从最新邮件提取）
-
-        // 如果账户有邮件数据，说明已经进行过邮件同步
-        const hasEmailData = account.emails && account.emails.length > 0;
-
-        // 如果账户有last_sync时间戳，说明进行过邮件同步
-        const hasBeenSynced = !!account.last_sync;
-
-        // 简化验证码显示逻辑：只要有验证码数据就显示
-        // 后端已经成功提取了验证码，应该立即显示
 
         // 检查是否为纯数字验证码
         const isNumericCode = /^\d+$/.test(latestCode.code);
@@ -1404,6 +1409,16 @@ class SimpleMailManager {
   
     // 获取验证码收件时间显示（从simple-mail-manager.html复制）
     getActiveTimeDisplay(account) {
+        // 🔧 如果账户正在监控中，显示"监控中..."
+        if (account.is_monitoring) {
+            return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
+        }
+
+        // 如果账户设置了只显示监控期间的验证码，但还没有新验证码，显示"监控中..."
+        if (account.monitoring_codes_only && (!account.codes || account.codes.length === 0)) {
+            return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
+        }
+
         // 如果没有验证码，显示"无"
         if (!account.codes || account.codes.length === 0) {
             return '<span class="text-gray-400 text-base">无</span>';
@@ -1427,6 +1442,16 @@ class SimpleMailManager {
 
     // 发件人显示逻辑 - 精简显示（从simple-mail-manager.html复制）
     getEmailSenderDisplay(account) {
+        // 🔧 如果账户正在监控中，显示"监控中..."
+        if (account.is_monitoring) {
+            return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
+        }
+
+        // 如果账户设置了只显示监控期间的验证码，但还没有新验证码，显示"监控中..."
+        if (account.monitoring_codes_only && (!account.codes || account.codes.length === 0)) {
+            return '<span class="text-blue-500 text-base animate-pulse">监控中...</span>';
+        }
+
         if (!account.codes || account.codes.length === 0) {
             return '<span class="text-gray-400 text-base">无</span>';
         }
@@ -1817,27 +1842,16 @@ class SimpleMailManager {
 
     // 复制最新验证码到剪贴板
     async copyLatestCode(accountId) {
-        // ✅ 方案1：统一数据源 - 始终从localStorage读取数据，确保与显示数据一致
-        const storedAccounts = localStorage.getItem('mailmanager_accounts');
-        if (!storedAccounts) {
-            Utils.showNotification('没有账户数据', 'error');
+        // ✅ 正确方案：优先从内存读取最新数据，同时确保数据已同步到localStorage
+        const account = this.accounts.find(acc => acc.id === accountId);
+        if (!account) {
+            console.error(`[错误] 找不到账户ID: ${accountId}`);
+            Utils.showNotification('找不到对应账户', 'error');
             return;
         }
 
-        let account;
-        try {
-            const parsedAccounts = JSON.parse(storedAccounts);
-            account = parsedAccounts.find(acc => acc.id === accountId);
-            if (!account) {
-                console.error(`[错误] 找不到账户ID: ${accountId}`);
-                Utils.showNotification('找不到对应账户', 'error');
-                return;
-            }
-        } catch (error) {
-            console.error('读取账户数据失败:', error);
-            Utils.showNotification('账户数据读取失败', 'error');
-            return;
-        }
+        // 🔧 确保数据同步：在复制前先保存最新数据到localStorage
+        await this.saveAccounts();
 
         // 检查是否有验证码
         if (!account.codes || account.codes.length === 0) {
@@ -1864,27 +1878,16 @@ class SimpleMailManager {
 
     // 只复制邮箱地址到剪贴板（不启动监控）
     async copyEmailOnly(accountId) {
-        // ✅ 统一数据源：也从localStorage读取，保持一致性
-        const storedAccounts = localStorage.getItem('mailmanager_accounts');
-        if (!storedAccounts) {
-            Utils.showNotification('没有账户数据', 'error');
+        // ✅ 正确方案：优先从内存读取最新数据，同时确保数据已同步到localStorage
+        const account = this.accounts.find(acc => acc.id === accountId);
+        if (!account) {
+            console.error(`[错误] 找不到账户ID: ${accountId}`);
+            Utils.showNotification('找不到对应账户', 'error');
             return;
         }
 
-        let account;
-        try {
-            const parsedAccounts = JSON.parse(storedAccounts);
-            account = parsedAccounts.find(acc => acc.id === accountId);
-            if (!account) {
-                console.error(`[错误] 找不到账户ID: ${accountId}`);
-                Utils.showNotification('找不到对应账户', 'error');
-                return;
-            }
-        } catch (error) {
-            console.error('读取账户数据失败:', error);
-            Utils.showNotification('账户数据读取失败', 'error');
-            return;
-        }
+        // 🔧 确保数据同步：在复制前先保存最新数据到localStorage
+        await this.saveAccounts();
 
         try {
             await navigator.clipboard.writeText(account.email);
