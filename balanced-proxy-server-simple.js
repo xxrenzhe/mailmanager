@@ -1193,11 +1193,16 @@ function stripHtmlTags(html) {
 
 // 🎯 精确主体词提取算法 - 只提取主语品牌名
 function extractSenderEmail(email) {
-    if (!email || !email.Subject) return 'unknown';
+    if (!email) return 'unknown';
 
     try {
-        const subject = email.Subject.trim();
-        console.log(`[主体词提取] 分析主题: "${subject}"`);
+        // 处理Microsoft Graph API的Pascal命名和camelCase命名法
+        const subject = email.Subject || email.subject || '';
+        if (!subject) return 'unknown';
+
+        const cleanSubject = subject.trim();
+        if (!cleanSubject) return 'unknown';
+        console.log(`[主体词提取] 分析主题: "${cleanSubject}"`);
 
         // 🎯 定义知名品牌和服务名称（单个词）
         const knownBrands = new Set([
@@ -1210,7 +1215,7 @@ function extractSenderEmail(email) {
 
         // 🎯 模式1: "You just made a commission via [Service Name]!" - 保留完整服务名
         const commissionViaPattern = /^You just made a commission via\s+([A-Za-z0-9\s&']+?)\s*!?\s*$/i;
-        let match = subject.match(commissionViaPattern);
+        let match = cleanSubject.match(commissionViaPattern);
         if (match) {
             let serviceName = match[1].trim();
             serviceName = serviceName.replace(/\s+/g, ' ');
@@ -1225,7 +1230,7 @@ function extractSenderEmail(email) {
         ];
 
         for (const pattern of brandBusinessPatterns) {
-            const matches = [...subject.matchAll(pattern)];
+            const matches = [...cleanSubject.matchAll(pattern)];
             if (matches.length > 0) {
                 let brandName = matches[0][2] || matches[0][1]; // 适配不同捕获组
                 brandName = brandName.charAt(0).toUpperCase() + brandName.slice(1).toLowerCase();
@@ -1236,7 +1241,7 @@ function extractSenderEmail(email) {
 
         // 🎯 模式3: "Welcome to [Brand]" - 提取品牌名
         const welcomeToPattern = /(?:Welcome\s+to|Join|Start\s+using)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi;
-        match = subject.match(welcomeToPattern);
+        match = cleanSubject.match(welcomeToPattern);
         if (match) {
             let brandName = match[1].trim();
             // 如果是多词组合，尝试找到主要品牌词
