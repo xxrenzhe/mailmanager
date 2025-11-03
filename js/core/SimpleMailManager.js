@@ -1817,10 +1817,25 @@ class SimpleMailManager {
 
     // 复制最新验证码到剪贴板
     async copyLatestCode(accountId) {
-        const account = this.accounts.find(acc => acc.id === accountId);
-        if (!account) {
-            console.error(`[错误] 找不到账户ID: ${accountId}`);
-            Utils.showNotification('找不到对应账户', 'error');
+        // ✅ 方案1：统一数据源 - 始终从localStorage读取数据，确保与显示数据一致
+        const storedAccounts = localStorage.getItem('mailmanager_accounts');
+        if (!storedAccounts) {
+            Utils.showNotification('没有账户数据', 'error');
+            return;
+        }
+
+        let account;
+        try {
+            const parsedAccounts = JSON.parse(storedAccounts);
+            account = parsedAccounts.find(acc => acc.id === accountId);
+            if (!account) {
+                console.error(`[错误] 找不到账户ID: ${accountId}`);
+                Utils.showNotification('找不到对应账户', 'error');
+                return;
+            }
+        } catch (error) {
+            console.error('读取账户数据失败:', error);
+            Utils.showNotification('账户数据读取失败', 'error');
             return;
         }
 
@@ -1830,46 +1845,11 @@ class SimpleMailManager {
             return;
         }
 
-        // 🔧 修复：使用统一的工具函数获取最新验证码
+        // 使用统一的工具函数获取最新验证码
         const latestCode = this.getLatestVerificationCode(account);
         if (!latestCode || !latestCode.code) {
             Utils.showNotification('该账户暂无可用验证码', 'warning');
             return;
-        }
-
-        // 🔧 调试：显示账户验证码数据状态
-        console.log(`[复制验证码调试] 账户 ${account.email} 数据状态:`);
-        console.log(`  验证码总数: ${account.codes?.length || 0}`);
-        console.log(`  所有验证码:`, account.codes?.map((c, i) => ({
-            index: i,
-            code: c.code,
-            received_at: c.received_at,
-            subject: c.subject?.substring(0, 30) + '...'
-        })));
-        console.log(`  最新验证码(通过getLatestVerificationCode获取):`, latestCode);
-
-        // 🔧 临时修复：强制从存储重新读取账户数据，确保获取最新数据
-        const storedAccounts = localStorage.getItem('mailmanager_accounts');
-        if (storedAccounts) {
-            try {
-                const parsedAccounts = JSON.parse(storedAccounts);
-                const storedAccount = parsedAccounts.find(acc => acc.id === accountId);
-                if (storedAccount && storedAccount.codes && storedAccount.codes.length > 0) {
-                    console.log(`[复制验证码调试] 从localStorage重新读取到账户数据:`);
-                    console.log(`  存储的验证码数量: ${storedAccount.codes.length}`);
-                    console.log(`  存储的最新验证码:`, storedAccount.codes[0]);
-
-                    // 如果存储的数据中有更新的验证码，使用存储的数据
-                    const storedLatestCode = this.getLatestVerificationCode(storedAccount);
-                    if (storedLatestCode && storedLatestCode.code !== latestCode.code) {
-                        console.log(`[复制验证码修复] 发现存储数据更新，使用存储的验证码: ${storedLatestCode.code}`);
-                        latestCode.code = storedLatestCode.code;
-                        latestCode.received_at = storedLatestCode.received_at;
-                    }
-                }
-            } catch (error) {
-                console.error('[复制验证码调试] 读取存储数据失败:', error);
-            }
         }
 
         try {
@@ -1884,10 +1864,25 @@ class SimpleMailManager {
 
     // 只复制邮箱地址到剪贴板（不启动监控）
     async copyEmailOnly(accountId) {
-        const account = this.accounts.find(acc => acc.id === accountId);
-        if (!account) {
-            console.error(`[错误] 找不到账户ID: ${accountId}`);
-            Utils.showNotification('找不到对应账户', 'error');
+        // ✅ 统一数据源：也从localStorage读取，保持一致性
+        const storedAccounts = localStorage.getItem('mailmanager_accounts');
+        if (!storedAccounts) {
+            Utils.showNotification('没有账户数据', 'error');
+            return;
+        }
+
+        let account;
+        try {
+            const parsedAccounts = JSON.parse(storedAccounts);
+            account = parsedAccounts.find(acc => acc.id === accountId);
+            if (!account) {
+                console.error(`[错误] 找不到账户ID: ${accountId}`);
+                Utils.showNotification('找不到对应账户', 'error');
+                return;
+            }
+        } catch (error) {
+            console.error('读取账户数据失败:', error);
+            Utils.showNotification('账户数据读取失败', 'error');
             return;
         }
 
