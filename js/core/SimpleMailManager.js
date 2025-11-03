@@ -431,12 +431,41 @@ class SimpleMailManager {
                 account = this.accounts.find(acc => acc.email === data.email && acc.status === 'pending');
             }
 
-            // KISS：前端已经创建了账户，只需要更新状态
+            // KISS：前端已经创建了账户���只需要更新状态
             if (account) {
                 const oldStatus = account.status;
                 account.status = data.status;
                 account.email_count = data.email_count || 0;
                 account.last_checked = new Date().toISOString();
+
+                // 🔧 关键修复：处理导入时发现的验证码
+                if (data.data && data.data.verification_code) {
+                    const verificationCode = data.data.verification_code;
+                    console.log(`[导入进度] 处理导入时发现的验证码: ${account.email} -> ${verificationCode.code}`);
+
+                    // 确保有codes数组
+                    if (!account.codes) {
+                        account.codes = [];
+                    }
+
+                    // 添加验证码到codes数组
+                    const importTimestamp = new Date().toISOString();
+                    const codeData = {
+                        code: verificationCode.code,
+                        sender: verificationCode.sender || 'Unknown',
+                        subject: verificationCode.subject || 'Imported during bulk import',
+                        received_at: verificationCode.received_time || verificationCode.received_at || new Date().toISOString(),
+                        import_timestamp: importTimestamp
+                    };
+
+                    // 插入到codes数组开头（最新的在前面）
+                    account.codes.unshift(codeData);
+
+                    // 🔧 更新时间基准为最新验证码的收件时间
+                    account.last_code_time = codeData.received_at;
+                    console.log(`[导入进度] 更新时间基准: ${account.last_code_time}`);
+                    console.log(`[导入进度] 验证码收件时间: ${codeData.received_at}`);
+                }
 
                 // 如果账户状态变为已授权且有验证码，标记为导入时获取的新验证码
                 // 🔧 支持多种已授权状态，确保批量导入的验证码显示为新验证码
@@ -1216,15 +1245,23 @@ class SimpleMailManager {
     // 格式化完整时间（从simple-mail-manager.html复制）
     formatFullTime(timestamp) {
         if (!timestamp) return '-';
-        const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        });
+
+        try {
+            const date = new Date(timestamp);
+
+            // 验证日期有效性
+            if (isNaN(date.getTime())) {
+                console.warn(`[时间格式化] 无效的时间戳: ${timestamp}`);
+                return '-';
+            }
+
+            // 🔧 KISS原则: 直接显示UTC时间，简单可靠
+            const utcTime = date.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+            return utcTime;
+        } catch (error) {
+            console.error(`[时间格式化] 错误:`, error);
+            return '-';
+        }
     }
 
     

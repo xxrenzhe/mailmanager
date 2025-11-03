@@ -1621,14 +1621,14 @@ function extractVerificationCodes(emails) {
         const bodyContent = email.Body?.Content || email.body?.content || '';
         // 从邮件主题中提取发件人关键词作为显示名称
         const senderName = extractSenderEmail(email);
-        const receivedTime = email.ReceivedDateTime || email.receivedDateTime;
+        const receivedTime = email.ReceivedDateTime || email.receivedDateTime; // 🔧 KISS原则: 直接使用UTC时间
 
         const code = extractVerificationCode(subject, bodyContent);
         if (code) {
             codes.push({
                 code: code,
                 sender: senderName,
-                received_at: receivedTime, // 🔧 统一字段名为received_at
+                received_at: receivedTime, // UTC时间，简单可靠
                 subject: subject
             });
         }
