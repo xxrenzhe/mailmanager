@@ -39,19 +39,10 @@ RUN mkdir -p /app/data /app/etc && \
 
 # 创建 nginx 配置（支持Cloudflare CDN和WebSocket代理）
 RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
-# 域名重定向服务器 - 将mailmanager.dev重定向到www
+# 主域名服务器 - 处理所有域名请求
 server {
     listen 80;
-    server_name mailmanager.dev;
-
-    # 301永久重定向到www域名
-    return 301 https://www.mailmanager.dev$request_uri;
-}
-
-# 主域名服务器 - 处理www.mailmanager.dev的请求
-server {
-    listen 80;
-    server_name www.mailmanager.dev;
+    server_name mailmanager.dev www.mailmanager.dev;
     root /app;
 
     # Cloudflare真实IP设置

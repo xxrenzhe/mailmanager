@@ -1,4 +1,4 @@
-# 基本原则
+# 基本原则和项目信息
 1. 使用中文进行沟通和文档输出
 2. 遵循KISS原则，在确保实现业务需求的情况下，简化代码实现，提高可维护性
 3. 不要为了简化，而破坏业务核心功能和逻辑，简化不是无脑删除，而是在保持业务价值的前提下提升代码质量和可维护性
@@ -8,7 +8,13 @@
 7. 修复前必先全面检查依赖关系，增量修复优于整体重写，确保所有现有功能完整保留
 8. 分析数据流问题时，必须逆向检查所有fallback和默认值逻辑，因为异常路径往往比正常路径更容易隐藏真正的问题根源
 9. 修复特定问题时，必须严格限制修改范围，只触碰与问题直接相关的代码，并在修改后立即验证所有核心功能是否正常
-10. 代码分支和部署流程（Github Actions）
+10. 请自行访问GCP完成更新：使用secrets目录下的gcp_codex_dev.json密钥文件
+- GCP服务账号：codex-dev@gen-lang-client-0944935873.iam.gserviceaccount.com
+- GCP_Project_ID：gen-lang-client-0944935873
+- GCP_REGION：asia-northeast1
+11. secrets目录和其下的所有文件都不能上传Github，也不能打包进入镜像
+12. 301跳转实现：使用Cloudflare CDN配置域名重定向（mailmanager.dev → www.mailmanager.dev），避免在应用层实现，遵循单一职责原则
+13. 代码分支和部署流程（Github Actions）
    部署流程主要分两步，第一步：推送代码到Github，触发Github Actions，生成镜像；第二部：手动拉取镜像并部署到ClawCloud
    - 代码推送到main分支，触发production环境镜像构建：标注 docker image tag 为 prod-latest 和 prod-[commitid]
    - 当打了tag（如v3.0.0），触发production环境镜像构建：标注 docker image tag 为 prod-[tag] 和 prod-[commitid]

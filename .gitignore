@@ -65,3 +65,4 @@ token_diagnosis.html
 dev/data/backup/
 *.bak
 *.backup
+secrets/
