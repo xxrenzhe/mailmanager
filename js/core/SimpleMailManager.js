@@ -168,6 +168,17 @@ class SimpleMailManager {
         console.log('[WebSocket] 收到事件:', data);
         console.log('[WebSocket] 事件类型:', data.type);
 
+        // 🔧 调试：特别关注监控事件
+        if (data.type === 'monitoring_started' || data.type === 'monitoring_ended') {
+            console.log(`[WebSocket 调试] 监控事件详情:`, {
+                type: data.type,
+                email: data.email,
+                email_id: data.email_id,
+                message: data.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+
         switch (data.type) {
             case 'connection_established':
                 console.log(`[WebSocket] 连接确认: ${data.clientId}`);
