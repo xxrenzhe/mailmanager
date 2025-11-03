@@ -396,27 +396,7 @@ class SimpleMailManager {
         this.updateStats();
     }
 
-    // 🔧 统一监控系统 - 处理监控开始事件
-    handleMonitoringStarted(data) {
-        console.log('[监控] 监控开始:', data);
-
-        // 更新账户监控状态
-        if (data.email_id) {
-            const account = this.accounts.find(acc => acc.id === data.email_id);
-            if (account) {
-                console.log(`[监控] 设置账户 ${account.email} is_monitoring = true`);
-                account.is_monitoring = true;
-                this.debouncedSave();
-                this.updateStats();
-                this.render();
-            } else {
-                console.error(`[监控] handleMonitoringStarted找不到账户ID: ${data.email_id}`);
-            }
-        }
-
-        Utils.showNotification(data.message || '监控已开始', 'info');
-    }
-
+  
     // 统一处理导入进度事件（合并批量导入和单个导入进度）
     handleImportProgress(data) {
         if (data.message) {
@@ -991,8 +971,8 @@ class SimpleMailManager {
                                onchange="handleAccountSelection(this)">
                     </td>
                     <td class="px-3 py-3 whitespace-nowrap w-32 code-cell">
-                        <div class="flex flex-col ${localStorageAccount.is_new_code ? 'bg-blue-50 border border-blue-300 rounded' : ''}">
-                            ${this.getVerificationCodeDisplay(localStorageAccount)}
+                        <div class="flex flex-col ${account.is_new_code ? 'bg-blue-50 border border-blue-300 rounded' : ''}">
+                            ${this.getVerificationCodeDisplay(account)}
                         </div>
                     </td>
                     <td class="px-3 py-3 whitespace-nowrap text-base text-gray-600 w-28">
