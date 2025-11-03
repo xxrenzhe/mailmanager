@@ -112,14 +112,16 @@ jobs:
         flavor: |
           latest=false
 
-    - name: Build and push Docker image
+    - name: Build and push Docker image to both registries
       id: build
       uses: docker/build-push-action@v5
       with:
         context: .
         platforms: linux/amd64,linux/arm64
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest
+          ${{ env.GCP_REGISTRY }}/${{ env.GCP_PROJECT }}/mailmanager/mailmanager:prod-latest
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -221,18 +223,6 @@ jobs:
 
     - name: Configure Docker for GCP Artifact Registry
       run: gcloud auth configure-docker ${{ env.GCP_REGISTRY }}
-
-    - name: Tag and push image to GCP Artifact Registry
-      run: |
-        # 拉取镜像
-        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest
-
-        # 重新标记为GCP镜像
-        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod-latest \
-          ${{ env.GCP_REGISTRY }}/${{ env.GCP_PROJECT }}/mailmanager/mailmanager:prod-latest
-
-        # 推送到GCP Artifact Registry
-        docker push ${{ env.GCP_REGISTRY }}/${{ env.GCP_PROJECT }}/mailmanager/mailmanager:prod-latest
 
     - name: Deploy to Cloud Run
       id: deploy
