@@ -1527,35 +1527,26 @@ function showEdgeSimpleGuide() {
 
 // Edge专用PowerShell自动打开
 function openEdgePowerShellAsAdmin() {
-    try {
-        // 使用编码后的URL避免空格问题
-        const encodedCommand = encodeURIComponent('powershell.exe -NoProfile -ExecutionPolicy Bypass');
-        const cmdUrl = `msedge://shell:runas/user:administrator ${encodedCommand}`;
+    console.log('[DEBUG] 尝试自动打开PowerShell...');
 
-        console.log('[DEBUG] 尝试打开Edge shell协议:', cmdUrl);
-        window.open(cmdUrl, '_blank');
+    // 由于浏览器安全限制，无法自动打开管理员PowerShell
+    // 改为提供清晰的指导，让用户手动操作
+    setTimeout(() => {
+        Utils.showNotification('配置命令已复制！请按Win+X，选择"Windows PowerShell (管理员)"，然后按Ctrl+V粘贴命令并回车', 'success');
 
-        // 备选方案：直接使用shell协议
-        setTimeout(() => {
-            try {
-                const fallbackUrl = 'shell:runas/user:administrator powershell.exe';
-                console.log('[DEBUG] 尝试备选shell协议:', fallbackUrl);
-                window.open(fallbackUrl, '_blank');
-            } catch (fallbackError) {
-                console.log('[DEBUG] shell协议也失败:', fallbackError);
-                Utils.showNotification('请手动打开PowerShell（管理员权限）', 'info');
-            }
-        }, 1500);
+        // 同时显示更详细的指导
+        console.log('[DEBUG] 显示PowerShell打开指导');
+        Utils.showModal('🚀 PowerShell操作指导', `
+📋 **下一步操作**：
 
-    } catch (error) {
-        console.log('[DEBUG] Edge PowerShell自动打开失败:', error);
+1. 按 **Win + X** 键
+2. 选择 **"Windows PowerShell (管理员)"**
+3. 在PowerShell窗口中按 **Ctrl + V** 粘贴命令
+4. 按 **回车键** 执行配置
 
-        // 直接尝试shell协议
-        try {
-            const fallbackUrl = 'shell:runas/user:administrator powershell.exe';
-            window.open(fallbackUrl, '_blank');
-        } catch (fallbackError) {
-            Utils.showNotification('请手动打开PowerShell（管理员权限）', 'info');
-        }
-    }
+✨ **命令已自动复制到剪贴板**
+
+💡 **提示**：如果UAC提示，请点击"是"允许管理员权限
+        `);
+    }, 500);
 }
