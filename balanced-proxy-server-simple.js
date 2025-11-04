@@ -1142,15 +1142,16 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                 let searchCriteria;
                 if (timeFilter && timeFilter !== '2000-01-01T00:00:00Z') {
                     // 将时间转换为IMAP兼容的日期格式 (DD-MMM-YYYY)
+                    // 使用UTC日期避免时区差异问题
                     const filterDate = new Date(timeFilter);
-                    const day = String(filterDate.getDate()).padStart(2, '0');
+                    const day = String(filterDate.getUTCDate()).padStart(2, '0');
                     const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
-                    const year = filterDate.getFullYear();
+                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getUTCMonth()];
+                    const year = filterDate.getUTCFullYear();
                     // 使用正确的IMAP日期格式字符串 (DD-MMM-YYYY)
                     // 注意：IMAP库接受此格式，与文档示例略有不同但有效
                     const dateString = `${day}-${month}-${year}`;
-                    console.log(`[调试] IMAP搜索日期格式: "${dateString}" (原始时间: ${timeFilter})`);
+                    console.log(`[调试] IMAP搜索日期格式: "${dateString}" (原始时间: ${timeFilter}, UTC时间: ${filterDate.toUTCString()})`);
                     searchCriteria = ['SINCE', dateString];
                 } else {
                     searchCriteria = ['ALL'];
@@ -1378,15 +1379,16 @@ async function fetchICloudEmails(email, password, timeFilter = null) {
                 let searchCriteria;
                 if (timeFilter && timeFilter !== '2000-01-01T00:00:00Z') {
                     // 将时间转换为IMAP兼容的日期格式 (DD-MMM-YYYY)
+                    // 使用UTC日期避免时区差异问题
                     const filterDate = new Date(timeFilter);
-                    const day = String(filterDate.getDate()).padStart(2, '0');
+                    const day = String(filterDate.getUTCDate()).padStart(2, '0');
                     const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
-                    const year = filterDate.getFullYear();
+                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getUTCMonth()];
+                    const year = filterDate.getUTCFullYear();
                     // 使用正确的IMAP日期格式字符串 (DD-MMM-YYYY)
                     // 注意：IMAP库接受此格式，与文档示例略有不同但有效
                     const dateString = `${day}-${month}-${year}`;
-                    console.log(`[调试] IMAP搜索日期格式: "${dateString}" (原始时间: ${timeFilter})`);
+                    console.log(`[调试] IMAP搜索日期格式: "${dateString}" (原始时间: ${timeFilter}, UTC时间: ${filterDate.toUTCString()})`);
                     searchCriteria = ['SINCE', dateString];
                 } else {
                     searchCriteria = ['ALL'];
