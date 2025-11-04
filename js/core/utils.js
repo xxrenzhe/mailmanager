@@ -363,6 +363,10 @@ const Utils = {
             // Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
             console.log(`[Parse] 识别为Yahoo邮箱格式，开始解析...`);
             result = this.parseYahooLine(line, email);
+        } else if (domain.includes('icloud.com') || domain.includes('me.com')) {
+            // iCloud邮箱格式：邮箱地址----应用专用密码
+            console.log(`[Parse] 识别为iCloud邮箱格式，开始解析...`);
+            result = this.parseICloudLine(line, email);
         } else {
             // Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
             console.log(`[Parse] 识别为Outlook邮箱格式，开始解析...`);
@@ -415,6 +419,42 @@ const Utils = {
         };
 
         console.log(`[Parse-Yahoo] 解析成功:`, result);
+        return result;
+    },
+
+    // 解析iCloud邮箱格式：邮箱地址----应用专用密码
+    parseICloudLine(line, email) {
+        console.log(`[Parse-iCloud] 开始解析iCloud邮箱: ${email}`);
+        console.log(`[Parse-iCloud] 原始行: "${line}"`);
+
+        const parts = line.split('----');
+        console.log(`[Parse-iCloud] 分割后字段数: ${parts.length}, 字段:`, parts);
+
+        if (parts.length < 2) {
+            console.warn(`[Parse-iCloud] iCloud格式错误，期望至少2个字段，实际${parts.length}个:`, line);
+            return null;
+        }
+
+        const [, password] = parts;
+        console.log(`[Parse-iCloud] 提取应用专用密码: "${password}"`);
+
+        if (!password || password.trim().length < 4) {
+            console.warn(`[Parse-iCloud] iCloud应用专用密码过短: "${password}"`);
+            return null;
+        }
+
+        const result = {
+            email: email.trim(),
+            password: password.trim(),
+            type: 'icloud',
+            // iCloud邮箱使用IMAP，不需要OAuth相关字段
+            client_id: '',
+            refresh_token: '',
+            // iCloud邮箱不需要授权，默认设置为已授权状态
+            status: 'authorized'
+        };
+
+        console.log(`[Parse-iCloud] 解析成功:`, result);
         return result;
     },
 
