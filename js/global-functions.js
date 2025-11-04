@@ -864,26 +864,7 @@ https://www.microsoft.com/edge
 
         console.log('[DEBUG] 通过Edge检测，继续执行KISS配置流程');
 
-        // Edge专用一键配置确认
-        const confirmMessage = `🚀 Edge浏览器一键代理配置
-
-代理服务器：${proxyHost}:${proxyPort}
-用户名：${proxyUsername}
-
-✨ 一键特性：
-• 自动打开管理员PowerShell
-• 自动复制配置命令
-• 自动粘贴执行
-• 配置完成后自动启动Edge验证
-
-点击"确定"开始一键配置，点击"取消"退出。`;
-
-        const userConfirmed = confirm(confirmMessage);
-        if (!userConfirmed) {
-            return;
-        }
-
-        // Edge专用一键配置
+        // Edge专用一键配置 - 直接执行，无需确认
         console.log('[DEBUG] 开始执行Edge专用一键配置');
         showProxyStatus('info', '正在准备Edge代理配置...');
         const result = await executeEdgeOneClickProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
