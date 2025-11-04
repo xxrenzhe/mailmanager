@@ -729,6 +729,13 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         }
                         emails = await fetchYahooEmails(email, password);
                         console.log(`[批量导入] Yahoo邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
+                    } else if (accountType === 'icloud') {
+                        console.log(`[批量导入] iCloud邮箱直接获取邮件: ${email}`);
+                        if (!password) {
+                            throw new Error('iCloud邮箱缺少应用专用密码');
+                        }
+                        emails = await fetchICloudEmails(email, password);
+                        console.log(`[批量导入] iCloud邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
                     } else {
                         // Outlook邮箱：验证授权凭证并获取access_token
                         const tokenResult = await refreshToken(refresh_token, client_id, '');
@@ -781,7 +788,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         password: password || '',
                         client_id: client_id,
                         refresh_token: refresh_token,
-                        access_token: accountType !== 'yahoo' ? tokenResult.access_token : '',
+                        access_token: accountType === 'outlook' ? tokenResult.access_token : '',
                         status: 'authorized',
                         created_at: new Date().toISOString(),
                         last_checked: new Date().toISOString(),

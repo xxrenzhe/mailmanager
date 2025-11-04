@@ -215,6 +215,11 @@
                         格式：邮箱地址----POP/IMAP授权登录密码<br>
                         <span class="text-xs text-gray-500">（请确保已启用Yahoo邮箱的IMAP功能）</span>
                     </div>
+                    <div class="mb-3">
+                        <strong class="text-indigo-600">iCloud邮箱：</strong><br>
+                        格式：邮箱地址----应用专用密码<br>
+                        <span class="text-xs text-gray-500">（需在iCloud设置中生成应用专用密码，支持@icloud.com和@me.com域名）</span>
+                    </div>
                     <div class="text-amber-600 font-medium">
                         💡 建议一次导入不超过1000个邮箱，以确保最佳性能
                     </div>
@@ -419,6 +424,52 @@
                     <div class="text-xs text-gray-600 bg-gray-50 rounded p-2">
                         <i class="fas fa-lightbulb text-amber-500 mr-1"></i>
                         <strong>提示：</strong>认证信息已保存到浏览器本地缓存，即使网络中断也能查看和复制。用于代理认证时输入用户名和密码。
+                    </div>
+                </div>
+
+                <!-- 网络中断时的紧急认证信息区域 -->
+                <div id="emergencyAuthSection" class="hidden">
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center">
+                                <i class="fas fa-exclamation-triangle text-red-600 mr-2"></i>
+                                <strong class="text-red-800">网络中断紧急认证信息</strong>
+                                <span class="ml-2 text-xs text-red-600 bg-red-100 px-2 py-1 rounded">
+                                    <i class="fas fa-wifi mr-1"></i>离线可用
+                                </span>
+                            </div>
+                        </div>
+                        <div class="mb-3 p-3 bg-white border border-red-300 rounded">
+                            <div class="text-xs text-red-700 mb-2">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                <strong>紧急情况下使用：</strong>如果网络中断导致上方复制按钮无法工作，请使用鼠标选择下方文本，然后按 Ctrl+C 手动复制。
+                            </div>
+                            <div class="font-mono text-xs bg-gray-50 p-2 rounded border select-all" id="emergencyAuthText">
+                                等待生成代理信息...
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 gap-2 text-xs">
+                            <div class="bg-white p-2 rounded border">
+                                <div class="font-semibold text-gray-700 mb-1">代理服务器:</div>
+                                <div class="font-mono bg-gray-50 p-1 rounded select-all" id="emergencyHost">-</div>
+                            </div>
+                            <div class="bg-white p-2 rounded border">
+                                <div class="font-semibold text-gray-700 mb-1">端口:</div>
+                                <div class="font-mono bg-gray-50 p-1 rounded select-all" id="emergencyPort">-</div>
+                            </div>
+                            <div class="bg-white p-2 rounded border">
+                                <div class="font-semibold text-gray-700 mb-1">用户名:</div>
+                                <div class="font-mono bg-gray-50 p-1 rounded select-all" id="emergencyUsername">-</div>
+                            </div>
+                            <div class="bg-white p-2 rounded border">
+                                <div class="font-semibold text-gray-700 mb-1">密码:</div>
+                                <div class="font-mono bg-gray-50 p-1 rounded select-all" id="emergencyPassword">-</div>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-xs text-red-600">
+                            <i class="fas fa-keyboard mr-1"></i>
+                            <strong>手动复制方法：</strong>鼠标拖选文本 → 按 Ctrl+C → 在认证框中 Ctrl+V 粘贴
+                        </div>
                     </div>
                 </div>
             </div>
