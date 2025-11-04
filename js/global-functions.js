@@ -808,12 +808,27 @@ function displayProxyData(proxyData) {
 async function configureSystemProxy() {
     console.log('[DEBUG] configureSystemProxy 函数开始执行');
 
-    const proxyHost = document.getElementById('proxyHost').textContent;
-    const proxyPort = document.getElementById('proxyPort').textContent;
-    const proxyUsername = document.getElementById('proxyUsername').textContent;
-    const proxyPassword = document.getElementById('proxyPassword').textContent;
+    // 安全获取DOM元素内容
+    const proxyHostElement = document.getElementById('proxyHost');
+    const proxyPortElement = document.getElementById('proxyPort');
+    const proxyUsernameElement = document.getElementById('proxyUsername');
+    const proxyPasswordElement = document.getElementById('proxyPassword');
 
-    console.log('[DEBUG] 代理数据:', { proxyHost, proxyPort, proxyUsername, passwordLength: proxyPassword?.length });
+    const proxyHost = proxyHostElement ? proxyHostElement.textContent.trim() : '';
+    const proxyPort = proxyPortElement ? proxyPortElement.textContent.trim() : '';
+    const proxyUsername = proxyUsernameElement ? proxyUsernameElement.textContent.trim() : '';
+    const proxyPassword = proxyPasswordElement ? proxyPasswordElement.textContent.trim() : '';
+
+    console.log('[DEBUG] 代理数据:', {
+        proxyHost,
+        proxyPort,
+        proxyUsername,
+        passwordLength: proxyPassword?.length,
+        hostElement: !!proxyHostElement,
+        portElement: !!proxyPortElement,
+        userElement: !!proxyUsernameElement,
+        passElement: !!proxyPasswordElement
+    });
 
     if (!proxyHost || !proxyPort || !proxyUsername || !proxyPassword) {
         console.log('[DEBUG] 代理数据不完整');
