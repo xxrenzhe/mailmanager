@@ -1314,7 +1314,7 @@ echo.
 
 echo 💾 步骤2: 备份当前配置...
 set "backupFile=%temp%\\proxy_backup_%random%.reg"
-reg export "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" "%backupFile%" >nul 2>&1
+reg export "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" "%backupFile%" >nul 2>&1
 if exist "%backupFile%" (
     echo    ✅ 当前配置已备份
 ) else (
@@ -1326,7 +1326,7 @@ echo ⚙️  步骤3: 配置系统代理...
 echo    3.1 配置注册表代理设置...
 
 REM 启用代理
-reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
 if %errorLevel% equ 0 (
     echo       ✅ 代理已启用
 ) else (
@@ -1335,7 +1335,7 @@ if %errorLevel% equ 0 (
 )
 
 REM 设置代理服务器
-reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f >nul
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f >nul
 if %errorLevel% equ 0 (
     echo       ✅ 代理服务器已设置
 ) else (
@@ -1344,7 +1344,7 @@ if %errorLevel% equ 0 (
 )
 
 REM 设置代理绕过列表
-reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f >nul
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f >nul
 if %errorLevel% equ 0 (
     echo       ✅ 代理绕过列表已设置
 ) else (
@@ -1541,7 +1541,7 @@ echo.
 
 echo Step 2: Backing up current configuration...
 set "backupFile=%temp%\\proxy_backup_%random%.reg"
-reg export "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" "%backupFile%" >nul 2>&1
+reg export "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" "%backupFile%" >nul 2>&1
 if exist "%backupFile%" (
     echo OK: Current configuration backed up
 ) else (
@@ -1553,7 +1553,7 @@ echo Step 3: Configuring system proxy...
 echo   3.1 Setting registry proxy configuration...
 
 REM Enable proxy
-reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
 if %errorLevel% equ 0 (
     echo OK: Proxy enabled
 ) else (
@@ -1562,7 +1562,7 @@ if %errorLevel% equ 0 (
 )
 
 REM Set proxy server
-reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f >nul
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f >nul
 if %errorLevel% equ 0 (
     echo OK: Proxy server set
 ) else (
@@ -1571,7 +1571,7 @@ if %errorLevel% equ 0 (
 )
 
 REM Set proxy override list
-reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f >nul
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f >nul
 if %errorLevel% equ 0 (
     echo OK: Proxy override list set
 ) else (
