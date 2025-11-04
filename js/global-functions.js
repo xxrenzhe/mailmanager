@@ -1528,18 +1528,34 @@ function showEdgeSimpleGuide() {
 // Edge专用PowerShell自动打开
 function openEdgePowerShellAsAdmin() {
     try {
-        // 使用msedge shell协议打开管理员PowerShell
-        const cmdUrl = 'msedge://shell:runas/user:administrator powershell.exe -NoProfile -ExecutionPolicy Bypass';
+        // 使用编码后的URL避免空格问题
+        const encodedCommand = encodeURIComponent('powershell.exe -NoProfile -ExecutionPolicy Bypass');
+        const cmdUrl = `msedge://shell:runas/user:administrator ${encodedCommand}`;
+
+        console.log('[DEBUG] 尝试打开Edge shell协议:', cmdUrl);
         window.open(cmdUrl, '_blank');
 
         // 备选方案：直接使用shell协议
         setTimeout(() => {
-            const fallbackUrl = 'shell:runas/user:administrator powershell.exe';
-            window.open(fallbackUrl, '_blank');
-        }, 2000);
+            try {
+                const fallbackUrl = 'shell:runas/user:administrator powershell.exe';
+                console.log('[DEBUG] 尝试备选shell协议:', fallbackUrl);
+                window.open(fallbackUrl, '_blank');
+            } catch (fallbackError) {
+                console.log('[DEBUG] shell协议也失败:', fallbackError);
+                Utils.showNotification('请手动打开PowerShell（管理员权限）', 'info');
+            }
+        }, 1500);
 
     } catch (error) {
-        console.log('Edge PowerShell自动打开失败', error);
-        Utils.showNotification('请手动打开PowerShell（管理员权限）', 'info');
+        console.log('[DEBUG] Edge PowerShell自动打开失败:', error);
+
+        // 直接尝试shell协议
+        try {
+            const fallbackUrl = 'shell:runas/user:administrator powershell.exe';
+            window.open(fallbackUrl, '_blank');
+        } catch (fallbackError) {
+            Utils.showNotification('请手动打开PowerShell（管理员权限）', 'info');
+        }
     }
 }
