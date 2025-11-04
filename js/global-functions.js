@@ -904,8 +904,8 @@ async function configureSystemProxy() {
             throw new Error('此功能仅支持Windows操作系统。请使用Windows系统访问此功能。');
         }
 
-        // 生成并下载BAT版配置脚本（更稳定）
-        generateBatProxyScript(proxyHost, proxyPort, proxyUsername, proxyPassword);
+        // 生成并下载纯英文BAT配置脚本（解决编码问题）
+        generateCleanBatProxyScript(proxyHost, proxyPort, proxyUsername, proxyPassword);
 
     } catch (error) {
         console.error('配置代理失败:', error);
@@ -979,7 +979,7 @@ HKCU,"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings","ProxyOve
     }
 }
 
-// 生成BAT版代理配置脚本（更稳定）
+// 生成BAT版代理配置脚本（纯英文版本）
 function generateBatProxyScript(host, port, username, password) {
     const proxyServer = `${host}:${port}`;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -1261,7 +1261,7 @@ Start-Sleep -Seconds 2
 async function downloadAndRunProxyScript(proxyUrl, proxyData) {
     try {
         const data = JSON.parse(decodeURIComponent(proxyData));
-        await generateBatProxyScript(data.host, data.port, data.username, data.password);
+        await generateCleanBatProxyScript(data.host, data.port, data.username, data.password);
         Utils.showNotification('BAT配置脚本已下载！请查看下载文件夹。', 'success');
     } catch (error) {
         console.error('下载脚本失败:', error);
@@ -1269,7 +1269,7 @@ async function downloadAndRunProxyScript(proxyUrl, proxyData) {
     }
 }
 
-// 生成BAT版代理配置脚本（更稳定）
+// 生成BAT版代理配置脚本（纯英文版本）
 function generateBatProxyScript(host, port, username, password) {
     const proxyServer = `${host}:${port}`;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -1494,6 +1494,188 @@ Read-Host "Press any key to exit"
     URL.revokeObjectURL(url);
 
     Utils.showNotification('PowerShell script generated, please run as administrator', 'success');
+}
+
+// 生成纯英文BAT代理配置脚本（解决编码问题）
+function generateCleanBatProxyScript(host, port, username, password) {
+    const proxyServer = `${host}:${port}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `proxy-config-${timestamp}.bat`;
+
+    // 完全纯英文的BAT脚本，无任何中文
+    const batScript = `@echo off
+setlocal enabledelayedexpansion
+
+title Windows Proxy Configuration
+
+echo ==========================================
+echo     Windows Proxy Configuration
+echo ==========================================
+echo.
+echo Configuration Info:
+echo   Proxy Server: ${proxyServer}
+echo   Username: ${username}
+echo   Generated: %date% %time%
+echo.
+
+echo Press any key to start configuration...
+pause >nul
+echo.
+
+echo Step 1: Checking administrator privileges...
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo ERROR: Administrator privileges required!
+    echo.
+    echo SOLUTION:
+    echo   1. Right-click this script file
+    echo   2. Select "Run as administrator"
+    echo   3. Click "Yes" on UAC prompt
+    echo.
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+echo OK: Administrator privileges confirmed
+echo.
+
+echo Step 2: Backing up current configuration...
+set "backupFile=%temp%\\proxy_backup_%random%.reg"
+reg export "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" "%backupFile%" >nul 2>&1
+if exist "%backupFile%" (
+    echo OK: Current configuration backed up
+) else (
+    echo WARNING: Could not backup current configuration
+)
+echo.
+
+echo Step 3: Configuring system proxy...
+echo   3.1 Setting registry proxy configuration...
+
+REM Enable proxy
+reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
+if %errorLevel% equ 0 (
+    echo OK: Proxy enabled
+) else (
+    echo ERROR: Failed to enable proxy
+    goto :error
+)
+
+REM Set proxy server
+reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f >nul
+if %errorLevel% equ 0 (
+    echo OK: Proxy server set
+) else (
+    echo ERROR: Failed to set proxy server
+    goto :error
+)
+
+REM Set proxy override list
+reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f >nul
+if %errorLevel% equ 0 (
+    echo OK: Proxy override list set
+) else (
+    echo ERROR: Failed to set proxy override list
+    goto :error
+)
+
+echo   3.2 Configuring WinHTTP proxy...
+netsh winhttp set proxy ${proxyServer} "<local>" >nul
+if %errorLevel% equ 0 (
+    echo OK: WinHTTP proxy configured
+) else (
+    echo WARNING: WinHTTP proxy configuration may have failed
+)
+echo.
+
+echo Step 4: Refreshing system settings...
+echo   4.1 Flushing DNS cache...
+ipconfig /flushdns >nul
+if %errorLevel% equ 0 (
+    echo OK: DNS cache flushed
+) else (
+    echo WARNING: DNS cache flush may have failed
+)
+
+echo   4.2 Notifying system settings changes...
+rundll32.exe user32.dll,UpdatePerUserSystemParameters >nul 2>&1
+echo OK: System settings notified
+echo.
+
+echo ==========================================
+echo SUCCESS: Proxy Configuration Completed!
+echo ==========================================
+echo.
+echo SUMMARY:
+echo   OK: Administrator privileges confirmed
+echo   OK: System registry configured
+echo   OK: WinHTTP proxy configured
+echo   OK: System settings refreshed
+echo.
+echo PROXY INFO:
+echo   Proxy Server: ${proxyServer}
+echo   Username: ${username}
+echo   Password: [Hidden]
+echo.
+echo VERIFICATION:
+echo   1. Open browser (Chrome or Edge recommended)
+echo   2. Visit https://ip111.cn/
+echo   3. Confirm IP address shows proxy server IP
+echo   4. If IP changed, configuration successful!
+echo.
+echo SUPPORT:
+echo   If IP does not change:
+echo   - Restart browser (Ctrl+Shift+R)
+echo   - Clear browser cache (Ctrl+Shift+Delete)
+echo   - Check browser proxy settings
+echo   - Try visiting other websites to verify proxy
+echo.
+
+goto :success
+
+:error
+echo.
+echo ERROR: Configuration failed
+echo.
+echo RECOVERY: Restoring backup configuration...
+if exist "%backupFile%" (
+    reg import "%backupFile%" >nul 2>&1
+    echo OK: Configuration restored to backup state
+) else (
+    echo WARNING: No backup file available
+)
+echo.
+echo TROUBLESHOOTING:
+echo   1. Ensure script is run as administrator
+echo   2. Check if proxy server is available
+echo   3. Verify username and password are correct
+echo   4. Try running this script again
+echo.
+echo Press any key to exit...
+pause >nul
+exit /b 1
+
+:success
+echo.
+echo COMPLETE: Script execution finished!
+echo Press any key to exit...
+pause >nul
+exit /b 0
+`;
+
+    // 创建Blob并下载
+    const blob = new Blob([batScript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    Utils.showNotification('Clean BAT script downloaded, please run as administrator', 'success');
 }
 
 // 显示代理状态消息
