@@ -1528,6 +1528,99 @@ function stripHtmlTags(html) {
     return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 }
 
+// 🔧 从邮件正文中提取服务标识（用于主题为空的邮件）
+function extractServiceFromBody(bodyContent) {
+    if (!bodyContent) return 'unknown';
+
+    const cleanBody = stripHtmlTags(bodyContent).substring(0, 500); // 只检查前500字符
+    console.log(`[正文提取] 分析邮件正文前500字符: "${cleanBody.substring(0, 100)}..."`);
+
+    // 定义服务标识模式 - 按优先级排序
+    const servicePatterns = [
+        // 高优先级：明确的服务标识
+        {
+            name: 'Perplexity',
+            patterns: [/perplexity\.ai/i, /perplexity/i],
+            priority: 1
+        },
+        {
+            name: 'Microsoft',
+            patterns: [/microsoft account/i, /microsoft/i],
+            priority: 1
+        },
+        {
+            name: 'AWS',
+            patterns: [/amazon web services/i, /aws\.amazon\.com/i, /aws customer/i],
+            priority: 1
+        },
+        {
+            name: 'OpenAI',
+            patterns: [/openai/i, /chatgpt/i],
+            priority: 1
+        },
+        {
+            name: 'Apple',
+            patterns: [/apple id/i, /icloud/i],
+            priority: 1
+        },
+        {
+            name: 'Google',
+            patterns: [/google account/i, /google/i],
+            priority: 1
+        },
+        {
+            name: 'Amazon',
+            patterns: [/amazon\.com/i, /amazon customer/i],
+            priority: 1
+        },
+        {
+            name: 'Meta',
+            patterns: [/meta\.com/i, /facebook/i, /instagram/i],
+            priority: 1
+        },
+        {
+            name: 'CrowdStreet',
+            patterns: [/crowd street/i, /crowdstreet/i],
+            priority: 1
+        },
+        {
+            name: 'Cloud Manager',
+            patterns: [/cloud manager/i],
+            priority: 1
+        },
+        {
+            name: 'Akamai',
+            patterns: [/akamai/i],
+            priority: 1
+        },
+
+        // 中等优先级：通用验证码邮件
+        {
+            name: 'Verification',
+            patterns: [/verification code/i, /verify your email/i, /security code/i],
+            priority: 2
+        },
+        {
+            name: 'Notification',
+            patterns: [/notification/i, /alert/i],
+            priority: 2
+        }
+    ];
+
+    // 按优先级查找匹配
+    for (const service of servicePatterns) {
+        for (const pattern of service.patterns) {
+            if (pattern.test(cleanBody)) {
+                console.log(`[正文提取] 找到服务标识: ${service.name}`);
+                return service.name;
+            }
+        }
+    }
+
+    console.log(`[正文提取] 未能识别服务标识`);
+    return 'unknown';
+}
+
 // 🎯 精确主体词提取算法 - 只提取主语品牌名
 function extractSenderEmail(email) {
     if (!email) return 'unknown';
@@ -1535,7 +1628,13 @@ function extractSenderEmail(email) {
     try {
         // 处理Microsoft Graph API的Pascal命名和camelCase命名法
         const subject = email.Subject || email.subject || '';
-        if (!subject) return 'unknown';
+        const bodyContent = email.Body?.Content || email.body?.content || email.body || '';
+
+        // 如果主题为空，尝试从正文提取服务标识
+        if (!subject || subject.trim() === '(无主题)') {
+            console.log(`[主体词提取] 主题为空，尝试从正文提取服务标识...`);
+            return extractServiceFromBody(bodyContent);
+        }
 
         const cleanSubject = subject.trim();
         if (!cleanSubject) return 'unknown';
