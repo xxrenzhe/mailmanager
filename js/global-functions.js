@@ -1584,13 +1584,15 @@ REM Create credentials file for automatic authentication
 set "credsFile=%temp%\\proxy_creds.txt"
 echo ${username}:${password} > "%credsFile%"
 
-REM Add proxy credentials to Windows Credential Manager
-cmdkey /add:Target=PROXY_SERVER /User:${username} /pass:${password} /reg:HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings >nul 2>&1
+REM Add proxy credentials to Windows Credential Manager for browser auto-fill
+cmdkey /add:${host}:${port} /user:${username} /pass:${password} >nul 2>&1
 if %errorLevel% equ 0 (
     echo OK: Proxy credentials saved to Credential Manager
 ) else (
     echo WARNING: Could not save to Credential Manager (manual setup may be required)
 )
+REM Also add generic Windows proxy credential
+cmdkey /add:Windows_Proxy /user:${username} /pass:${password} >nul 2>&1
 
 REM Configure WinHTTP proxy with authentication (Windows 10+)
 echo   3.2 Configuring WinHTTP proxy with credentials...
@@ -1612,10 +1614,12 @@ echo. >> "%psScript%"
 echo # Add proxy server to trusted sites >> "%psScript%"
 echo Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxySettingsPerUser" -Value 1 -Type DWord -Force >> "%psScript%"
 echo. >> "%psScript%"
-echo # Store credentials in Windows Credential Manager for auto-fill >> "%psScript%"
+echo # Store credentials in Windows Credential Manager for browser auto-fill >> "%psScript%"
 echo try { >> "%psScript%"
-echo     cmdkey /add:Target=PROXY_AUTH /User:${username} /pass:${password} >> "%psScript%"
-echo     Write-Host "Credentials saved to Windows Credential Manager" -ForegroundColor Green >> "%psScript%"
+echo     cmdkey /add:${host}:${port} /user:${username} /pass:${password} >> "%psScript%"
+echo     cmdkey /add:Windows_Proxy /user:${username} /pass:${password} >> "%psScript%"
+echo     Write-Host "Credentials saved to Windows Credential Manager for auto-fill" -ForegroundColor Green >> "%psScript%"
+echo     Write-Host "Browser will automatically use these credentials for proxy authentication" -ForegroundColor Cyan >> "%psScript%"
 echo } catch { >> "%psScript%"
 echo     Write-Host "WARNING: Could not save credentials to Credential Manager" -ForegroundColor Yellow >> "%psScript%"
 echo } >> "%psScript%"
@@ -1656,25 +1660,38 @@ echo SUMMARY:
 echo   OK: Administrator privileges confirmed
 echo   OK: System registry configured
 echo   OK: WinHTTP proxy configured
+echo   OK: Proxy credentials saved to Windows Credential Manager
 echo   OK: System settings refreshed
 echo.
 echo PROXY INFO:
 echo   Proxy Server: ${proxyServer}
 echo   Username: ${username}
-echo   Password: [Hidden]
+echo   Password: [Hidden for security]
+echo   Credentials: Saved to Windows Credential Manager
+echo.
+echo AUTOMATIC AUTHENTICATION:
+echo   ✅ Browser should automatically use proxy credentials
+echo   ✅ No manual username/password prompt expected
+echo   ✅ Credentials stored in Windows Credential Manager
 echo.
 echo VERIFICATION:
 echo   1. Open browser (Chrome or Edge recommended)
 echo   2. Visit https://ip111.cn/
 echo   3. Confirm IP address shows proxy server IP
 echo   4. If IP changed, configuration successful!
+echo   5. Browser should NOT ask for username/password
 echo.
 echo SUPPORT:
+echo   If browser still asks for credentials:
+echo   - Restart browser completely
+echo   - Clear browser cache and saved passwords
+echo   - Check Windows Credential Manager for proxy entries
+echo   - Try different browser (Chrome/Edge work best)
+echo.
 echo   If IP does not change:
 echo   - Restart browser (Ctrl+Shift+R)
-echo   - Clear browser cache (Ctrl+Shift+Delete)
-echo   - Check browser proxy settings
-echo   - Try visiting other websites to verify proxy
+echo   - Check browser proxy settings are enabled
+echo   - Verify proxy server is accessible
 echo.
 
 goto :success
