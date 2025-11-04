@@ -2055,6 +2055,11 @@ class SimpleMailManager {
         // 记录本次导入的数量
         this.currentImportCount = emailDataList.length;
 
+        // 0. 计算当前最大序列号
+        const currentMaxSequence = this.accounts.length > 0 ?
+            Math.max(...this.accounts.map(acc => acc.sequence || 0)) : 0;
+        console.log(`[批量导入] 当前最大序列号: ${currentMaxSequence}, 已有账户数: ${this.accounts.length}`);
+
         // 1. 前端创建账户记录（并发处理提高效率）
         const newAccounts = await Promise.all(emailDataList.map(async (data, i) => {
             // 生成唯一ID
@@ -2074,7 +2079,7 @@ class SimpleMailManager {
                 last_checked: new Date().toISOString(),
                 email_count: 0,
                 verification_code: null,
-                sequence: i + 1,
+                sequence: currentMaxSequence + i + 1,
                 monitoring_enabled: false,
                 codes: [],
                 emails: []
@@ -2123,7 +2128,8 @@ class SimpleMailManager {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     sessionId: this.sessionId,
-                    emails: emailsData
+                    emails: emailsData,
+                    currentMaxSequence: currentMaxSequence
                 })
             });
 

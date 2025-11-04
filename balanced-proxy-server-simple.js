@@ -659,7 +659,7 @@ app.post('/api/validate-email', (req, res) => {
 // 批量导入API - 完整处理版本（授权+取件+验证码提取）
 app.post('/api/accounts/batch-import', async (req, res) => {
     try {
-        const { emails, sessionId } = req.body;
+        const { emails, sessionId, currentMaxSequence = 0 } = req.body;
 
         console.log(`[批量导入] 开始处理 ${emails ? emails.length : 0} 个邮箱的完整流程`);
 
@@ -794,7 +794,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         last_checked: new Date().toISOString(),
                         email_count: emails.length,
                         verification_code: latestCode,
-                        sequence: i + batch.indexOf(emailData) + 1,
+                        sequence: currentMaxSequence + i + batch.indexOf(emailData) + 1,
                         monitoring_enabled: false,
                         emails: emails // 包含邮件数据
                     };
