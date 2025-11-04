@@ -927,8 +927,10 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
             sessionId,
             email_id,
             email,
+            type = 'outlook', // 添加邮箱类型，默认为outlook
             client_id,
             refresh_token,
+            password, // 添加密码字段，Yahoo需要
             current_status,
             codes = [],
             emails = [],
@@ -952,45 +954,84 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         if (current_status === 'pending' || current_status === 'reauth_required') {
             console.log(`[监控触发] 账户 ${email} 状态为 ${current_status}，将尝试重新授权`);
 
-            // 尝试重新授权（刷新token）
-            try {
-                const tokenResult = await refreshToken(refresh_token, client_id, '');
-                if (tokenResult && tokenResult.access_token) {
+            // 根据邮箱类型进行不同的授权处理
+            if (type === 'yahoo') {
+                // Yahoo邮箱：只需要检查密码是否有效
+                if (password && password.length >= 4) {
                     finalStatus = 'authorized';
-                    console.log(`[监控触发] 账户 ${email} 重新授权成功，状态更新为 authorized`);
+                    console.log(`[监控触发] Yahoo账户 ${email} 授权检查通过`);
 
-                    // 通知前端重新授权成功
+                    // 通知前端授权成功
                     emitEvent({
                         type: 'account_status_changed',
                         sessionId: sessionId,
                         email_id: email_id,
                         email: email,
                         status: 'authorized',
-                        message: '账户重新授权成功'
+                        message: 'Yahoo账户授权成功'
                     });
                 } else {
-                    throw new Error('重新授权失败：未获取到有效token');
+                    finalStatus = 'reauth_required';
+                    console.log(`[监控触发] Yahoo账户 ${email} 密码无效，需要重新授权`);
+
+                    // 通知前端授权失败
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: sessionId,
+                        email_id: email_id,
+                        email: email,
+                        status: 'reauth_required',
+                        message: 'Yahoo账户密码无效，请检查配置'
+                    });
+
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Yahoo账户密码无效，请检查配置',
+                        status: 'reauth_required',
+                        message: '请确认Yahoo邮箱的IMAP授权密码正确'
+                    });
                 }
-            } catch (reauthError) {
-                console.log(`[监控触发] 账户 ${email} 重新授权失败: ${reauthError.message}`);
+            } else {
+                // Outlook邮箱：尝试重新授权（刷新token）
+                try {
+                    const tokenResult = await refreshToken(refresh_token, client_id, '');
+                    if (tokenResult && tokenResult.access_token) {
+                        finalStatus = 'authorized';
+                        console.log(`[监控触发] Outlook账户 ${email} 重新授权成功，状态更新为 authorized`);
 
-                // 通知前端需要手动重新授权
-                emitEvent({
-                    type: 'account_status_changed',
-                    sessionId: sessionId,
-                    email_id: email_id,
-                    email: email,
-                    status: 'reauth_required',
-                    message: 'Token已失效，请重新获取授权信息',
-                    error: reauthError.message
-                });
+                        // 通知前端重新授权成功
+                        emitEvent({
+                            type: 'account_status_changed',
+                            sessionId: sessionId,
+                            email_id: email_id,
+                            email: email,
+                            status: 'authorized',
+                            message: 'Outlook账户重新授权成功'
+                        });
+                    } else {
+                        throw new Error('重新授权失败：未获取到有效token');
+                    }
+                } catch (reauthError) {
+                    console.log(`[监控触发] Outlook账户 ${email} 重新授权失败: ${reauthError.message}`);
 
-                return res.status(403).json({
-                    success: false,
-                    error: '账户重新授权失败，请手动更新授权信息',
-                    status: 'reauth_required',
-                    message: '请在应用中更新refresh_token后重试'
-                });
+                    // 通知前端需要手动重新授权
+                    emitEvent({
+                        type: 'account_status_changed',
+                        sessionId: sessionId,
+                        email_id: email_id,
+                        email: email,
+                        status: 'reauth_required',
+                        message: 'Outlook Token已失效，请重新获取授权信息',
+                        error: reauthError.message
+                    });
+
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Outlook账户重新授权失败，请手动更新授权信息',
+                        status: 'reauth_required',
+                        message: '请在应用中更新refresh_token后重试'
+                    });
+                }
             }
         }
 
