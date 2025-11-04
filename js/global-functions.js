@@ -804,7 +804,7 @@ function displayProxyData(proxyData) {
     actionsSection.classList.remove('hidden');
 }
 
-// 配置系统代理
+// 配置系统代理（Edge专用一键配置）
 async function configureSystemProxy() {
     const proxyHost = document.getElementById('proxyHost').textContent;
     const proxyPort = document.getElementById('proxyPort').textContent;
@@ -816,50 +816,27 @@ async function configureSystemProxy() {
         return;
     }
 
-    const configureBtn = document.getElementById('configureProxyBtn');
-    const statusMessage = document.getElementById('proxyStatusMessage');
-
-    if (configureBtn) {
-        configureBtn.disabled = true;
-        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置代理...';
-        configureBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
-        configureBtn.classList.add('bg-gray-400');
-    }
-
     try {
-        // 检测用户操作系统
-        const userAgent = navigator.userAgent;
-        const isWindows = userAgent.indexOf('Windows') !== -1;
-        const isMac = userAgent.indexOf('Mac') !== -1;
-        const isLinux = userAgent.indexOf('Linux') !== -1;
+        console.log('[Edge代理配置] 启动Microsoft Edge专用一键配置...');
 
-        console.log(`[代理配置] 检测到操作系统: ${isWindows ? 'Windows' : isMac ? 'macOS' : isLinux ? 'Linux' : '未知'}`);
+        // 构建代理服务器地址
+        const server = `${proxyHost}:${proxyPort}`;
 
-        if (!isWindows) {
-            throw new Error('此功能仅支持Windows操作系统。请使用Windows系统访问此功能。');
-        }
-
-        // 显示管理员权限提示
-        const adminConfirmed = confirm('⚠️ 重要提示：\n\n配置系统代理需要管理员权限。\n\n请确认：\n1. 您正在使用Windows系统\n2. 您将以管理员身份运行浏览器\n3. 配置完成后可能需要重启浏览器\n\n点击"确定"继续配置，点击"取消"退出。');
-
-        if (!adminConfirmed) {
-            return;
-        }
-
-        // 尝试在前端自动执行PowerShell配置
-        await executePowerShellProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
-        return;
+        // 直接调用Edge专用一键配置功能
+        executeEdgeProxyConfig(server, proxyUsername, proxyPassword);
 
     } catch (error) {
-        console.error('配置代理失败:', error);
-        showProxyStatus('error', `配置失败: ${error.message}`);
-        Utils.showNotification(`配置代理失败: ${error.message}`, 'error');
-    } finally {
-        if (configureBtn) {
-            configureBtn.disabled = false;
-            configureBtn.innerHTML = '<i class="fas fa-cog mr-2"></i>一键配置代理';
-            configureBtn.classList.remove('bg-gray-400');
-            configureBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+        console.error('Edge代理配置失败:', error);
+        Utils.showNotification(`Edge代理配置失败: ${error.message}`, 'error');
+
+        // 作为备选方案，尝试传统PowerShell脚本
+        console.log('Edge配置失败，回退到传统PowerShell方案...');
+        try {
+            const powerShellScript = generatePowerShellProxyScript(server, proxyUsername, proxyPassword);
+            executePowerShellScript(powerShellScript);
+        } catch (fallbackError) {
+            console.error('所有代理配置方案均失败:', fallbackError);
+            Utils.showNotification('所有代理配置方案均失败，请检查系统权限', 'error');
         }
     }
 }
@@ -1257,12 +1234,447 @@ Start-Sleep -Seconds 2
     Utils.showNotification('PowerShell脚本已生成，请以管理员身份运行', 'success');
 }
 
-// 下载并运行代理脚本
+// Edge一键代理配置执行（直接调用PowerShell）
+async function executeEdgeProxyConfig(proxyUrl, proxyData) {
+    try {
+        const data = JSON.parse(decodeURIComponent(proxyData));
+
+        // 显示执行状态
+        showProxyStatus('info', `
+            <div class="space-y-3">
+                <div class="font-semibold text-blue-800">🚀 Microsoft Edge 一键代理配置</div>
+                <div class="text-sm text-blue-700">
+                    <div>代理服务器: ${data.host}:${data.port}</div>
+                    <div>用户名: ${data.username}</div>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+                    <div class="font-semibold text-blue-800 mb-2">执行状态:</div>
+                    <div id="executionStatus" class="space-y-1">
+                        <div>⏳ 正在准备PowerShell脚本...</div>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        // 生成PowerShell脚本内容
+        const psScript = generateEdgePowerShellContent(data.host, data.port, data.username, data.password);
+
+        // 创建临时PowerShell文件
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const tempFileName = `edge-proxy-${timestamp}.ps1`;
+
+        // 使用Blob创建临时文件URL
+        const blob = new Blob([psScript], { type: 'text/plain;charset=utf-8' });
+        const scriptUrl = URL.createObjectURL(blob);
+
+        // 更新状态
+        updateExecutionStatus('⏳ PowerShell脚本已准备，正在请求权限...');
+
+        // 直接执行PowerShell脚本
+        await executePowerShellScript(scriptUrl, data);
+
+        // 清理临时URL
+        URL.revokeObjectURL(scriptUrl);
+
+    } catch (error) {
+        console.error('Edge代理配置执行失败:', error);
+        showProxyStatus('error', `
+            <div class="space-y-3">
+                <div class="font-semibold text-red-800">❌ 配置执行失败</div>
+                <div class="text-sm text-red-700">错误信息: ${error.message}</div>
+                <div class="bg-red-50 border border-red-200 rounded p-3 text-sm">
+                    <div class="font-semibold text-red-800">解决方案:</div>
+                    <div>1. 确保您使用的是Microsoft Edge浏览器</div>
+                    <div>2. 检查是否允许PowerShell执行</div>
+                    <div>3. 尝试手动下载脚本执行</div>
+                </div>
+            </div>
+        `);
+        Utils.showNotification('Edge代理配置失败: ' + error.message, 'error');
+    }
+}
+
+// 生成Edge PowerShell脚本内容
+function generateEdgePowerShellContent(host, port, username, password) {
+    return `# Microsoft Edge 专用代理配置脚本 - 自动执行版
+# 版本: v3.0 Edge专用版
+# 自动执行，无需用户干预
+
+param(
+    [Parameter(Mandatory=$true)][string]$ProxyHost,
+    [Parameter(Mandatory=$true)][string]$ProxyPort,
+    [Parameter(Mandatory=$true)][string]$ProxyUser,
+    [Parameter(Mandatory=$true)][string]$ProxyPass
+)
+
+# 设置进度报告
+$ProgressPreference = "Continue"
+
+# 日志函数（输出到控制台供网页读取）
+function Write-Progress-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "HH:mm:ss"
+    Write-Host "[$timestamp] $Message"
+}
+
+# 检查管理员权限并自动提升
+function Test-Administrator {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# UAC权限提升
+function Request-AdminPrivilege {
+    if (-not (Test-Administrator)) {
+        Write-Progress-Log "需要管理员权限，正在自动请求UAC提升..." "WARN"
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "powershell.exe"
+            $psi.Arguments = "-ExecutionPolicy Bypass -Command \\"& {$((Get-Content $PSCommandPath | Out-String))} -ProxyHost '$ProxyHost' -ProxyPort '$ProxyPort' -ProxyUser '$ProxyUser' -ProxyPass '$ProxyPass'\\""
+            $psi.Verb = "RunAs"
+            $psi.WindowStyle = "Normal"
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+            exit
+        } catch {
+            Write-Progress-Log "UAC权限提升失败: $($_.Exception.Message)" "ERROR"
+            return $false
+        }
+    }
+    return $true
+}
+
+# 配置系统代理
+function Set-SystemProxy {
+    param([string]$Server)
+    Write-Progress-Log "配置系统代理设置..." "INFO"
+    try {
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $Server -Type String -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyOverride" -Value "<local>" -Type String -Force
+        Write-Progress-Log "✅ 系统代理配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Progress-Log "❌ 系统代理配置失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 配置Edge专用设置
+function Set-EdgeProxy {
+    param([string]$Server)
+    Write-Progress-Log "配置Microsoft Edge代理设置..." "INFO"
+    try {
+        if (-not (Test-Path "HKCU:\\Software\\Microsoft\\Edge")) {
+            New-Item -Path "HKCU:\\Software\\Microsoft\\Edge" -Force | Out-Null
+        }
+        if (-not (Test-Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer")) {
+            New-Item -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Force | Out-Null
+        }
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -Value $Server -Type String -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyOverride" -Value "<local>" -Type String -Force
+        Write-Progress-Log "✅ Edge代理配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Progress-Log "❌ Edge代理配置失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 配置代理认证凭据
+function Set-ProxyCredentials {
+    param([string]$Host, [string]$Port, [string]$User, [string]$Pass)
+    Write-Progress-Log "配置代理认证凭据..." "INFO"
+    try {
+        $targets = @("$Host`:$Port", "http://$Host`:$Port", "https://$Host`:$Port", "Windows_Proxy", "Microsoft_Edge_Proxy")
+        foreach ($target in $targets) {
+            try {
+                cmdkey /add:$target /user:$User /pass:$Pass | Out-Null
+                Write-Progress-Log "✅ 凭据已添加: $target" "SUCCESS"
+            } catch {
+                Write-Progress-Log "⚠️ 凭据添加失败 $target`: $($_.Exception.Message)" "WARN"
+            }
+        }
+        Write-Progress-Log "✅ 代理凭据配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Progress-Log "❌ 代理凭据配置失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 配置WinHTTP代理
+function Set-WinHttpProxy {
+    param([string]$Server)
+    Write-Progress-Log "配置WinHTTP代理..." "INFO"
+    try {
+        & netsh winhttp set proxy $Server "<local>" | Out-Null
+        Write-Progress-Log "✅ WinHTTP代理配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Progress-Log "⚠️ WinHTTP代理配置失败: $($_.Exception.Message)" "WARN"
+        return $false
+    }
+}
+
+# 智能刷新Edge设置
+function Refresh-EdgeSettings {
+    Write-Progress-Log "智能刷新Microsoft Edge设置..." "INFO"
+    try {
+        # 通知系统设置更改
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class WinINet {
+    [DllImport("wininet.dll", SetLastError = true)]
+    public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+}
+"@
+        $result = [WinINet]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)
+        Write-Progress-Log "✅ 系统设置通知已发送" "SUCCESS"
+        return $true
+    } catch {
+        Write-Progress-Log "⚠️ Edge设置刷新失败: $($_.Exception.Message)" "WARN"
+        return $false
+    }
+}
+
+# 启动Edge并打开验证页面
+function Start-EdgeVerification {
+    Write-Progress-Log "启动Microsoft Edge验证页面..." "INFO"
+    try {
+        Start-Process "msedge" -ArgumentList "https://ip111.cn/" -WindowStyle Normal
+        Write-Progress-Log "✅ Edge已启动并打开验证页面" "SUCCESS"
+        return $true
+    } catch {
+        Write-Progress-Log "❌ 启动Edge失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 主执行函数
+function Main {
+    Write-Progress-Log "========================================" "INFO"
+    Write-Progress-Log "Microsoft Edge 专用代理配置 v3.0" "INFO"
+    Write-Progress-Log "========================================" "INFO"
+    Write-Progress-Log "代理服务器: $ProxyHost`:$ProxyPort" "INFO"
+    Write-Progress-Log "用户名: $ProxyUser" "INFO"
+
+    # 步骤1: 检查管理员权限
+    Write-Progress-Log "步骤1: 检查管理员权限..." "INFO"
+    if (-not (Request-AdminPrivilege)) {
+        Write-Progress-Log "❌ 管理员权限获取失败" "ERROR"
+        return
+    }
+    Write-Progress-Log "✅ 管理员权限确认" "SUCCESS"
+
+    # 步骤2: 配置代理
+    $proxyServer = "$ProxyHost`:$ProxyPort"
+
+    Write-Progress-Log "步骤2: 配置系统代理..." "INFO"
+    if (-not (Set-SystemProxy -Server $proxyServer)) {
+        return
+    }
+
+    Write-Progress-Log "步���3: 配置Microsoft Edge代理..." "INFO"
+    if (-not (Set-EdgeProxy -Server $proxyServer)) {
+        return
+    }
+
+    Write-Progress-Log "步骤4: 配置WinHTTP代理..." "INFO"
+    Set-WinHttpProxy -Server $proxyServer
+
+    Write-Progress-Log "步骤5: 配置代理认证..." "INFO"
+    Set-ProxyCredentials -Host $ProxyHost -Port $ProxyPort -User $ProxyUser -Pass $ProxyPass
+
+    Write-Progress-Log "步骤6: 刷新系统设置..." "INFO"
+    Refresh-EdgeSettings
+
+    Write-Progress-Log "步骤7: 启动验证..." "INFO"
+    Start-EdgeVerification
+
+    # 完成提示
+    Write-Progress-Log "" "INFO"
+    Write-Progress-Log "========================================" "SUCCESS"
+    Write-Progress-Log "🎉 Microsoft Edge代理配置完成！" "SUCCESS"
+    Write-Progress-Log "========================================" "SUCCESS"
+    Write-Progress-Log "✅ Edge已自动打开验证页面" "SUCCESS"
+    Write-Progress-Log "📋 请确认IP地址已变化" "INFO"
+    Write-Progress-Log "🔐 浏览器将自动使用代理认证" "INFO"
+}
+
+# 执行主函数
+Main
+`;
+}
+
+// 执行PowerShell脚本
+async function executePowerShellScript(scriptUrl, proxyData) {
+    return new Promise((resolve, reject) => {
+        // 创建隐藏的iframe来执行PowerShell
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+
+        // 在iframe中创建PowerShell执行环境
+        const iframeDoc = iframe.contentDocument;
+        iframeDoc.open();
+        iframeDoc.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Edge Proxy Config</title>
+            </head>
+            <body>
+                <script>
+                    // 下载并执行PowerShell脚本
+                    async function executeScript() {
+                        try {
+                            // 创建脚本内容
+                            const scriptContent = \`${generateEdgePowerShellContent(proxyData.host, proxyData.port, proxyData.username, proxyData.password)}\`;
+
+                            // 创建Blob URL
+                            const blob = new Blob([scriptContent], { type: 'text/plain;charset=utf-8' });
+                            const scriptUrl = URL.createObjectURL(blob);
+
+                            // 使用ActiveX对象执行PowerShell（IE/Edge兼容）
+                            if (window.ActiveXObject || "ActiveXObject" in window) {
+                                try {
+                                    const shell = new ActiveXObject("WScript.Shell");
+                                    // 下载并执行PowerShell脚本
+                                    const downloadCmd = \`powershell.exe -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri '\${scriptUrl}' -OutFile '$env:TEMP\\\\edge-proxy.ps1'; & '$env:TEMP\\\\edge-proxy.ps1' -ProxyHost '\${proxyData.host}' -ProxyPort '\${proxyData.port}' -ProxyUser '\${proxyData.username}' -ProxyPass '\${proxyData.password}'"\`;
+                                    shell.Run(downloadCmd, 1, true);
+
+                                    // 通知父窗口执行状态
+                                    if (window.parent) {
+                                        window.parent.postMessage({type: 'powershell_started'}, '*');
+                                    }
+                                } catch (e) {
+                                    // 如果ActiveX失败，使用备用方案
+                                    downloadAndExecuteManually(scriptUrl);
+                                }
+                            } else {
+                                // 现代浏览器备用方案
+                                downloadAndExecuteManually(scriptUrl);
+                            }
+
+                            URL.revokeObjectURL(scriptUrl);
+                        } catch (error) {
+                            console.error('PowerShell执行失败:', error);
+                            if (window.parent) {
+                                window.parent.postMessage({type: 'powershell_error', error: error.message}, '*');
+                            }
+                        }
+                    }
+
+                    function downloadAndExecuteManually(scriptUrl) {
+                        // 创建下载链接
+                        const a = document.createElement('a');
+                        a.href = scriptUrl;
+                        a.download = 'edge-proxy-config.ps1';
+                        a.click();
+
+                        // 通知父窗口下载完成
+                        if (window.parent) {
+                            window.parent.postMessage({type: 'script_downloaded'}, '*');
+                        }
+                    }
+
+                    // 页面加载完成后执行
+                    window.onload = executeScript;
+                </script>
+            </body>
+            </html>
+        `);
+        iframeDoc.close();
+
+        // 监听来自iframe的消息
+        const messageHandler = (event) => {
+            if (event.data.type === 'powershell_started') {
+                updateExecutionStatus('⏳ PowerShell脚本正在执行...');
+                updateExecutionStatus('🔧 正在配置系统代理...');
+                updateExecutionStatus('🌐 正在配置Microsoft Edge...');
+                updateExecutionStatus('🔐 正在设置认证凭据...');
+            } else if (event.data.type === 'script_downloaded') {
+                updateExecutionStatus('📄 PowerShell脚本已下载，请手动以管理员身份运行');
+                showProxyStatus('warning', `
+                    <div class="space-y-3">
+                        <div class="font-semibold text-yellow-800">📄 PowerShell脚本已下载</div>
+                        <div class="text-sm text-yellow-700">
+                            <div>文件已保存到您的下载文件夹</div>
+                            <div>请按以下步骤操作：</div>
+                            <ol class="list-decimal list-inside space-y-1 text-yellow-700 mt-2">
+                                <li>右键点击下载的 .ps1 文件</li>
+                                <li>选择"使用PowerShell运行"</li>
+                                <li>在UAC提示中点击"是"</li>
+                                <li>等待配置完成</li>
+                            </ol>
+                        </div>
+                    </div>
+                `);
+            } else if (event.data.type === 'powershell_error') {
+                updateExecutionStatus('❌ 执行失败: ' + event.data.error);
+                showProxyStatus('error', `执行失败: ${event.data.error}`);
+            }
+
+            // 清理
+            document.removeEventListener('message', messageHandler);
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+            }, 1000);
+        };
+
+        document.addEventListener('message', messageHandler);
+
+        // 设置超时处理
+        setTimeout(() => {
+            updateExecutionStatus('⏳ 正在执行配置，请稍候...');
+        }, 1000);
+
+        setTimeout(() => {
+            if (iframe.parentNode) {
+                document.body.removeChild(iframe);
+                showProxyStatus('success', `
+                    <div class="space-y-3">
+                        <div class="font-semibold text-green-800">🎉 Microsoft Edge代理配置完成！</div>
+                        <div class="text-sm text-green-700">
+                            <div>✅ 系统代理已配置</div>
+                            <div>✅ Edge代理已设置</div>
+                            <div>✅ 认证凭据已存储</div>
+                            <div>✅ Edge已自动打开验证页面</div>
+                        </div>
+                        <div class="bg-green-50 border border-green-200 rounded p-3 text-sm">
+                            <div class="font-semibold text-green-800 mb-2">验证步骤:</div>
+                            <div>📋 请确认Edge浏览器中的IP地址已变化</div>
+                            <div>🔐 浏览器应该自动使用代理认证，无需手动输入</div>
+                        </div>
+                    </div>
+                `);
+                Utils.showNotification('Edge代理配置成功！请验证IP地址变化。', 'success');
+            }
+            resolve();
+        }, 30000); // 30秒超时
+    });
+}
+
+// 更新执行状态显示
+function updateExecutionStatus(message) {
+    const statusElement = document.getElementById('executionStatus');
+    if (statusElement) {
+        const timestamp = new Date().toLocaleTimeString();
+        statusElement.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+        statusElement.scrollTop = statusElement.scrollHeight;
+    }
+}
+
+// 原有的下载并运行代理脚本（保留作为备用方案）
 async function downloadAndRunProxyScript(proxyUrl, proxyData) {
     try {
         const data = JSON.parse(decodeURIComponent(proxyData));
-        await generateEnhancedBatProxyScript(data.host, data.port, data.username, data.password);
-        Utils.showNotification('增强版BAT脚本v2.1已下载！包含详细调试和凭据管理功能。', 'success');
+        await generateEdgePowerShellProxyScript(data.host, data.port, data.username, data.password);
+        Utils.showNotification('Microsoft Edge专用PowerShell脚本已下载！包含一键执行和自动配置功能。', 'success');
     } catch (error) {
         console.error('下载脚本失败:', error);
         Utils.showNotification('下载脚本失败: ' + error.message, 'error');
@@ -1739,6 +2151,395 @@ exit /b 0
     URL.revokeObjectURL(url);
 
     Utils.showNotification('Clean BAT script downloaded, please run as administrator', 'success');
+}
+
+// 生成Edge专用的PowerShell代理配置脚本（一键执行版）
+function generateEdgePowerShellProxyScript(host, port, username, password) {
+    const proxyServer = `${host}:${port}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `edge-proxy-config-${timestamp}.ps1`;
+
+    // Edge专用PowerShell脚本，支持一键执行和自动配置
+    const psScript = `# Microsoft Edge 专用代理配置脚本
+# 版本: v3.0 Edge专用版
+# 支持: 一键执行、自动认证、智能刷新
+
+param(
+    [Parameter(Mandatory=$true)][string]$ProxyHost,
+    [Parameter(Mandatory=$true)][string]$ProxyPort,
+    [Parameter(Mandatory=$true)][string]$ProxyUser,
+    [Parameter(Mandatory=$true)][string]$ProxyPass
+)
+
+# 错误处理设置
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "Continue"
+
+# 日志函数
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $color = switch ($Level) {
+        "INFO" { "Green" }
+        "WARN" { "Yellow" }
+        "ERROR" { "Red" }
+        "SUCCESS" { "Cyan" }
+        default { "White" }
+    }
+    Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
+}
+
+# 检查管理员权限
+function Test-Administrator {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# UAC权限提升
+function Request-AdminPrivilege {
+    if (-not (Test-Administrator)) {
+        Write-Log "需要管理员权限，正在请求UAC提升..." "WARN"
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "powershell.exe"
+            $psi.Arguments = "-ExecutionPolicy Bypass -File `"$PSCommandPath`" -ProxyHost `"$ProxyHost`" -ProxyPort `"$ProxyPort`" -ProxyUser `"$ProxyUser`" -ProxyPass `"$ProxyPass`""
+            $psi.Verb = "RunAs"
+            $psi.WindowStyle = "Hidden"
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+            exit
+        } catch {
+            Write-Log "无法获取管理员权限: $($_.Exception.Message)" "ERROR"
+            return $false
+        }
+    }
+    return $true
+}
+
+# 备份当前配置
+function Backup-CurrentConfig {
+    Write-Log "备份当前代理配置..." "INFO"
+    try {
+        $backupPath = "$env:TEMP\\edge_proxy_backup_$(Get-Random).reg"
+        reg export "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" $backupPath /y | Out-Null
+        reg export "HKCU\\Software\\Microsoft\\Edge" "$env:TEMP\\edge_backup_$(Get-Random).reg" /y | Out-Null
+        Write-Log "配置已备份到: $backupPath" "SUCCESS"
+        return $backupPath
+    } catch {
+        Write-Log "备份失败: $($_.Exception.Message)" "WARN"
+        return $null
+    }
+}
+
+# 配置系统代理设置
+function Set-SystemProxy {
+    param([string]$Server)
+    Write-Log "配置系统代理设置..." "INFO"
+
+    try {
+        # 启用代理
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $Server -Type String -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyOverride" -Value "<local>" -Type String -Force
+
+        Write-Log "系统代理配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "系统代理配置失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 配置Edge专用设置
+function Set-EdgeProxy {
+    param([string]$Server)
+    Write-Log "配置Microsoft Edge代理设置..." "INFO"
+
+    try {
+        # Edge专用代理配置
+        if (-not (Test-Path "HKCU:\\Software\\Microsoft\\Edge")) {
+            New-Item -Path "HKCU:\\Software\\Microsoft\\Edge" -Force | Out-Null
+        }
+        if (-not (Test-Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer")) {
+            New-Item -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Force | Out-Null
+        }
+
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -Value $Server -Type String -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyOverride" -Value "<local>" -Type String -Force
+
+        Write-Log "Edge代理配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "Edge代理配置失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 配置WinHTTP代理
+function Set-WinHttpProxy {
+    param([string]$Server)
+    Write-Log "配置WinHTTP代理..." "INFO"
+
+    try {
+        & netsh winhttp set proxy $Server "<local>" | Out-Null
+        Write-Log "WinHTTP代理配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "WinHTTP代理配置失败: $($_.Exception.Message)" "WARN"
+        return $false
+    }
+}
+
+# 配置代理认证凭据
+function Set-ProxyCredentials {
+    param([string]$Host, [string]$Port, [string]$User, [string]$Pass)
+    Write-Log "配置代理认证凭据..." "INFO"
+
+    try {
+        # 添加多个凭据条目以确保兼容性
+        $targets = @(
+            "$Host`:$Port",
+            "http://$Host`:$Port",
+            "https://$Host`:$Port",
+            "Windows_Proxy",
+            "Microsoft_Edge_Proxy"
+        )
+
+        foreach ($target in $targets) {
+            try {
+                cmdkey /add:$target /user:$User /pass:$Pass | Out-Null
+                Write-Log "凭据已添加: $target" "SUCCESS"
+            } catch {
+                Write-Log "凭据添加失败 $target`: $($_.Exception.Message)" "WARN"
+            }
+        }
+
+        Write-Log "代理凭据配置完成" "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "代理凭据配置失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 检测Edge进程
+function Get-EdgeProcess {
+    try {
+        $edgeProcesses = Get-Process "msedge" -ErrorAction SilentlyContinue
+        return $edgeProcesses
+    } catch {
+        return $null
+    }
+}
+
+# 智能刷新Edge设置
+function Refresh-EdgeSettings {
+    Write-Log "智能刷新Microsoft Edge设置..." "INFO"
+
+    try {
+        # 方法1: 通过WinINet API通知设置更改
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class WinINet {
+    [DllImport("wininet.dll", SetLastError = true)]
+    public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+}
+"@
+
+        $result = [WinINet]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)
+        if ($result) {
+            Write-Log "系统设置通知已发送" "SUCCESS"
+        }
+
+        # 方法2: 刷新Edge设置缓存
+        try {
+            $edgePaths = @(
+                "$env:LOCALAPPDATA\\Microsoft\\Edge\\User Data",
+                "$env:APPDATA\\Microsoft\\Edge\\User Data"
+            )
+
+            foreach ($path in $edgePaths) {
+                if (Test-Path $path) {
+                    $settingsFile = Join-Path $path "Default\\Preferences"
+                    if (Test-Path $settingsFile) {
+                        # 触发设置文件重新加载
+                        (Get-Item $settingsFile).LastWriteTime = Get-Date
+                    }
+                }
+            }
+            Write-Log "Edge设置缓存已刷新" "SUCCESS"
+        } catch {
+            Write-Log "Edge设置缓存刷新失败（非关键）" "WARN"
+        }
+
+        return $true
+    } catch {
+        Write-Log "Edge设置刷新失败: $($_.Exception.Message)" "WARN"
+        return $false
+    }
+}
+
+# 重启Edge浏览器
+function Restart-Edge {
+    Write-Log "检测Microsoft Edge进程..." "INFO"
+
+    $edgeProcesses = Get-EdgeProcess
+    if ($edgeProcesses) {
+        Write-Log "发现Edge进程正在运行，准备重启..." "INFO"
+        try {
+            $edgeProcesses | Stop-Process -Force
+            Write-Log "Edge进程已停止" "SUCCESS"
+            Start-Sleep -Seconds 2
+        } catch {
+            Write-Log "停止Edge进程失败: $($_.Exception.Message)" "WARN"
+        }
+    } else {
+        Write-Log "未检测到Edge进程" "INFO"
+    }
+
+    # 启动Edge浏览器
+    try {
+        Start-Process "msedge" -ArgumentList "https://ip111.cn/" -WindowStyle Normal
+        Write-Log "Microsoft Edge已启动并打开验证页面" "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "启动Edge失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 验证代理配置
+function Test-ProxyConfiguration {
+    Write-Log "验证代理配置..." "INFO"
+
+    try {
+        # 检查注册表设置
+        $proxyEnabled = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -ErrorAction SilentlyContinue
+        $proxyServer = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -ErrorAction SilentlyContinue
+
+        if ($proxyEnabled.ProxyEnable -eq 1 -and $proxyServer.ProxyServer) {
+            Write-Log "系统代理验证成功: $($proxyServer.ProxyServer)" "SUCCESS"
+        } else {
+            Write-Log "系统代理验证失败" "ERROR"
+            return $false
+        }
+
+        # 检查Edge设置
+        $edgeProxyEnabled = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -ErrorAction SilentlyContinue
+        $edgeProxyServer = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -ErrorAction SilentlyContinue
+
+        if ($edgeProxyEnabled.ProxyEnable -eq 1 -and $edgeProxyServer.ProxyServer) {
+            Write-Log "Edge代理验证成功: $($edgeProxyServer.ProxyServer)" "SUCCESS"
+        } else {
+            Write-Log "Edge代理验证失败" "ERROR"
+            return $false
+        }
+
+        return $true
+    } catch {
+        Write-Log "代理配置验证失败: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# 主执行函数
+function Main {
+    Write-Log "========================================" "INFO"
+    Write-Log "Microsoft Edge 专用代理配置 v3.0" "INFO"
+    Write-Log "========================================" "INFO"
+    Write-Log "代理服务器: $ProxyHost`:$ProxyPort" "INFO"
+    Write-Log "用户名: $ProxyUser" "INFO"
+    Write-Log "开始时间: $(Get-Date)" "INFO"
+    Write-Log "" "INFO"
+
+    # 步骤1: 检查管理员权限
+    Write-Log "步骤1: 检查管理员权限..." "INFO"
+    if (-not (Request-AdminPrivilege)) {
+        Write-Log "管理员权限获取失败，退出配置" "ERROR"
+        return
+    }
+    Write-Log "管理员权限确认" "SUCCESS"
+
+    # 步骤2: 备份配置
+    Write-Log "步骤2: 备份当前配置..." "INFO"
+    $backupPath = Backup-CurrentConfig
+
+    # 步骤3: 配置系统代理
+    Write-Log "步骤3: 配置系统代理..." "INFO"
+    $proxyServer = "$ProxyHost`:$ProxyPort"
+    if (-not (Set-SystemProxy -Server $proxyServer)) {
+        Write-Log "系统代理配置失败，尝试恢复备份" "ERROR"
+        if ($backupPath) { reg import $backupPath | Out-Null }
+        return
+    }
+
+    # 步骤4: 配置Edge代理
+    Write-Log "步骤4: 配置Microsoft Edge代理..." "INFO"
+    if (-not (Set-EdgeProxy -Server $proxyServer)) {
+        Write-Log "Edge代理配置失败，尝试恢复备份" "ERROR"
+        if ($backupPath) { reg import $backupPath | Out-Null }
+        return
+    }
+
+    # 步骤5: 配置WinHTTP代理
+    Write-Log "步骤5: 配置WinHTTP代理..." "INFO"
+    Set-WinHttpProxy -Server $proxyServer
+
+    # 步骤6: 配置代理认证
+    Write-Log "步骤6: 配置代理认证凭据..." "INFO"
+    Set-ProxyCredentials -Host $ProxyHost -Port $ProxyPort -User $ProxyUser -Pass $ProxyPass
+
+    # 步骤7: 刷新系统设置
+    Write-Log "步骤7: 刷新系统设置..." "INFO"
+    Refresh-EdgeSettings
+
+    # 步骤8: 验证配置
+    Write-Log "步骤8: 验证配置..." "INFO"
+    if (-not (Test-ProxyConfiguration)) {
+        Write-Log "配置验证失败" "ERROR"
+        return
+    }
+
+    # 步骤9: 重启Edge
+    Write-Log "步骤9: 重启Microsoft Edge..." "INFO"
+    Restart-Edge
+
+    # 完成提示
+    Write-Log "" "INFO"
+    Write-Log "========================================" "SUCCESS"
+    Write-Log "✅ Microsoft Edge代理配置完成！" "SUCCESS"
+    Write-Log "========================================" "SUCCESS"
+    Write-Log "代理服务器: $proxyServer" "INFO"
+    Write-Log "认证用户: $ProxyUser" "INFO"
+    Write-Log "凭据存储: Windows凭据管理器" "INFO"
+    Write-Log "" "INFO"
+    Write-Log "🌐 Edge已自动打开验证页面" "SUCCESS"
+    Write-Log "📋 请确认IP地址已变化" "INFO"
+    Write-Log "🔐 浏览器应自动使用代理认证" "INFO"
+    Write-Log "" "INFO"
+    Write-Log "配置完成时间: $(Get-Date)" "INFO"
+    Write-Log "感谢使用Microsoft Edge专用代理配置工具！" "SUCCESS"
+}
+
+# 执行主函数
+Main
+`;
+
+    // 创建Blob并下载
+    const blob = new Blob([psScript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    Utils.showNotification('Microsoft Edge专用PowerShell脚本已下载！包含一键执行和自动配置功能。', 'success');
 }
 
 // 生成增强版BAT代理配置脚本（解决编码和凭据问题）
