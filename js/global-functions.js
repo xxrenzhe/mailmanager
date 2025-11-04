@@ -1424,10 +1424,12 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
 // Edge浏览器专用一键代理配置（完全自动化版本）
 async function executeEdgeOneClickProxy(host, port, username, password) {
     try {
-        // 生成简化的PowerShell脚本
-        const autoCommand = `# 系统代理配置脚本
+        // 生成完整的PowerShell脚本
+        const autoCommand = `# 代理配置脚本 (包含认证)
 $proxyHost = "${host}"
 $proxyPort = "${port}"
+$proxyUser = "${username}"
+$proxyPass = "${password}"
 $proxyServer = "${proxyHost}:${proxyPort}"
 
 Write-Host "🔧 配置系统代理: $proxyServer" -ForegroundColor Green
@@ -1436,7 +1438,15 @@ Write-Host "🔧 配置系统代理: $proxyServer" -ForegroundColor Green
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $proxyServer -Force
 
-Write-Host "✅ 代理配置完成！" -ForegroundColor Green`;
+# 配置代理认证凭据
+Write-Host "🔐 配置代理认证..." -ForegroundColor Green
+cmdkey /add:$proxyHost /user:$proxyUser /pass:$proxyPass
+
+# 刷新网络设置
+Write-Host "🔄 刷新网络设置..." -ForegroundColor Green
+netsh winhttp import proxy source=ie
+
+Write-Host "✅ 代理配置完成！认证凭据已保存。" -ForegroundColor Green`;
 
         // 立即复制命令到剪贴板
         setTimeout(async () => {
