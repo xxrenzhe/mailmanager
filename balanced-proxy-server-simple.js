@@ -1168,7 +1168,7 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                     let processedCount = 0;
 
                     const fetch = imap.fetch(recentResults, {
-                        bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)',
+                        bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)', '1'], // 获取头部和第一部分
                         struct: true
                     });
 
@@ -1183,15 +1183,22 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                             });
 
                             stream.once('end', () => {
-                                headers = Imap.parseHeader(buffer);
-                                messageId = headers['message-id'] || `msg_${seqno}_${Date.now()}`;
+                                // 🔍 调试：检查原始IMAP数据
+                                console.log(`[Yahoo邮件IMAP] 邮件 #${seqno} body部分:`, info.which);
+                                console.log(`[Yahoo邮件IMAP] 原始数据前200字符: "${buffer.substring(0, 200)}..."`);
 
-                                // 🔍 调试：检查IMAP头部解析结果
-                                console.log(`[Yahoo邮件头部] 邮件 #${seqno} IMAP头部:`);
-                                console.log(`[Yahoo邮件头部] subject字段: "${headers.subject}"`);
-                                console.log(`[Yahoo邮件头部] from字段:`, headers.from);
-                                console.log(`[Yahoo邮件头部] to字段:`, headers.to);
-                                console.log(`[Yahoo邮件头部] date字段:`, headers.date);
+                                if (info.which === 'HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)') {
+                                    headers = Imap.parseHeader(buffer);
+                                    messageId = headers['message-id'] || `msg_${seqno}_${Date.now()}`;
+
+                                    // 🔍 调试：检查IMAP头部解析结果
+                                    console.log(`[Yahoo邮件头部] 邮件 #${seqno} IMAP头部:`);
+                                    console.log(`[Yahoo邮件头部] subject字段: "${headers.subject}"`);
+                                    console.log(`[Yahoo邮件头部] 所有字段:`, Object.keys(headers));
+                                    console.log(`[Yahoo邮件头部] from字段:`, headers.from);
+                                    console.log(`[Yahoo邮件头部] to字段:`, headers.to);
+                                    console.log(`[Yahoo邮件头部] date字段:`, headers.date);
+                                }
                             });
                         });
 
