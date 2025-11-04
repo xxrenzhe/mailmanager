@@ -2115,6 +2115,244 @@ app.post('/api/accounts/clear-all', async (req, res) => {
     }
 });
 
+// ========== 代理设置相关API ==========
+
+// 代理IP获取接口
+app.post('/api/proxy/fetch', async (req, res) => {
+    const { url } = req.body;
+
+    if (!url) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少代理URL参数'
+        });
+    }
+
+    // 验证URL格式
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(url);
+    } catch (e) {
+        return res.status(400).json({
+            success: false,
+            error: 'URL格式无效'
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        return res.status(400).json({
+            success: false,
+            error: 'URL必须使用https协议'
+        });
+    }
+
+    try {
+        console.log(`[代理API] 正在获取代理IP: ${url}`);
+
+        // 使用fetch获取代理IP
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/plain, text/*',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            },
+            timeout: 15000 // 15秒超时
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status} ${response.statusText}`);
+        }
+
+        const proxyData = await response.text();
+        const trimmedData = proxyData.trim();
+
+        if (!trimmedData) {
+            throw new Error('返回数据为空');
+        }
+
+        console.log(`[代理API] 成功获取代理IP: ${trimmedData.substring(0, 20)}...`);
+
+        res.json({
+            success: true,
+            proxyData: trimmedData,
+            message: '代理IP获取成功'
+        });
+
+    } catch (error) {
+        console.error('[代理API] 获取代理IP失败:', error);
+
+        let errorMessage = '获取代理IP失败';
+        if (error.name === 'AbortError' || error.message.includes('timeout')) {
+            errorMessage = '请求超时，请检查网络连接或重试';
+        } else if (error.code === 'ENOTFOUND') {
+            errorMessage = '域名解析失败，请检查URL是否正确';
+        } else if (error.code === 'ECONNREFUSED') {
+            errorMessage = '连接被拒绝，请检查代理服务是否可用';
+        } else if (error.code === 'ECONNRESET') {
+            errorMessage = '连接被重置，请重试';
+        } else {
+            errorMessage = error.message || errorMessage;
+        }
+
+        res.status(500).json({
+            success: false,
+            error: errorMessage
+        });
+    }
+});
+
+// Windows系统代理配置接口
+app.post('/api/proxy/configure', async (req, res) => {
+    const { host, port, username, password } = req.body;
+
+    // 验证参数
+    if (!host || !port || !username || !password) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少代理配置参数'
+        });
+    }
+
+    // 验证端口号
+    if (isNaN(port) || port < 1 || port > 65535) {
+        return res.status(400).json({
+            success: false,
+            error: '端口号无效，必须在1-65535之间'
+        });
+    }
+
+    try {
+        console.log(`[代理配置] 开始配置Windows系统代理: ${host}:${port}`);
+
+        // 检测操作系统
+        const platform = process.platform;
+        if (platform !== 'win32') {
+            return res.status(400).json({
+                success: false,
+                error: '此功能仅支持Windows操作系统'
+            });
+        }
+
+        // 构建PowerShell命令
+        const proxyServer = `${host}:${port}`;
+
+        // PowerShell脚本内容
+        const powershellScript = `
+# 设置系统代理
+try {
+    Write-Host "正在配置系统代理..."
+
+    # 设置注册表代理配置
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1 -Type DWord -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value "${proxyServer}" -Type String -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyOverride -Value "<local>" -Type String -Force
+
+    # 设置WinHTTP代理
+    & netsh winhttp set proxy ${proxyServer} "<local>"
+
+    # 刷新系统设置
+    & ipconfig /flushdns > $null
+
+    # 通知系统代理设置已更改
+    $signature = @"
+[DllImport("wininet.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+"@
+
+    $type = Add-Type -MemberDefinition $signature -Name WinINet -Namespace System -PassThru
+    $INTERNET_OPTION_SETTINGS_CHANGED = 39
+    $INTERNET_OPTION_REFRESH = 37
+    $type::InternetSetOption(0, $INTERNET_OPTION_SETTINGS_CHANGED, 0, 0)
+    $type::InternetSetOption(0, $INTERNET_OPTION_REFRESH, 0, 0)
+
+    Write-Host "系统代理配置完成！"
+    Write-Host "代理服务器: ${proxyServer}"
+    Write-Host "用户名: ${username}"
+
+    exit 0
+} catch {
+    Write-Host "配置失败: $($_.Exception.Message)"
+    exit 1
+}
+        `;
+
+        // 执行PowerShell命令
+        const { spawn } = require('child_process');
+
+        const ps = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-Command', '-'], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: true
+        });
+
+        // 发送PowerShell脚本
+        ps.stdin.write(powershellScript);
+        ps.stdin.end();
+
+        let output = '';
+        let errorOutput = '';
+
+        ps.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+
+        ps.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+
+        // 等待PowerShell执行完成
+        const result = await new Promise((resolve, reject) => {
+            ps.on('close', (code) => {
+                if (code === 0) {
+                    console.log('[代理配置] PowerShell执行成功');
+                    console.log('[代理配置] 输出:', output);
+                    resolve({ success: true, output: output.trim() });
+                } else {
+                    console.error('[代理配置] PowerShell执行失败，退出码:', code);
+                    console.error('[代理配置] 错误输出:', errorOutput);
+                    reject(new Error(`PowerShell执行失败 (退出码: ${code}): ${errorOutput}`));
+                }
+            });
+
+            ps.on('error', (error) => {
+                console.error('[代理配置] PowerShell进程错误:', error);
+                reject(new Error(`无法启动PowerShell: ${error.message}`));
+            });
+
+            // 设置超时
+            setTimeout(() => {
+                ps.kill();
+                reject(new Error('PowerShell执行超时'));
+            }, 30000); // 30秒超时
+        });
+
+        res.json({
+            success: true,
+            message: `系统代理配置成功！\n代理服务器: ${proxyServer}\n用户名: ${username}\n\n请打开浏览器访问 https://ip111.cn/ 验证代理是否生效。`,
+            details: result.output
+        });
+
+    } catch (error) {
+        console.error('[代理配置] 配置系统代理失败:', error);
+
+        let errorMessage = '配置系统代理失败';
+        if (error.message.includes('Access is denied')) {
+            errorMessage = '权限不足，请以管理员身份运行此应用';
+        } else if (error.message.includes('PowerShell')) {
+            errorMessage = `PowerShell执行失败: ${error.message}`;
+        } else {
+            errorMessage = error.message || errorMessage;
+        }
+
+        res.status(500).json({
+            success: false,
+            error: errorMessage
+        });
+    }
+});
+
 // 健康检查
 app.get('/api/health', (req, res) => {
     res.json({

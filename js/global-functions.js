@@ -576,3 +576,321 @@ function goToLastPage() {
     const totalPages = Math.ceil(window.manager.filteredAccounts.length / window.manager.pageSize);
     window.manager.goToPage(totalPages);
 }
+
+// ========== 代理设置相关功能 ==========
+
+// 显示代理设置弹窗
+function showProxyModal() {
+    const modal = document.getElementById('proxyModal');
+    if (modal) {
+        modal.classList.remove('modal-hidden', 'hidden');
+        modal.classList.add('flex');
+        modal.style.display = 'flex';
+        // 重置弹窗状态
+        resetProxyModal();
+    }
+}
+
+// 隐藏代理设置弹窗
+function hideProxyModal() {
+    const modal = document.getElementById('proxyModal');
+    if (modal) {
+        modal.classList.add('modal-hidden', 'hidden');
+        modal.classList.remove('flex');
+        modal.style.display = 'none';
+    }
+}
+
+// 重置代理弹窗状态
+function resetProxyModal() {
+    // 清除错误信息
+    const errorDiv = document.getElementById('proxyUrlError');
+    if (errorDiv) {
+        errorDiv.classList.add('hidden');
+        errorDiv.textContent = '';
+    }
+
+    // 隐藏结果区域
+    const resultSection = document.getElementById('proxyResultSection');
+    const actionsSection = document.getElementById('proxyActionsSection');
+    const statusMessage = document.getElementById('proxyStatusMessage');
+
+    if (resultSection) resultSection.classList.add('hidden');
+    if (actionsSection) actionsSection.classList.add('hidden');
+    if (statusMessage) {
+        statusMessage.classList.add('hidden');
+        statusMessage.textContent = '';
+    }
+
+    // 重置按钮状态
+    const generateBtn = document.getElementById('generateProxyBtn');
+    if (generateBtn) {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="fas fa-download mr-2"></i>生成代理IP';
+        generateBtn.classList.remove('bg-gray-400');
+        generateBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+    }
+}
+
+// 验证代理URL格式
+function validateProxyUrl(url) {
+    if (!url) {
+        return { valid: false, error: '请输入代理URL' };
+    }
+
+    // 检查URL格式和https协议
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(url);
+    } catch (e) {
+        return { valid: false, error: 'URL格式无效，请输入有效的https URL' };
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        return { valid: false, error: 'URL必须使用https协议' };
+    }
+
+    // 检查必须参数
+    const params = new URLSearchParams(parsedUrl.search);
+    const username = params.get('username');
+    const password = params.get('password');
+    const requiredParams = 'ips=1&type=-res-&proxyType=http&responseType=txt';
+
+    if (!username) {
+        return { valid: false, error: 'URL缺少必须参数：username' };
+    }
+
+    if (!password) {
+        return { valid: false, error: 'URL缺少必须参数：password' };
+    }
+
+    // 检查固定参数
+    if (!url.includes(requiredParams)) {
+        return { valid: false, error: `URL缺少必须参数：${requiredParams}` };
+    }
+
+    return { valid: true, data: { url, username, password } };
+}
+
+// 显示代理URL验证错误
+function showProxyUrlError(message) {
+    const errorDiv = document.getElementById('proxyUrlError');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.classList.remove('hidden');
+    }
+}
+
+// 隐藏代理URL验证错误
+function hideProxyUrlError() {
+    const errorDiv = document.getElementById('proxyUrlError');
+    if (errorDiv) {
+        errorDiv.classList.add('hidden');
+    }
+}
+
+// 生成代理IP
+async function generateProxyIP() {
+    const urlInput = document.getElementById('proxyUrlInput');
+    const generateBtn = document.getElementById('generateProxyBtn');
+
+    if (!urlInput || !generateBtn) {
+        Utils.showNotification('页面元素未找到，请刷新页面重试', 'error');
+        return;
+    }
+
+    const proxyUrl = urlInput.value.trim();
+
+    // 验证URL格式
+    const validation = validateProxyUrl(proxyUrl);
+    if (!validation.valid) {
+        showProxyUrlError(validation.error);
+        return;
+    }
+
+    hideProxyUrlError();
+
+    // 更新按钮状态
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在获取代理IP...';
+    generateBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+    generateBtn.classList.add('bg-gray-400');
+
+    try {
+        // 调用后端API获取代理IP
+        const response = await fetch('/api/proxy/fetch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: proxyUrl })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '获取代理IP失败');
+        }
+
+        const result = await response.json();
+
+        if (result.success && result.proxyData) {
+            // 解析代理IP数据
+            const proxyData = parseProxyData(result.proxyData);
+            if (proxyData) {
+                displayProxyData(proxyData);
+                Utils.showNotification('代理IP获取成功', 'success');
+            } else {
+                throw new Error('代理IP数据格式错误');
+            }
+        } else {
+            throw new Error(result.error || '获取代理IP失败');
+        }
+
+    } catch (error) {
+        console.error('生成代理IP失败:', error);
+        Utils.showNotification(`获取代理IP失败: ${error.message}`, 'error');
+    } finally {
+        // 恢复按钮状态
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="fas fa-download mr-2"></i>生成代理IP';
+        generateBtn.classList.remove('bg-gray-400');
+        generateBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+    }
+}
+
+// 解析代理IP数据 (格式: host:port:username:password)
+function parseProxyData(proxyString) {
+    if (!proxyString) return null;
+
+    const parts = proxyString.split(':');
+    if (parts.length !== 4) {
+        console.error('代理数据格式错误，期望4个字段:', proxyString);
+        return null;
+    }
+
+    return {
+        host: parts[0].trim(),
+        port: parseInt(parts[1], 10),
+        username: parts[2].trim(),
+        password: parts[3].trim()
+    };
+}
+
+// 显示代理数据
+function displayProxyData(proxyData) {
+    const resultSection = document.getElementById('proxyResultSection');
+    const actionsSection = document.getElementById('proxyActionsSection');
+
+    if (!resultSection || !actionsSection) return;
+
+    // 更新显示数据
+    const elements = {
+        proxyHost: proxyData.host,
+        proxyPort: proxyData.port,
+        proxyUsername: proxyData.username,
+        proxyPassword: proxyData.password,
+        fullProxyAddress: `${proxyData.host}:${proxyData.port}:${proxyData.username}:${proxyData.password}`
+    };
+
+    Object.keys(elements).forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = elements[id];
+        }
+    });
+
+    // 显示结果区域和操作按钮
+    resultSection.classList.remove('hidden');
+    actionsSection.classList.remove('hidden');
+}
+
+// 配置系统代理
+async function configureSystemProxy() {
+    const proxyHost = document.getElementById('proxyHost').textContent;
+    const proxyPort = document.getElementById('proxyPort').textContent;
+    const proxyUsername = document.getElementById('proxyUsername').textContent;
+    const proxyPassword = document.getElementById('proxyPassword').textContent;
+
+    if (!proxyHost || !proxyPort || !proxyUsername || !proxyPassword) {
+        Utils.showNotification('代理数据不完整，请重新获取代理IP', 'error');
+        return;
+    }
+
+    const configureBtn = document.getElementById('configureProxyBtn');
+    const statusMessage = document.getElementById('proxyStatusMessage');
+
+    if (configureBtn) {
+        configureBtn.disabled = true;
+        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置代理...';
+        configureBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+        configureBtn.classList.add('bg-gray-400');
+    }
+
+    try {
+        // 调用后端API配置系统代理
+        const response = await fetch('/api/proxy/configure', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                host: proxyHost,
+                port: parseInt(proxyPort, 10),
+                username: proxyUsername,
+                password: proxyPassword
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '配置代理失败');
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+            showProxyStatus('success', result.message || '代理配置成功！');
+            Utils.showNotification('系统代理配置成功', 'success');
+        } else {
+            throw new Error(result.error || '配置代理失败');
+        }
+
+    } catch (error) {
+        console.error('配置代理失败:', error);
+        showProxyStatus('error', `配置失败: ${error.message}`);
+        Utils.showNotification(`配置代理失败: ${error.message}`, 'error');
+    } finally {
+        if (configureBtn) {
+            configureBtn.disabled = false;
+            configureBtn.innerHTML = '<i class="fas fa-cog mr-2"></i>一键配置代理';
+            configureBtn.classList.remove('bg-gray-400');
+            configureBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+        }
+    }
+}
+
+// 验证代理IP
+function verifyProxyIP() {
+    Utils.showNotification('正在打开IP验证页面...', 'info');
+    // 打开IP验证网站
+    window.open('https://ip111.cn/', '_blank');
+}
+
+// 显示代理状态消息
+function showProxyStatus(type, message) {
+    const statusMessage = document.getElementById('proxyStatusMessage');
+    if (!statusMessage) return;
+
+    statusMessage.classList.remove('hidden');
+
+    if (type === 'success') {
+        statusMessage.className = 'bg-green-50 border border-green-200 rounded-lg p-4 text-green-800';
+        statusMessage.innerHTML = `<i class="fas fa-check-circle mr-2"></i>${message}`;
+    } else if (type === 'error') {
+        statusMessage.className = 'bg-red-50 border border-red-200 rounded-lg p-4 text-red-800';
+        statusMessage.innerHTML = `<i class="fas fa-exclamation-circle mr-2"></i>${message}`;
+    } else if (type === 'warning') {
+        statusMessage.className = 'bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800';
+        statusMessage.innerHTML = `<i class="fas fa-exclamation-triangle mr-2"></i>${message}`;
+    }
+}
