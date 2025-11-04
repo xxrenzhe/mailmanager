@@ -2227,14 +2227,9 @@ app.post('/api/proxy/configure', async (req, res) => {
     try {
         console.log(`[代理配置] 开始配置Windows系统代理: ${host}:${port}`);
 
-        // 检测操作系统
-        const platform = process.platform;
-        if (platform !== 'win32') {
-            return res.status(400).json({
-                success: false,
-                error: '此功能仅支持Windows操作系统'
-            });
-        }
+        // 注意：操作系统检测移至前端，后端不再限制操作系统
+        // 这样可以在客户端浏览器中检测实际用户的操作系统
+        console.log(`[代理配置] 开始配置系统代理: ${host}:${port} (操作系统检测移至前端)`);
 
         // 构建PowerShell命令
         const proxyServer = `${host}:${port}`;

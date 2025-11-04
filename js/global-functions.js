@@ -827,6 +827,25 @@ async function configureSystemProxy() {
     }
 
     try {
+        // 检测用户操作系统
+        const userAgent = navigator.userAgent;
+        const isWindows = userAgent.indexOf('Windows') !== -1;
+        const isMac = userAgent.indexOf('Mac') !== -1;
+        const isLinux = userAgent.indexOf('Linux') !== -1;
+
+        console.log(`[代理配置] 检测到操作系统: ${isWindows ? 'Windows' : isMac ? 'macOS' : isLinux ? 'Linux' : '未知'}`);
+
+        if (!isWindows) {
+            throw new Error('此功能仅支持Windows操作系统。请使用Windows系统访问此功能。');
+        }
+
+        // 显示管理员权限提示
+        const adminConfirmed = confirm('⚠️ 重要提示：\n\n配置系统代理需要管理员权限。\n\n请确认：\n1. 您正在使用Windows系统\n2. 您将以管理员身份运行浏览器\n3. 配置完成后可能需要重启浏览器\n\n点击"确定"继续配置，点击"取消"退出。');
+
+        if (!adminConfirmed) {
+            return;
+        }
+
         // 调用后端API配置系统代理
         const response = await fetch('/api/proxy/configure', {
             method: 'POST',
