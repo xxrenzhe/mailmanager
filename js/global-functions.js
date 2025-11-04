@@ -806,12 +806,17 @@ function displayProxyData(proxyData) {
 
 // 配置Edge浏览器一键代理（KISS原则）
 async function configureSystemProxy() {
+    console.log('[DEBUG] configureSystemProxy 函数开始执行');
+
     const proxyHost = document.getElementById('proxyHost').textContent;
     const proxyPort = document.getElementById('proxyPort').textContent;
     const proxyUsername = document.getElementById('proxyUsername').textContent;
     const proxyPassword = document.getElementById('proxyPassword').textContent;
 
+    console.log('[DEBUG] 代理数据:', { proxyHost, proxyPort, proxyUsername, passwordLength: proxyPassword?.length });
+
     if (!proxyHost || !proxyPort || !proxyUsername || !proxyPassword) {
+        console.log('[DEBUG] 代理数据不完整');
         Utils.showNotification('代理数据不完整，请重新获取代理IP', 'error');
         return;
     }
@@ -831,13 +836,14 @@ async function configureSystemProxy() {
         const isWindows = userAgent.indexOf('Windows') !== -1;
         const isEdge = userAgent.indexOf('Edg/') !== -1;
 
-        console.log(`[Edge一键配置] 操作系统: ${isWindows ? 'Windows' : '非Windows'}, 浏览器: ${isEdge ? 'Edge' : '其他'}`);
+        console.log(`[DEBUG] 系统检测 - 操作系统: ${isWindows ? 'Windows' : '非Windows'}, 浏览器: ${isEdge ? 'Edge' : '其他'}, UserAgent: ${userAgent}`);
 
         if (!isWindows) {
             throw new Error('代理配置功能仅支持Windows操作系统。');
         }
 
         if (!isEdge) {
+            console.log('[DEBUG] 非Edge浏览器，显示不支持信息');
             // 非Edge浏览器显示指导信息
             Utils.showModal('浏览器不支持', `
 🚫 此功能仅支持 Microsoft Edge 浏览器
@@ -855,6 +861,8 @@ https://www.microsoft.com/edge
             `);
             return;
         }
+
+        console.log('[DEBUG] 通过Edge检测，继续执行KISS配置流程');
 
         // Edge专用一键配置确认
         const confirmMessage = `🚀 Edge浏览器一键代理配置
@@ -876,19 +884,25 @@ https://www.microsoft.com/edge
         }
 
         // Edge专用一键配置
+        console.log('[DEBUG] 开始执行Edge专用一键配置');
         showProxyStatus('info', '正在准备Edge代理配置...');
         const result = await executeEdgeOneClickProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 
+        console.log('[DEBUG] executeEdgeOneClickProxy 执行结果:', result);
+
         if (result.success) {
+            console.log('[DEBUG] Edge配置成功，显示成功状态');
             showProxyStatus('success', 'Edge代理配置完成！');
             Utils.showNotification('Edge代理配置成功！PowerShell窗口即将打开...', 'success');
 
             // 延迟显示简化指导
             setTimeout(() => {
+                console.log('[DEBUG] 显示Edge简化指导');
                 showEdgeSimpleGuide();
             }, 1500);
 
         } else {
+            console.log('[DEBUG] Edge配置失败:', result.error);
             throw new Error(result.error || 'Edge代理配置失败');
         }
 
