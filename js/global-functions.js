@@ -1440,12 +1440,13 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
 async function executeEdgeOneClickProxy(host, port, username, password) {
     try {
         // 生成增强的PowerShell脚本
+        const proxyServer = `${host}:${port}`;
         const autoCommand = `# 代理配置脚本 (增强版)
 $proxyHost = "${host}"
 $proxyPort = "${port}"
 $proxyUser = "${username}"
 $proxyPass = "${password}"
-$proxyServer = "${proxyHost}:${proxyPort}"
+$proxyServer = "${proxyServer}"
 
 Write-Host "🔧 配置系统代理: $proxyServer" -ForegroundColor Green
 Write-Host "📍 代理服务器: $proxyHost" -ForegroundColor White
