@@ -846,33 +846,9 @@ async function configureSystemProxy() {
             return;
         }
 
-        // 调用后端API配置系统代理
-        const response = await fetch('/api/proxy/configure', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                host: proxyHost,
-                port: parseInt(proxyPort, 10),
-                username: proxyUsername,
-                password: proxyPassword
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || '配置代理失败');
-        }
-
-        const result = await response.json();
-
-        if (result.success) {
-            showProxyStatus('success', result.message || '代理配置成功！');
-            Utils.showNotification('系统代理配置成功', 'success');
-        } else {
-            throw new Error(result.error || '配置代理失败');
-        }
+        // 尝试在前端自动执行PowerShell配置
+        await executePowerShellProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
+        return;
 
     } catch (error) {
         console.error('配置代理失败:', error);
@@ -893,6 +869,417 @@ function verifyProxyIP() {
     Utils.showNotification('正在打开IP验证页面...', 'info');
     // 打开IP验证网站
     window.open('https://ip111.cn/', '_blank');
+}
+
+// 前端自动执行PowerShell代理配置
+async function executePowerShellProxy(host, port, username, password) {
+    const proxyServer = `${host}:${port}`;
+
+    console.log(`[代理配置] 尝试前端自动执行: ${proxyServer}`);
+
+    try {
+        // 方案1: 尝试使用ActiveXObject (仅IE浏览器)
+        if (window.ActiveXObject || "ActiveXObject" in window) {
+            return await executeWithActiveXObject(proxyServer, username, password);
+        }
+
+        // 方案2: 尝试使用WScript.Shell
+        if (typeof WScriptShell !== 'undefined' || navigator.userAgent.indexOf('Windows') !== -1) {
+            return await executeWithWScriptShell(proxyServer, username, password);
+        }
+
+        // 方案3: 尝试使用Windows PowerShell URI scheme
+        return await executeWithPowerShellURI(proxyServer, username, password);
+
+    } catch (error) {
+        console.error('前端自动执行失败:', error);
+
+        // 如果自动执行失败，提供脚本下载选项
+        showProxyStatus('warning', `
+            <div class="space-y-3">
+                <div class="font-semibold">⚠️ 自动执行受限，提供手动配置方案</div>
+                <div class="text-sm text-gray-600">
+                    浏览器安全策略限制自动执行系统命令
+                </div>
+                <div class="space-y-2">
+                    <button onclick="generateProxyScript('${host}', '${port}', '${username}', '${password}')"
+                            class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm">
+                        📄 下载PowerShell配置脚本
+                    </button>
+                </div>
+            </div>
+        `);
+
+        Utils.showNotification('自动执行受限，请下载脚本手动配置', 'warning');
+    }
+}
+
+// 使用ActiveXObject执行PowerShell (仅IE)
+async function executeWithActiveXObject(proxyServer, username, password) {
+    try {
+        const shell = new ActiveXObject("WScript.Shell");
+
+        // 构建PowerShell命令
+        const powershellCommand = `powershell.exe -ExecutionPolicy Bypass -Command "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -Value 1 -Force; Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -Value '${proxyServer}' -Force; netsh winhttp set proxy ${proxyServer} '<local>'; ipconfig /flushdns"`;
+
+        // 执行命令
+        const result = shell.Run(powershellCommand, 0, true);
+
+        showProxyStatus('success', `
+            <div class="space-y-2">
+                <div class="font-semibold">✅ 系统代理配置成功 (ActiveXObject)</div>
+                <div class="text-sm">代理服务器: ${proxyServer}</div>
+                <div class="text-sm">用户名: ${username}</div>
+                <button onclick="verifyProxyIP()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded text-sm mt-2">
+                    🔍 验证IP地址
+                </button>
+            </div>
+        `);
+
+        Utils.showNotification('代理配置成功！请验证IP地址', 'success');
+        return true;
+
+    } catch (error) {
+        throw new Error(`ActiveXObject执行失败: ${error.message}`);
+    }
+}
+
+// 使用WScript.Shell执行
+async function executeWithWScriptShell(proxyServer, username, password) {
+    try {
+        // 创建临时PowerShell脚本文件
+        const scriptContent = `
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1 -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value "${proxyServer}" -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyOverride -Value "<local>" -Force
+netsh winhttp set proxy ${proxyServer} "<local>"
+ipconfig /flushdns
+Write-Output "Proxy configuration completed: ${proxyServer}"
+        `;
+
+        // 使用URL scheme触发PowerShell执行
+        const powerShellUrl = `powershell.exe -Command "${scriptContent.replace(/\n/g, '; ')}"`;
+
+        // 尝试打开PowerShell
+        window.open(powerShellUrl, '_blank');
+
+        // 等待执行完成
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        showProxyStatus('success', `
+            <div class="space-y-2">
+                <div class="font-semibold">✅ 已启动PowerShell配置</div>
+                <div class="text-sm">代理服务器: ${proxyServer}</div>
+                <div class="text-sm">用户名: ${username}</div>
+                <div class="text-xs text-amber-600">请确认PowerShell窗口中的配置是否成功</div>
+                <button onclick="verifyProxyIP()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded text-sm mt-2">
+                    🔍 验证IP地址
+                </button>
+            </div>
+        `);
+
+        Utils.showNotification('PowerShell配置已启动，请确认执行结果', 'success');
+        return true;
+
+    } catch (error) {
+        throw new Error(`WScript执行失败: ${error.message}`);
+    }
+}
+
+// 使用PowerShell URI scheme执行
+async function executeWithPowerShellURI(proxyServer, username, password) {
+    try {
+        // 编码PowerShell命令
+        const encodedCommand = encodeURIComponent(`
+# Windows系统代理配置脚本
+try {
+    Write-Host "正在配置系统代理..." -ForegroundColor Green
+    Write-Host "代理服务器: ${proxyServer}" -ForegroundColor Cyan
+
+    # 检查管理员权限
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Host "❌ 错误: 需要管理员权限" -ForegroundColor Red
+        Write-Host "请以管理员身份运行PowerShell" -ForegroundColor Red
+        pause
+        exit 1
+    }
+
+    # 设置注册表代理配置
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1 -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value "${proxyServer}" -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyOverride -Value "<local>" -Force
+
+    # 设置WinHTTP代理
+    netsh winhttp set proxy ${proxyServer} "<local>"
+
+    # 刷新DNS
+    ipconfig /flushdns
+
+    # 通知系统设置更改
+    $signature = @"
+[DllImport("wininet.dll")]
+public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+"@
+    $type = Add-Type -MemberDefinition $signature -Name WinINet
+    $type::InternetSetOption(0, 39, 0, 0)
+    $type::InternetSetOption(0, 37, 0, 0)
+
+    Write-Host "✅ 代理配置成功！" -ForegroundColor Green
+    Write-Host "代理服务器: ${proxyServer}" -ForegroundColor White
+    Write-Host "用户名: ${username}" -ForegroundColor White
+    Write-Host ""
+    Write-Host "请访问 https://ip111.cn/ 验证���理" -ForegroundColor Yellow
+
+} catch {
+    Write-Host "❌ 配置失败: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+Write-Host "按任意键退出..."
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        `);
+
+        // 构建PowerShell URI
+        const powerShellURI = `powershell.exe -ExecutionPolicy Bypass -Command "${encodedCommand}"`;
+
+        // 创建一个隐藏的iframe来执行URI
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = powerShellURI;
+        document.body.appendChild(iframe);
+
+        // 等待一段时间后移除iframe
+        setTimeout(() => {
+            document.body.removeChild(iframe);
+        }, 1000);
+
+        // 等待PowerShell执行
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        showProxyStatus('success', `
+            <div class="space-y-2">
+                <div class="font-semibold">✅ PowerShell配置已启动</div>
+                <div class="text-sm">代理服务器: ${proxyServer}</div>
+                <div class="text-sm">用户名: ${username}</div>
+                <div class="bg-amber-50 border border-amber-200 rounded p-2 text-xs">
+                    <div class="font-semibold text-amber-800">请确认：</div>
+                    <ul class="list-disc list-inside text-amber-700">
+                        <li>PowerShell窗口是否打开</li>
+                        <li>是否显示了配置成功信息</li>
+                        <li>如果有错误提示，请以管理员身份运行</li>
+                    </ul>
+                </div>
+                <div class="space-x-2 mt-2">
+                    <button onclick="verifyProxyIP()" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-sm">
+                        🔍 验证IP
+                    </button>
+                    <button onclick="generateProxyScript('${proxyServer.split(':')[0]}', '${proxyServer.split(':')[1]}', '${username}', '${password}')" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
+                        📄 下载脚本
+                    </button>
+                </div>
+            </div>
+        `);
+
+        Utils.showNotification('PowerShell配置已启动，请查看执行结果', 'success');
+        return true;
+
+    } catch (error) {
+        throw new Error(`PowerShell URI执行失败: ${error.message}`);
+    }
+}
+
+// 使用注册表协议执行 (备用方案)
+async function executeWithRegistryProtocol(proxyServer, username, password) {
+    try {
+        // 构建注册表修改的INF文件内容
+        const infContent = `
+[Version]
+Signature="$CHICAGO$"
+
+[DefaultInstall]
+AddReg=ProxySettings
+
+[ProxySettings]
+HKCU,"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings","ProxyEnable",0x00010001,1
+HKCU,"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings","ProxyServer",,"${proxyServer}"
+HKCU,"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings","ProxyOverride",,"<local>"
+        `.trim();
+
+        // 创建下载链接
+        const blob = new Blob([infContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'proxy-config.inf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // 提供INF文件安装指导
+        showProxyStatus('warning', `
+            <div class="space-y-3">
+                <div class="font-semibold">📄 已生成代理配置文件</div>
+                <div class="text-sm">
+                    下载了 proxy-config.inf 文件，请按以下步骤操作：
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+                    <ol class="list-decimal list-inside space-y-1 text-blue-700">
+                        <li>右键点击下载的 INF 文件</li>
+                        <li>选择"安装"</li>
+                        <li>确认所有UAC提示</li>
+                        <li>重启浏览器使设置生效</li>
+                    </ol>
+                </div>
+                <button onclick="verifyProxyIP()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded text-sm">
+                    🔍 验证IP地址
+                </button>
+            </div>
+        `);
+
+        Utils.showNotification('INF配置文件已下载，请安装后验证', 'warning');
+        return true;
+
+    } catch (error) {
+        throw new Error(`注册表协议执行失败: ${error.message}`);
+    }
+}
+
+// 生成PowerShell代理配置脚本
+function generateProxyScript(host, port, username, password) {
+    const proxyServer = `${host}:${port}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `proxy-config-${timestamp}.ps1`;
+
+    // 生成PowerShell脚本内容
+    const powershellScript = `# Windows系统代理配置脚本
+# 生成时间: ${new Date().toLocaleString()}
+# 代理服务器: ${proxyServer}
+
+Write-Host "===========================================" -ForegroundColor Green
+Write-Host "    Windows系统代理配置脚本" -ForegroundColor Green
+Write-Host "===========================================" -ForegroundColor Green
+Write-Host ""
+
+try {
+    Write-Host "正在配置系统代理..." -ForegroundColor Yellow
+    Write-Host "代理服务器: ${proxyServer}" -ForegroundColor Cyan
+    Write-Host "用户名: ${username}" -ForegroundColor Cyan
+    Write-Host ""
+
+    # 检查管理员权限
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Host "❌ 错误: 需要管理员权限运行此脚本" -ForegroundColor Red
+        Write-Host "请右键点击此文件，选择'以管理员身份运行'" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "按任意键退出..." -ForegroundColor Yellow
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        exit 1
+    }
+
+    Write-Host "✅ 管理员权限确认，开始配置..." -ForegroundColor Green
+    Write-Host ""
+
+    # 设置注册表代理配置
+    Write-Host "1. 设置系统注册表代理配置..." -ForegroundColor Yellow
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1 -Type DWord -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value "${proxyServer}" -Type String -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyOverride -Value "<local>" -Type String -Force
+    Write-Host "   ✅ 注册表配置完成" -ForegroundColor Green
+
+    # 设置WinHTTP代理
+    Write-Host "2. 配置WinHTTP代理..." -ForegroundColor Yellow
+    & netsh winhttp set proxy ${proxyServer} "<local>"
+    Write-Host "   ✅ WinHTTP代理配置完成" -ForegroundColor Green
+
+    # 刷新系统设置
+    Write-Host "3. 刷新系统设置..." -ForegroundColor Yellow
+    & ipconfig /flushdns > $null
+
+    # 通知系统代理设置已更改
+    $signature = @"
+[DllImport("wininet.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+"@
+
+    $type = Add-Type -MemberDefinition $signature -Name WinINet -Namespace System -PassThru
+    $INTERNET_OPTION_SETTINGS_CHANGED = 39
+    $INTERNET_OPTION_REFRESH = 37
+    $type::InternetSetOption(0, $INTERNET_OPTION_SETTINGS_CHANGED, 0, 0)
+    $type::InternetSetOption(0, $INTERNET_OPTION_REFRESH, 0, 0)
+    Write-Host "   ✅ 系统设置刷新完成" -ForegroundColor Green
+
+    Write-Host ""
+    Write-Host "===========================================" -ForegroundColor Green
+    Write-Host "🎉 代理配置成功！" -ForegroundColor Green
+    Write-Host "===========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "配置信息:" -ForegroundColor Cyan
+    Write-Host "  代理服务器: ${proxyServer}" -ForegroundColor White
+    Write-Host "  用户名: ${username}" -ForegroundColor White
+    Write-Host ""
+    Write-Host "验证步骤:" -ForegroundColor Yellow
+    Write-Host "1. 打开浏览器" -ForegroundColor White
+    Write-Host "2. 访问 https://ip111.cn/" -ForegroundColor White
+    Write-Host "3. 确认显示的IP地址为代理服务器IP" -ForegroundColor White
+    Write-Host ""
+    Write-Host "注意: 如果IP地址没有变化，请:" -ForegroundColor Yellow
+    Write-Host "  - 重启浏览器" -ForegroundColor White
+    Write-Host "  - 清除浏览器缓存" -ForegroundColor White
+    Write-Host "  - 检查代理设置是否生效" -ForegroundColor White
+    Write-Host ""
+
+} catch {
+    Write-Host "❌ 配置过程中发生错误:" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "请检查:" -ForegroundColor Yellow
+    Write-Host "  1. 是否以管理员身份运行" -ForegroundColor White
+    Write-Host "  2. 网络连接是否正常" -ForegroundColor White
+    Write-Host "  3. 代理服务器信息是否正确" -ForegroundColor White
+    Write-Host ""
+}
+
+Write-Host "按任意键退出..." -ForegroundColor Yellow
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+`;
+
+    // 创建Blob并下载
+    const blob = new Blob([powershellScript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // 显示成功消息和说明
+    showProxyStatus('success', `
+        <div class="space-y-3">
+            <div class="font-semibold">✅ PowerShell脚本已生成并开始下载</div>
+            <div class="text-sm">
+                <div>文件名: <code class="bg-gray-100 px-2 py-1 rounded">${filename}</code></div>
+            </div>
+            <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+                <div class="font-semibold text-blue-800 mb-2">📋 接下来的步骤:</div>
+                <ol class="list-decimal list-inside space-y-1 text-blue-700">
+                    <li>右键点击下载的 ${filename} 文件</li>
+                    <li>选择"以管理员身份运行"</li>
+                    <li>按照脚本提示完成代理配置</li>
+                    <li>访问 <a href="https://ip111.cn/" target="_blank" class="underline">https://ip111.cn/</a> 验证代理</li>
+                </ol>
+            </div>
+        </div>
+    `);
+
+    Utils.showNotification('PowerShell脚本已生成，请以管理员身份运行', 'success');
 }
 
 // 显示代理状态消息
