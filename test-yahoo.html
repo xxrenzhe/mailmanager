@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Yahoo邮箱解析测试</title>
+</head>
+<body>
+    <h1>Yahoo邮箱解析测试</h1>
+    <div id="test-results"></div>
+
+    <script src="js/core/utils.js?v=20251104-1"></script>
+    <script>
+        // 测试数据
+        const testData = [
+            'GuarinLadayjakV@yahoo.com----fvuociwnxpezxssf',
+            'JamieleeMckaleeaL@yahoo.com----bigergpkszqoiola'
+        ];
+
+        const results = document.getElementById('test-results');
+
+        testData.forEach(line => {
+            console.log('测试行:', line);
+            const result = Utils.parseImportLine(line);
+            results.innerHTML += '<p><strong>输入:</strong> ' + line + '</p>';
+            results.innerHTML += '<p><strong>解析结果:</strong> ' + JSON.stringify(result, null, 2) + '</p>';
+            results.innerHTML += '<hr>';
+        });
+    </script>
+</body>
+</html>

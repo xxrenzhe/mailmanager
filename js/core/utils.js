@@ -361,11 +361,11 @@ const Utils = {
 
         if (domain.includes('yahoo.com') || domain.includes('yahoo')) {
             // Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
-            console.log(`[Parse] 识别为Yahoo邮箱格式`);
+            console.log(`[Parse] 识别为Yahoo邮箱格式，开始解析...`);
             result = this.parseYahooLine(line, email);
         } else {
             // Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
-            console.log(`[Parse] 识别为Outlook邮箱格式`);
+            console.log(`[Parse] 识别为Outlook邮箱格式，开始解析...`);
             result = this.parseOutlookLine(line, email);
         }
 
@@ -384,21 +384,26 @@ const Utils = {
 
     // 解析Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
     parseYahooLine(line, email) {
+        console.log(`[Parse-Yahoo] 开始解析Yahoo邮箱: ${email}`);
+        console.log(`[Parse-Yahoo] 原始行: "${line}"`);
+
         const parts = line.split('----');
+        console.log(`[Parse-Yahoo] 分割后字段数: ${parts.length}, 字段:`, parts);
 
         if (parts.length < 2) {
-            console.warn(`[Parse] Yahoo格式错误，期望至少2个字段，实际${parts.length}个:`, line);
+            console.warn(`[Parse-Yahoo] Yahoo格式错误，期望至少2个字段，实际${parts.length}个:`, line);
             return null;
         }
 
         const [, password] = parts;
+        console.log(`[Parse-Yahoo] 提取密码: "${password}"`);
 
         if (!password || password.trim().length < 4) {
-            console.warn(`[Parse] Yahoo授权密码过短: "${password}"`);
+            console.warn(`[Parse-Yahoo] Yahoo授权密码过短: "${password}"`);
             return null;
         }
 
-        return {
+        const result = {
             email: email.trim(),
             password: password.trim(),
             type: 'yahoo',
@@ -406,6 +411,9 @@ const Utils = {
             client_id: '',
             refresh_token: ''
         };
+
+        console.log(`[Parse-Yahoo] 解析成功:`, result);
+        return result;
     },
 
     // 解析Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
