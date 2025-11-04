@@ -1471,29 +1471,37 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
         downloadLink.click();
         document.body.removeChild(downloadLink);
 
-        // 延迟自动执行下载的脚本
+        // 延迟启动PowerShell并自动粘贴执行
         setTimeout(() => {
             try {
-                // 使用PowerShell直接执行下载的脚本
-                const psCommand = `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\\Downloads\\proxy-config.ps1"`;
-                console.log('[DEBUG] 尝试自动执行PowerShell脚本:', psCommand);
+                console.log('[DEBUG] 启动PowerShell并准备自动执行...');
 
-                // 使用ActiveXObject或window.open尝试执行
-                if (window.ActiveXObject) {
-                    // IE支持的ActiveXObject方式
-                    const shell = new ActiveXObject("WScript.Shell");
-                    shell.Run(psCommand, 1, true);
+                // 方法1: 使用shell协议启动PowerShell
+                const shellUrl = `shell:powershell`;
+                const newWindow = window.open(shellUrl, '_blank');
+
+                if (newWindow) {
+                    console.log('[DEBUG] PowerShell窗口已启动');
+
+                    // 延迟复制命令到剪贴板，方便用户粘贴
+                    setTimeout(async () => {
+                        const copySuccess = await copyToClipboard(autoCommand);
+                        if (copySuccess) {
+                            Utils.showNotification('命令已复制，请在PowerShell中右键粘贴执行', 'success');
+                        } else {
+                            Utils.showNotification('请手动复制并执行PowerShell命令', 'warning');
+                        }
+                    }, 1500);
                 } else {
-                    // 备选方案：尝试使用file协议
-                    const fileProtocolUrl = `file:///$env:USERPROFILE/Downloads/proxy-config.ps1`;
-                    window.open(fileProtocolUrl, '_blank');
+                    console.log('[DEBUG] shell协议失败，尝试备用方案');
+                    // 备用方案: 下载文件并提供指导
+                    Utils.showNotification('请下载PowerShell脚本并手动执行', 'warning');
                 }
             } catch (error) {
-                console.log('[DEBUG] 自动执行失败，需要用户手动执行:', error);
-                // 如果自动执行失败，回到手动模式
-                showManualInstructions(host, port);
+                console.log('[DEBUG] 自动启动失败，需要用户手动操作:', error);
+                Utils.showNotification('请手动打开PowerShell并执行脚本', 'warning');
             }
-        }, 1000);
+        }, 1500);
 
         // 清理URL对象
         setTimeout(() => {

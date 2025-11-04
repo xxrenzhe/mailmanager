@@ -1127,17 +1127,67 @@ async function fetchEmailsWithRetry(accessToken, maxRetries = 5) {
     }
 }
 
-// 辅助函数：获取Microsoft邮件（使用现有的正确实现）
+// 辅助函数：获取Microsoft邮件（扩展支持多文件夹）
 async function fetchEmailsFromMicrosoft(accessToken) {
+    const OUTLOOK_API = 'https://outlook.office.com/api/v2.0';
+
+    // 要检查的文件夹列表：收件箱、垃圾箱、已删除邮件
+    const folders = [
+        { name: 'inbox', displayName: '收件箱' },
+        { name: 'junkemail', displayName: '垃圾箱' },
+        { name: 'deleteditems', displayName: '已删除' }
+    ];
+
+    console.log(`[邮件获取] 扩展模式：检查多个文件夹获取邮件`);
+
+    const allEmails = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    // 逐个文件夹获取邮件
+    for (const folder of folders) {
+        try {
+            console.log(`[邮件获取] 正在获取${folder.displayName}邮件...`);
+
+            const folderEmails = await fetchEmailsFromFolder(accessToken, folder.name, OUTLOOK_API);
+
+            if (folderEmails.length > 0) {
+                console.log(`[邮件获取] ${folder.displayName}获取到 ${folderEmails.length} 封邮件`);
+                allEmails.push(...folderEmails);
+                successCount++;
+            } else {
+                console.log(`[邮件获取] ${folder.displayName}无邮件`);
+            }
+
+            // 添加文件夹间延迟，避免API速率限制
+            if (folders.indexOf(folder) < folders.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+        } catch (error) {
+            console.error(`[邮件获取] ${folder.displayName}获取失败:`, error.message);
+            errorCount++;
+            // 继续处理其他文件夹，不让单个文件夹失败影响整体
+        }
+    }
+
+    console.log(`[邮件获取] 文件夹获取完成: 成功 ${successCount}/${folders.length}, 总邮件 ${allEmails.length} 封`);
+
+    // 按接收时间排序并去重
+    const sortedEmails = deduplicateAndSortEmails(allEmails);
+
+    console.log(`[邮件获取] 最终获取 ${sortedEmails.length} 封邮件（去重后）`);
+
+    return sortedEmails;
+}
+
+// 获取指定文件夹的邮件
+async function fetchEmailsFromFolder(accessToken, folderName, outlookApi) {
     return new Promise((resolve, reject) => {
-        // 使用现有的Outlook API实现（已验证可用）
-        const OUTLOOK_API = 'https://outlook.office.com/api/v2.0';
-        const url = `${OUTLOOK_API}/me/messages?$top=5&$orderby=ReceivedDateTime desc`;
+        const url = `${outlookApi}/me/mailFolders/${folderName}/messages?$top=5&$orderby=ReceivedDateTime desc`;
 
-        console.log(`[邮件获取] 获取最新5封邮件`);
-        console.log(`[调试] URL: ${url}`);
+        console.log(`[邮件获取] ${folderName} - URL: ${url}`);
 
-        // 从完整URL中提取路径部分（与原实现保持一致）
         const urlObj = new URL(url);
         const options = {
             hostname: urlObj.hostname,
@@ -1157,42 +1207,103 @@ async function fetchEmailsFromMicrosoft(accessToken) {
                 try {
                     if (res.statusCode === 200) {
                         const result = JSON.parse(data);
-                        resolve(result.value || []);
-                    } else {
-                        console.error(`[邮件获取错误] HTTP ${res.statusCode} - URL: ${url}`);
-                        console.error(`[邮件获取错误] 响应体:`, data);
+                        const emails = result.value || [];
 
-                        if (res.statusCode === 400) {
-                            reject(new Error(`邮件获取失败: 400 - 权限不足或token无效`));
-                        } else if (res.statusCode === 401) {
-                            reject(new Error(`邮件获取失败: 401 - 未授权，token已过期`));
-                        } else if (res.statusCode === 403) {
-                            reject(new Error(`邮件获取失败: 403 - 禁止访问，权限不足`));
-                        } else if (res.statusCode === 503) {
-                            // 503服务不可用，使用指数退避重试
-                            reject(new Error(`邮件获取失败: 503 - 服务暂时不可用`));
-                        } else if (res.statusCode === 429) {
-                            // 429请求过于频繁，使用指数退避重试
-                            reject(new Error(`邮件获取失败: 429 - 请求过于频繁`));
+                        // 为每封邮件添加文件夹信息，便于调试
+                        emails.forEach(email => {
+                            email.folder = folderName;
+                        });
+
+                        resolve(emails);
+                    } else if (res.statusCode === 404) {
+                        // 文件夹不存在或无权限访问，返回空数组
+                        console.log(`[邮件获取] ${folderName} 文件夹不存在或无权限访问 (404)`);
+                        resolve([]);
+                    } else {
+                        console.error(`[邮件获取错误] ${folderName} HTTP ${res.statusCode} - URL: ${url}`);
+
+                        // 对于文件夹错误，返回空数组而不是拒绝
+                        if (res.statusCode >= 400 && res.statusCode < 500) {
+                            console.log(`[邮件获取] ${folderName} 权限或配置问题，跳过此文件夹`);
+                            resolve([]);
                         } else {
-                            reject(new Error(`邮件获取失败: ${res.statusCode}`));
+                            reject(new Error(`${folderName}邮件获取失败: ${res.statusCode}`));
                         }
                     }
                 } catch (error) {
-                    console.error(`[邮件解析错误] URL: ${url}`);
-                    console.error(`[邮件解析错误] 原始数据: ${data}`);
-                    reject(new Error(`邮件响应解析失败: ${error.message}`));
+                    console.error(`[邮件解析错误] ${folderName}:`, error.message);
+                    resolve([]); // 解析错误也返回空数组，继续处理其他文件夹
                 }
             });
         });
 
-        req.on('error', (error) => reject(error));
-        req.setTimeout(60000, () => {
-            req.destroy();
-            reject(new Error('邮件获取超��'));
+        req.on('error', (error) => {
+            console.error(`[邮件请求错误] ${folderName}:`, error.message);
+            resolve([]); // 网络错误也返回空数组
         });
+
+        req.setTimeout(30000, () => {
+            req.destroy();
+            console.log(`[邮件获取超时] ${folderName} 请求超时`);
+            resolve([]); // 超时也返回空数组
+        });
+
         req.end();
     });
+}
+
+// 邮件去重和排序函数
+function deduplicateAndSortEmails(emails) {
+    if (!emails || emails.length === 0) {
+        return [];
+    }
+
+    console.log(`[邮件处理] 开始去重和排序，原始邮件数: ${emails.length}`);
+
+    // 使用InternetMessageId去重，如果没有则使用Subject+ReceivedDateTime组合
+    const seenIds = new Set();
+    const seenCombination = new Set();
+    const uniqueEmails = [];
+
+    for (const email of emails) {
+        // 优先使用InternetMessageId去重
+        if (email.InternetMessageId) {
+            if (!seenIds.has(email.InternetMessageId)) {
+                seenIds.add(email.InternetMessageId);
+                uniqueEmails.push(email);
+            } else {
+                console.log(`[邮件去重] 跳过重复邮件 (ID: ${email.InternetMessageId})`);
+            }
+        } else {
+            // 备用方案：使用主题+接收时间组合去重
+            const subject = email.Subject || email.subject || '';
+            const receivedTime = email.ReceivedDateTime || email.receivedDateTime || '';
+            const combination = `${subject}_${receivedTime}`;
+
+            if (!seenCombination.has(combination)) {
+                seenCombination.add(combination);
+                uniqueEmails.push(email);
+            } else {
+                console.log(`[邮件去重] 跳过重复邮件 (主题+时间组合)`);
+            }
+        }
+    }
+
+    // 按接收时间降序排序（最新的在前）
+    uniqueEmails.sort((a, b) => {
+        const timeA = new Date(a.ReceivedDateTime || a.receivedDateTime || 0);
+        const timeB = new Date(b.ReceivedDateTime || b.receivedDateTime || 0);
+        return timeB - timeA; // 降序：最新在前
+    });
+
+    console.log(`[邮件处理] 去重完成，唯一邮件数: ${uniqueEmails.length}`);
+
+    // 显示前几封邮件的来源文件夹
+    uniqueEmails.slice(0, 5).forEach((email, index) => {
+        console.log(`[邮件处理] #${index + 1} 来自 ${email.folder}: ${email.Subject || email.subject} (${email.ReceivedDateTime || email.receivedDateTime})`);
+    });
+
+    return uniqueEmails;
 }
 
 // HTML标签清理函数
