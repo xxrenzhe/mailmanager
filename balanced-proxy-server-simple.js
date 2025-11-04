@@ -702,7 +702,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         throw new Error('邮箱数据解析失败');
                     }
 
-                    const { email, client_id, refresh_token, id: frontendId } = accountData;
+                    const { email, client_id, refresh_token, password, type: accountType, id: frontendId } = accountData;
 
                     // KISS原则：使用前端提供的ID（前端存储数据，前端生成ID）
                     if (!frontendId) {
@@ -710,37 +710,51 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     }
                     accountData.id = frontendId;
 
-                    console.log(`[批量导入] KISS模式：使用前端ID ${email} -> ${frontendId}`);
+                    console.log(`[批量导入] KISS模式：使用前端ID ${email} -> ${frontendId}, 类型: ${accountType || 'outlook'}`);
 
-                    // 1. 验证授权凭证并获取access_token
-                    const tokenResult = await refreshToken(refresh_token, client_id, '');
-                    if (!tokenResult.access_token) {
-                        throw new Error('Token刷新失败');
+                    let emails = [];
+
+                    // 1. 根据邮箱类型验证和获取邮件
+                    if (accountType === 'yahoo') {
+                        console.log(`[批量导入] Yahoo邮箱直接获取邮件: ${email}`);
+                        if (!password) {
+                            throw new Error('Yahoo邮箱缺少密码');
+                        }
+                        emails = await fetchYahooEmails(email, password);
+                        console.log(`[批量导入] Yahoo邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
+                    } else {
+                        // Outlook邮箱：验证授权凭证并获取access_token
+                        const tokenResult = await refreshToken(refresh_token, client_id, '');
+                        if (!tokenResult.access_token) {
+                            throw new Error('Token刷新失败');
+                        }
+
+                        console.log(`[批量导入] 授权成功: ${email}`);
+
+                        // 获取邮件（带重试机制）
+                        console.log(`[批量导入] 获取Outlook邮件: ${email}`);
+                        emails = await fetchEmailsFromMicrosoft(tokenResult.access_token);
+                        console.log(`[批量导入] Outlook邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
                     }
 
-                    console.log(`[批量导入] 授权成功: ${email}`);
+                    // 2. 提取验证码（Yahoo和Outlook都使用相同的验证码提取逻辑）
+                    console.log(`[批量导入] 开始提取验证码，邮件数量: ${emails.length}`);
 
-                    // 2. 获取邮件（带重试机制）
-                    console.log(`[批量导入] 获取邮件: ${email}`);
-                    const emailsResult = await fetchEmailsWithRetry(tokenResult.access_token);
-
-                    // 3. 提取验证码
-                    console.log(`[批量导入] 开始提取验证码，邮件数量: ${emailsResult.length}`);
-                    if (emailsResult.length > 0) {
-                        console.log(`[批量导入] 第一封邮件完整数据:`, JSON.stringify(emailsResult[0], null, 2));
-                        console.log(`[批量导入] 第一封邮件主题: "${emailsResult[0].Subject || emailsResult[0].subject || ''}"`);
-                        console.log(`[批量导入] 第一封邮件发件人: ${emailsResult[0].From?.emailAddress?.Address || emailsResult[0].from?.emailAddress?.address || 'unknown'}`);
+                    if (emails.length > 0) {
+                        console.log(`[批量导入] 第一封邮件完整数据:`, JSON.stringify(emails[0], null, 2));
+                        console.log(`[批量导入] 第一封邮件主题: "${emails[0].Subject || emails[0].subject || ''}"`);
+                        console.log(`[批量导入] 第一封邮件发件人: ${emails[0].From?.emailAddress?.Address || emails[0].from?.emailAddress?.address || 'unknown'}`);
                         // 添加更详细的From字段调试
-                        console.log(`[调试] From字段完整结构:`, JSON.stringify(emailsResult[0].From || {}, null, 2));
+                        console.log(`[调试] From字段完整结构:`, JSON.stringify(emails[0].From || {}, null, 2));
                         // 检查其他可能的发件人字段
-                        console.log(`[调试] Sender字段:`, JSON.stringify(emailsResult[0].Sender || {}, null, 2));
-                        console.log(`[调试] InternetMessageId: ${emailsResult[0].InternetMessageId || 'none'}`);
+                        console.log(`[调试] Sender字段:`, JSON.stringify(emails[0].Sender || {}, null, 2));
+                        console.log(`[调试] InternetMessageId: ${emails[0].InternetMessageId || 'none'}`);
                         // 检查所有可用字段
-                        const allFields = Object.keys(emailsResult[0]);
+                        const allFields = Object.keys(emails[0]);
                         console.log(`[调试] 所有可用字段:`, allFields.join(', '));
                     }
 
-                    const verificationCodes = extractVerificationCodes(emailsResult);
+                    const verificationCodes = extractVerificationCodes(emails);
                     const latestCode = verificationCodes.length > 0 ? verificationCodes[0] : null;
 
                     console.log(`[批量导入] 找到验证码: ${email} -> ${latestCode ? latestCode.code : '无'}`);
@@ -756,17 +770,19 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     const processedAccountData = {
                         id: 'email_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
                         email: email,
+                        type: accountType || 'outlook',
+                        password: password || '',
                         client_id: client_id,
                         refresh_token: refresh_token,
-                        access_token: tokenResult.access_token,
+                        access_token: accountType !== 'yahoo' ? tokenResult.access_token : '',
                         status: 'authorized',
                         created_at: new Date().toISOString(),
                         last_checked: new Date().toISOString(),
-                        email_count: emailsResult.length,
+                        email_count: emails.length,
                         verification_code: latestCode,
                         sequence: i + batch.indexOf(emailData) + 1,
                         monitoring_enabled: false,
-                        emails: emailsResult // 包含邮件数据
+                        emails: emails // 包含邮件数据
                     };
 
                     successCount++;
@@ -778,7 +794,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         email_id: accountData.id,
                         email: email,
                         status: 'authorized',
-                        email_count: emailsResult.length,
+                        email_count: emails.length,
                         progress: {
                             current: successCount + failureCount,
                             total: emails.length,
@@ -807,7 +823,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         email: email,
                         email_id: accountData.id,
                         status: 'authorized',
-                        email_count: emailsResult.length,
+                        email_count: emails.length,
                         has_verification_code: !!latestCode,
                         progress: {
                             current: successCount + failureCount,
@@ -823,7 +839,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                         email_id: accountData.id,
                         status: 'authorized',
                         verification_code: latestCode,
-                        email_count: emailsResult.length,
+                        email_count: emails.length,
                         data: accountData
                     };
 
@@ -1030,8 +1046,10 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         const account = {
             id: email_id,
             email: email,
+            type: type || 'outlook', // 确保包含邮箱类型
             client_id: client_id,
             refresh_token: refresh_token,
+            password: password || '', // Yahoo邮箱需要密码
             current_status: finalStatus,
             last_active_at: new Date().toISOString(),
             codes: codes || [],
@@ -1860,15 +1878,94 @@ function extractVerificationCode(subject, body) {
 // 邮箱导入行解析函数（与前端Utils.parseImportLine完全一致）
 function parseImportLine(line) {
     console.log(`[Parse Debug] 解析行:`, line);
+
+    // 如果已经是对象格式，直接返回
+    if (typeof line === 'object' && line.email) {
+        console.log(`[Parse Debug] 对象格式，直接返回:`, line.email);
+        return {
+            ...line,
+            type: line.type || (line.email.toLowerCase().includes('yahoo') ? 'yahoo' : 'outlook'),
+            status: line.status || (line.email.toLowerCase().includes('yahoo') ? 'authorized' : 'pending')
+        };
+    }
+
     // 预处理：移除行首行尾空白
     line = line.trim();
     if (!line) {
         console.warn(`[Parse] 空行，跳过`);
         return null;
     }
+
+    console.log(`[Parse Debug] 开始解析字符串格式:`, line);
+
+    // 检测邮箱类型并解析
+    const emailMatch = line.match(/^([^\s-]+@[^\s-]+)/);
+    if (!emailMatch) {
+        console.warn(`[Parse] ��找到有效邮箱地址: "${line}"`);
+        return null;
+    }
+
+    const email = emailMatch[1];
+    const domain = email.split('@')[1].toLowerCase();
+
+    console.log(`[Parse Debug] 检测到邮箱: ${email}, 域名: ${domain}`);
+
+    let result;
+
+    if (domain.includes('yahoo.com') || domain.includes('yahoo')) {
+        // Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
+        console.log(`[Parse Debug] 识别为Yahoo邮箱格式，开始解析...`);
+        result = parseYahooLine(line, email);
+    } else {
+        // Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
+        console.log(`[Parse Debug] 识别为Outlook邮箱格式，开始解析...`);
+        result = parseOutlookLine(line, email);
+    }
+
+    if (result) {
+        console.log(`[Parse Debug] 解析成功:`, {
+            email: result.email,
+            type: result.type,
+            hasPassword: !!result.password,
+            hasClientId: !!result.client_id,
+            hasRefreshToken: !!result.refresh_token,
+            status: result.status
+        });
+    } else {
+        console.warn(`[Parse Debug] 解析失败`);
+    }
+
+    return result;
+}
+
+// Yahoo邮箱行解析函数
+function parseYahooLine(line, email) {
+    const parts = line.split('----');
+    console.log(`[Parse Debug] Yahoo格式分割结果:`, parts, `字段数: ${parts.length}`);
+
+    if (parts.length >= 2) {
+        const password = parts[1].trim();
+
+        return {
+            email: email,
+            password: password,
+            type: 'yahoo',
+            client_id: '',
+            refresh_token: '',
+            status: 'authorized' // Yahoo邮箱默认已授权
+        };
+    }
+
+    console.warn(`[Parse Debug] Yahoo邮箱格式无效，期望至少2个字段，实际${parts.length}个`);
+    return null;
+}
+
+// Outlook邮箱行解析函数
+function parseOutlookLine(line, email) {
     // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
     let parts = line.split('----');
-    console.log(`[Parse Debug] 第一次分割结果:`, parts, `字段数: ${parts.length}`);
+    console.log(`[Parse Debug] Outlook格式第一次分割结果:`, parts, `字段数: ${parts.length}`);
+
     if (parts.length !== 4) {
         // 如果不是4个字段，尝试智能重构
         const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -1886,43 +1983,36 @@ function parseImportLine(line) {
                     uuidMatch[0],
                     afterUuid.replace(/^-+/, '')
                 ];
-                console.log(`[Parse Debug] 智能重构结果:`, parts);
+                console.log(`[Parse Debug] Outlook格式智能重构结果:`, parts);
             }
         }
     }
+
     if (parts.length < 4) {
-        console.warn(`[Parse] 无效数据格式，期望4个字段，实际${parts.length}个:`, line);
-        console.warn(`[Parse] 字段详情:`, parts.map((p, i) => `字段${i+1}: "${p}"`));
+        console.warn(`[Parse Debug] Outlook邮箱格式无效，期望4个字段，实际${parts.length}个`);
         return null;
     }
-    const [email, password, client_id, refresh_token_enc] = parts;
+
+    const [_, password, client_id, refresh_token_enc] = parts;
+
     // 验证每个字段
-    if (!email || !email.includes('@')) {
-        console.warn(`[Parse] 无效的邮箱地址: "${email}"`);
-        return null;
-    }
     if (!client_id || client_id.length < 10) {
-        console.warn(`[Parse] 无效的client_id: "${client_id}"`);
+        console.warn(`[Parse Debug] 无效的client_id: "${client_id}"`);
         return null;
     }
     if (!refresh_token_enc || refresh_token_enc.length < 10) {
-        console.warn(`[Parse] 无效的refresh_token: "${refresh_token_enc?.substring(0, 20)}..."`);
+        console.warn(`[Parse Debug] 无效的refresh_token: "${refresh_token_enc?.substring(0, 20)}..."`);
         return null;
     }
-    const result = {
-        email: email.trim(),
+
+    return {
+        email: email,
         password: password ? password.trim() : '',
         client_id: client_id.trim(),
-        refresh_token: refresh_token_enc.trim()
+        refresh_token: refresh_token_enc.trim(),
+        type: 'outlook',
+        status: 'pending' // Outlook邮箱需要授权
     };
-    console.log(`[Parse Debug] 最终解析结果:`, {
-        email: result.email,
-        hasClientId: !!result.client_id,
-        clientIdLength: result.client_id.length,
-        hasRefreshToken: !!result.refresh_token,
-        refreshTokenLength: result.refresh_token.length
-    });
-    return result;
 }
 
 function extractVerificationCodes(emails) {
@@ -1998,7 +2088,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             // Yahoo邮箱：直接使用IMAP获取，与Outlook保持一致，每个文件夹5封邮件，最多15封邮件
             try {
                 console.log(`[手动取件] Yahoo邮箱获取邮件: ${email}`);
-                emails = await fetchEmailsFromYahoo(email, password, 15);
+                emails = await fetchYahooEmails(email, password, null);
                 console.log(`[手动取件] Yahoo邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
             } catch (yahooError) {
                 console.error(`[手动取件] Yahoo邮箱获取失败: ${email}`, yahooError.message);
