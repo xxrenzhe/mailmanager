@@ -1131,14 +1131,19 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
 
                 console.log(`[Yahoo邮件] 收件箱打开成功，邮件总数: ${box.messages.total}`);
 
-                // 搜索最近的邮件（最近10封）
-                const searchCriteria = timeFilter ?
-                    ['SINCE', new Date(timeFilter).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: '2-digit',
-                        year: 'numeric'
-                    })] :
-                    ['ALL'];
+                // 搜索最近的邮件
+                let searchCriteria;
+                if (timeFilter && timeFilter !== '2000-01-01T00:00:00Z') {
+                    // 将时间转换为IMAP兼容的日期格式 (DD-MMM-YYYY)
+                    const filterDate = new Date(timeFilter);
+                    const day = String(filterDate.getDate()).padStart(2, '0');
+                    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
+                    const year = filterDate.getFullYear();
+                    searchCriteria = ['SINCE', `${day}-${month}-${year}`];
+                } else {
+                    searchCriteria = ['ALL'];
+                }
 
                 imap.search(searchCriteria, (err, results) => {
                     if (err) {
@@ -1255,6 +1260,14 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
 
         imap.once('error', (err) => {
             console.error(`[Yahoo邮件] IMAP连接错误: ${email}`, err);
+
+            // 特殊处理频率限制错误
+            if (err.textCode === 'LIMIT' && err.source === 'authentication') {
+                console.log(`[Yahoo邮件] 遇到频率限制，将在下次监控时重试: ${email}`);
+            } else {
+                console.log(`[Yahoo邮件] 连接失败，监控将继续: ${email}`);
+            }
+
             resolve([]);
         });
 
