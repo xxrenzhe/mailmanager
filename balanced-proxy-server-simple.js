@@ -280,6 +280,8 @@ function startMonitoring(sessionId, account, duration = 60000) {
                 // 根据邮箱类型使用不同的邮件获取方式
                 if (account.type === 'yahoo') {
                     console.log(`[Yahoo邮件] 直接获取Yahoo邮箱邮件: ${account.email}`);
+                } else if (account.type === 'icloud') {
+                    console.log(`[iCloud邮件] 直接获取iCloud邮箱邮件: ${account.email}`);
                 } else {
                     console.log(`[Token刷新] 开始刷新Token: ${account.email}`);
 
@@ -300,6 +302,11 @@ function startMonitoring(sessionId, account, duration = 60000) {
                 // 如果是Yahoo邮箱，使用Yahoo邮件获取函数
                 if (account.type === 'yahoo') {
                     emails = await fetchYahooEmails(account.email, account.password, account.last_check_time);
+                }
+
+                // 如果是iCloud邮箱，使用iCloud邮件获取��数
+                if (account.type === 'icloud') {
+                    emails = await fetchICloudEmails(account.email, account.password, account.last_check_time);
                 }
 
                 if (emails && emails.length > 0) {
@@ -979,8 +986,8 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         // 账户状态检查和处理
         let finalStatus = current_status;
 
-        // 只有Outlook邮箱才需要重新授权检查
-        if (type !== 'yahoo' && (current_status === 'pending' || current_status === 'reauth_required')) {
+        // 只有Outlook邮箱才需要重新授权检查（Yahoo和iCloud邮箱都是IMAP直接连接，无需OAuth）
+        if (type !== 'yahoo' && type !== 'icloud' && (current_status === 'pending' || current_status === 'reauth_required')) {
             console.log(`[监控触发] Outlook账户 ${email} 状态为 ${current_status}，将尝试重新授权`);
 
             // Outlook邮箱：尝试重新授权（刷新token）
@@ -1140,7 +1147,9 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                     const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
                     const year = filterDate.getFullYear();
-                    searchCriteria = ['SINCE', `${day}-${month}-${year}`];
+                    // 使用Date对象而不是字符串格式，避免IMAP搜索参数错误
+                    const filterDateObj = new Date(timeFilter);
+                    searchCriteria = ['SINCE', filterDateObj];
                 } else {
                     searchCriteria = ['ALL'];
                 }
@@ -1321,6 +1330,240 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
 
         imap.once('end', () => {
             console.log(`[Yahoo邮件] IMAP连接已断开: ${email}`);
+        });
+
+        imap.connect();
+    });
+}
+
+// iCloud邮箱IMAP获取函数（基于Yahoo邮箱逻辑，适配iCloud配置）
+async function fetchICloudEmails(email, password, timeFilter = null) {
+    console.log(`[iCloud邮件] 开始连接iCloud邮箱IMAP: ${email}`);
+
+    return new Promise((resolve, reject) => {
+        const Imap = require('imap');
+        const { simpleParser } = require('mailparser');
+
+        const imapConfig = {
+            user: email,
+            password: password,
+            host: 'imap.mail.me.com',  // iCloud IMAP服务器
+            port: 993,
+            tls: true,
+            tlsOptions: {
+                rejectUnauthorized: false
+            },
+            authTimeout: 30000,
+            connTimeout: 30000
+        };
+
+        const imap = new Imap(imapConfig);
+
+        imap.once('ready', () => {
+            console.log(`[iCloud邮件] IMAP连接成功: ${email}`);
+
+            // 打开收件箱
+            imap.openBox('INBOX', false, (err, box) => {
+                if (err) {
+                    console.error(`[iCloud邮件] 打开收件箱失败: ${email}`, err);
+                    imap.end();
+                    return resolve([]);
+                }
+
+                console.log(`[iCloud邮件] 收件箱打开成功，邮件总数: ${box.messages.total}`);
+
+                // 搜索最近的邮件
+                let searchCriteria;
+                if (timeFilter && timeFilter !== '2000-01-01T00:00:00Z') {
+                    // 将时间转换为IMAP兼容的日期格式 (DD-MMM-YYYY)
+                    const filterDate = new Date(timeFilter);
+                    const day = String(filterDate.getDate()).padStart(2, '0');
+                    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
+                    const year = filterDate.getFullYear();
+                    // 使用Date对象而不是字符串格式，避免IMAP搜索参数错误
+                    const filterDateObj = new Date(timeFilter);
+                    searchCriteria = ['SINCE', filterDateObj];
+                } else {
+                    searchCriteria = ['ALL'];
+                }
+
+                imap.search(searchCriteria, (err, results) => {
+                    if (err) {
+                        console.error(`[iCloud邮件] 搜索邮件失败: ${email}`, err);
+                        imap.end();
+                        return resolve([]);
+                    }
+
+                    if (!results || results.length === 0) {
+                        console.log(`[iCloud邮件] 未找到邮件: ${email}`);
+                        imap.end();
+                        return resolve([]);
+                    }
+
+                    console.log(`[iCloud邮件] 找到 ${results.length} 封邮件: ${email}`);
+
+                    // 获取最近的几封邮件
+                    const fetchCount = Math.min(results.length, 10);
+                    const recentResults = results.slice(-fetchCount);
+
+                    const emails = [];
+                    let processedCount = 0;
+
+                    const fetch = imap.fetch(recentResults, {
+                        bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)', 'TEXT'], // 获取头部和完整内容
+                        struct: true
+                    });
+
+                    fetch.on('message', (msg, seqno) => {
+                        let buffer = '';
+                        let messageId = '';
+                        let headers = {};
+
+                        msg.on('body', (stream, info) => {
+                            stream.on('data', (chunk) => {
+                                buffer += chunk.toString('utf8');
+                            });
+
+                            stream.once('end', () => {
+                                // 🔍 调试：检查原始IMAP数据
+                                console.log(`[iCloud邮件IMAP] 邮件 #${seqno} body部分:`, info.which);
+                                console.log(`[iCloud邮件IMAP] 原始数据前200字符: "${buffer.substring(0, 200)}..."`);
+
+                                if (info.which === 'HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)') {
+                                    headers = Imap.parseHeader(buffer);
+                                    messageId = headers['message-id'] || `msg_${seqno}_${Date.now()}`;
+
+                                    // 🔍 调试：检查IMAP头部解析结果
+                                    console.log(`[iCloud邮件头部] 邮件 #${seqno} IMAP头部:`);
+                                    console.log(`[iCloud邮件头部] subject字段: "${headers.subject}"`);
+                                    console.log(`[iCloud邮件头部] 所有字段:`, Object.keys(headers));
+                                    console.log(`[iCloud邮件头部] from字段:`, headers.from);
+                                    console.log(`[iCloud邮件头部] to字段:`, headers.to);
+                                    console.log(`[iCloud邮件头部] date字段:`, headers.date);
+                                }
+                            });
+                        });
+
+                        msg.once('attributes', (attrs) => {
+                            const receivedDate = new Date(attrs.date).toISOString();
+
+                            // 获取完整邮件内容
+                            const fullFetch = imap.fetch(attrs.uid, { bodies: 'TEXT', struct: true });
+
+                            fullFetch.on('message', (fullMsg, fullSeqno) => {
+                                let fullBuffer = '';
+
+                                fullMsg.on('body', (stream, info) => {
+                                    stream.on('data', (chunk) => {
+                                        fullBuffer += chunk.toString('utf8');
+                                    });
+
+                                    stream.once('end', async () => {
+                                        try {
+                                            const parsed = await simpleParser(fullBuffer);
+
+                                            // 🔍 调试：检查mailparser解析出的所有字段
+                                            console.log(`[iCloud邮件解析] 邮件 #${processedCount + 1} 原始字段:`);
+                                            console.log(`[iCloud邮件解析] parsed.subject: "${parsed.subject}"`);
+                                            console.log(`[iCloud邮件解析] parsed.subject 类型: ${typeof parsed.subject}`);
+                                            console.log(`[iCloud邮件解析] parsed.from:`, parsed.from);
+                                            console.log(`[iCloud邮件解析] parsed.to:`, parsed.to);
+                                            console.log(`[iCloud邮件解析] parsed.date:`, parsed.date);
+                                            console.log(`[iCloud邮件解析] parsed.messageId:`, parsed.messageId);
+
+                                            // 🎯 iCloud邮件特殊处理：从HTML title标签提取发件人信息（与Yahoo一致）
+                                            let extractedSubject = parsed.subject;
+                                            if (!extractedSubject && (parsed.html || parsed.text)) {
+                                                const content = parsed.html || parsed.text;
+                                                console.log(`[iCloud邮件主题] 尝试从邮件内容提取主题...`);
+
+                                                // 查找HTML title标签
+                                                const titleMatch = content.match(/<title[^>]*>([^<]+)<\/title>/i);
+                                                if (titleMatch) {
+                                                    extractedSubject = titleMatch[1].replace(/=\s*\n/g, '').trim(); // 清理邮件中的格式
+                                                    console.log(`[iCloud邮件主题] 从HTML title提取到主题: "${extractedSubject}"`);
+                                                } else {
+                                                    // 备用方案：查找"Sign in to"模式
+                                                    const signInMatch = content.match(/sign in to ([^\s\n]+)/i);
+                                                    if (signInMatch) {
+                                                        extractedSubject = `Sign in to ${signInMatch[1]}`;
+                                                        console.log(`[iCloud邮件主题] 从Sign in to模式提取到主题: "${extractedSubject}"`);
+                                                    } else {
+                                                        console.log(`[iCloud邮件主题] 未能从邮件内容提取主题`);
+                                                    }
+                                                }
+                                            }
+
+                                            const email = {
+                                                id: messageId,
+                                                Subject: extractedSubject || '(无主题)', // 优先使用提取的主题
+                                                Body: { // 统一使用嵌套Body结构
+                                                    Content: parsed.text || parsed.html || ''
+                                                },
+                                                From: { // 统一使用大写From
+                                                    EmailAddress: {
+                                                        Name: parsed.from?.value?.[0]?.name || '',
+                                                        Address: parsed.from?.value?.[0]?.address || ''
+                                                    }
+                                                },
+                                                ToAddress: parsed.to?.value?.map(addr => addr.address || '') || [],
+                                                receivedDateTime: receivedDate,
+                                                IsRead: attrs.flags.includes('\\Seen')
+                                            };
+
+                                            console.log(`[iCloud邮件解析] 最终email.Subject: "${email.Subject}"`);
+                                            console.log(`[iCloud邮件解析] 构建后email.Body.Content长度: ${email.Body.Content.length}`);
+
+                                            emails.push(email);
+                                            processedCount++;
+
+                                            if (processedCount === recentResults.length) {
+                                                emails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+                                                console.log(`[iCloud邮件] 成功解析 ${emails.length} 封邮件: ${email}`);
+                                                imap.end();
+                                                resolve(emails);
+                                            }
+                                        } catch (parseError) {
+                                            console.error(`[iCloud邮件] 解析邮件失败: ${email}`, parseError);
+                                            processedCount++;
+
+                                            if (processedCount === recentResults.length) {
+                                                emails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+                                                imap.end();
+                                                resolve(emails);
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                    });
+
+                    fetch.once('error', (err) => {
+                        console.error(`[iCloud邮件] 获取邮件内容失败: ${email}`, err);
+                        imap.end();
+                        resolve([]);
+                    });
+                });
+            });
+        });
+
+        imap.once('error', (err) => {
+            console.error(`[iCloud邮件] IMAP连接错误: ${email}`, err);
+
+            // 特殊处理频率限制错误
+            if (err.textCode === 'LIMIT' && err.source === 'authentication') {
+                console.log(`[iCloud邮件] 遇到频率限制，将在下次监控时重试: ${email}`);
+            } else {
+                console.log(`[iCloud邮件] 连接失败，监控将继续: ${email}`);
+            }
+
+            resolve([]);
+        });
+
+        imap.once('end', () => {
+            console.log(`[iCloud邮件] IMAP连接已断开: ${email}`);
         });
 
         imap.connect();
@@ -1888,6 +2131,45 @@ function extractSenderEmail(email) {
     }
 }
 
+// 提取邮件收件人信息函数
+function extractRecipientEmails(email) {
+    if (!email) return [];
+
+    try {
+        const recipients = [];
+
+        // 从ToAddress字段提取收件人邮箱（优先使用）
+        if (email.ToAddress && Array.isArray(email.ToAddress)) {
+            email.ToAddress.forEach(addr => {
+                if (addr && addr.includes('@')) {
+                    recipients.push(addr.trim());
+                }
+            });
+        }
+
+        // 从to字段提取收件人邮箱（备用方案）
+        if (email.to && email.to.value && Array.isArray(email.to.value)) {
+            email.to.value.forEach(addr => {
+                if (addr && addr.address && addr.address.includes('@')) {
+                    const emailAddress = addr.address.trim();
+                    if (!recipients.includes(emailAddress)) {
+                        recipients.push(emailAddress);
+                    }
+                }
+            });
+        }
+
+        // 去重并返回
+        const uniqueRecipients = [...new Set(recipients)];
+        console.log(`[收件人提取] 提取到 ${uniqueRecipients.length} 个收件人:`, uniqueRecipients);
+
+        return uniqueRecipients;
+    } catch (error) {
+        console.error('[收件人提取] 提取失败:', error);
+        return [];
+    }
+}
+
 // 邮政编码过滤函数 - 检查是否为邮政编码或地址中的数字
 function isZipCodeOrAddressNumber(text, code, codePosition) {
     if (!text || !code || codePosition === undefined) return false;
@@ -2076,6 +2358,10 @@ function parseImportLine(line) {
         // Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
         console.log(`[Parse Debug] 识别为Yahoo邮箱格式，开始解析...`);
         result = parseYahooLine(line, email);
+    } else if (domain.includes('icloud.com') || domain.includes('me.com')) {
+        // iCloud邮箱格式：邮箱地址----应用专用密码
+        console.log(`[Parse Debug] 识别为iCloud邮箱格式，开始解析...`);
+        result = parseICloudLine(line, email);
     } else {
         // Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
         console.log(`[Parse Debug] 识别为Outlook邮箱格式，开始解析...`);
@@ -2117,6 +2403,28 @@ function parseYahooLine(line, email) {
     }
 
     console.warn(`[Parse Debug] Yahoo邮箱格式无效，期望至少2个字段，实际${parts.length}个`);
+    return null;
+}
+
+// iCloud邮箱行解析函数
+function parseICloudLine(line, email) {
+    const parts = line.split('----');
+    console.log(`[Parse Debug] iCloud格式分割结果:`, parts, `字段数: ${parts.length}`);
+
+    if (parts.length >= 2) {
+        const password = parts[1].trim();
+
+        return {
+            email: email,
+            password: password,
+            type: 'icloud',
+            client_id: '',
+            refresh_token: '',
+            status: 'authorized' // iCloud邮箱默认已授权
+        };
+    }
+
+    console.warn(`[Parse Debug] iCloud邮箱格式无效，期望至少2个字段，实际${parts.length}个`);
     return null;
 }
 
@@ -2183,6 +2491,8 @@ function extractVerificationCodes(emails) {
         const bodyContent = email.Body?.Content || email.body?.content || email.body || '';
         // 从邮件主题中提取发件人关键词作为显示名称
         const senderName = extractSenderEmail(email);
+        // 提取收件人信息
+        const recipientEmails = extractRecipientEmails(email);
         const receivedTime = email.ReceivedDateTime || email.receivedDateTime; // 🔧 KISS原则: 直接使用UTC时间
 
         const code = extractVerificationCode(subject, bodyContent);
@@ -2192,10 +2502,12 @@ function extractVerificationCodes(emails) {
             console.log(`[验证码提取] 邮件接收时间: ${receivedTime}`);
             console.log(`[验证码提取] 邮件主题: ${subject}`);
             console.log(`[验证码提取] 发件人: ${senderName}`);
+            console.log(`[验证码提取] 收件人: ${recipientEmails.join(', ')}`);
 
             codes.push({
                 code: code,
                 sender: senderName,
+                recipients: recipientEmails, // 新增收件人信息
                 received_at: receivedTime, // UTC时间，简单可靠
                 subject: subject
             });
@@ -2258,6 +2570,20 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
                     status: 'reauth_required'
                 });
             }
+        } else if (type === 'icloud') {
+            // iCloud邮箱：直接使用IMAP获取，与Yahoo保持一致
+            try {
+                console.log(`[手动取件] iCloud邮箱获取邮件: ${email}`);
+                emails = await fetchICloudEmails(email, password, null);
+                console.log(`[手动取件] iCloud邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
+            } catch (icloudError) {
+                console.error(`[手动取件] iCloud邮箱获取失败: ${email}`, icloudError.message);
+                return res.status(403).json({
+                    success: false,
+                    error: 'iCloud邮箱连接失败，请检查邮箱配置',
+                    status: 'reauth_required'
+                });
+            }
         } else {
             // Outlook邮箱：使用OAuth API获取邮件，每个文件夹5封邮件，共3个文件夹最多15封
             try {
@@ -2296,7 +2622,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             id: email_id,
             email: email,
             type: type || 'outlook', // 添加邮箱类型
-            password: type === 'yahoo' ? password : '', // Yahoo需要保存密码
+            password: (type === 'yahoo' || type === 'icloud') ? password : '', // Yahoo和iCloud需要保存密码
             client_id: type === 'outlook' ? client_id : '',
             refresh_token: type === 'outlook' ? refresh_token : '',
             access_token: type === 'outlook' ? (tokenResult ? tokenResult.access_token : '') : '',
