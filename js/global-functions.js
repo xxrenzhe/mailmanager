@@ -1535,18 +1535,13 @@ function showEdgeSimpleGuide() {
 • 配置脚本会自动处理所有细节
 • 如遇问题，请查看PowerShell中的提示`;
 
-    // 显示简化模态框 - 使用备选方案确保兼容性
-    try {
-        Utils.showModal('🚀 Edge一键配置执行指南', guideContent);
-    } catch (error) {
-        console.log('[DEBUG] showModal失败，使用alert作为备选方案:', error);
-        alert('🚀 Edge一键配置执行指南\n\n' + guideContent.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' '));
-    }
+    // 直接执行配置，不显示说明框
+    console.log('[DEBUG] 直接执行Edge代理配置，跳过说明框');
 
     // 尝试自动打开PowerShell（管理员权限）
     setTimeout(() => {
         openEdgePowerShellAsAdmin();
-    }, 1000);
+    }, 500);
 }
 
 // Edge专用PowerShell自动打开
