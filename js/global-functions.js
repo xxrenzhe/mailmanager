@@ -1064,7 +1064,7 @@ async function downloadPowerShellScript(file, host, port, username, password) {
 2. 勾选"解除阻止"
 3. 确定后重新运行`;
 
-                showModal('Edge代理配置说明', executionSteps);
+                Utils.showModal('Edge代理配置说明', executionSteps);
 
                 resolve({
                     success: true,
@@ -1121,7 +1121,7 @@ function launchEdgeBrowser() {
 2. 重启Edge浏览器
 3. 检查代理设置是否正确配置`;
 
-            showModal('手动启动Edge浏览器', manualSteps);
+            Utils.showModal('手动启动Edge浏览器', manualSteps);
             Utils.showNotification('请手动启动Edge浏览器验证代理', 'info');
         }
 
@@ -1536,7 +1536,7 @@ function showEdgeSimpleGuide() {
 • 如遇问题，请查看PowerShell中的提示`;
 
     // 显示简化模态框
-    showModal('🚀 Edge一键配置执行指南', guideContent);
+    Utils.showModal('🚀 Edge一键配置执行指南', guideContent);
 
     // 尝试自动打开PowerShell（管理员权限）
     setTimeout(() => {
