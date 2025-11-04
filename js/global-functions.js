@@ -813,7 +813,7 @@ function displayProxyData(proxyData) {
 // 填充紧急认证信息区域（网络中断时使用）
 function fillEmergencyAuthSection(proxyData) {
     try {
-        // 填充完整的认证信息文本
+        // 填充简化的认证信息文本
         const fullAuthText = `代理服务器: ${proxyData.host}
 端口: ${proxyData.port}
 用户名: ${proxyData.username}
@@ -821,21 +821,11 @@ function fillEmergencyAuthSection(proxyData) {
 
 完整格式: ${proxyData.host}:${proxyData.port}:${proxyData.username}:${proxyData.password}`;
 
-        // 更新紧急区域的所有字段
-        const emergencyElements = {
-            'emergencyAuthText': fullAuthText,
-            'emergencyHost': proxyData.host,
-            'emergencyPort': proxyData.port.toString(),
-            'emergencyUsername': proxyData.username,
-            'emergencyPassword': proxyData.password
-        };
-
-        Object.keys(emergencyElements).forEach(id => {
-            const element = document.getElementById(id);
-            if (element) {
-                element.textContent = emergencyElements[id];
-            }
-        });
+        // 更新紧急区域文本
+        const emergencyText = document.getElementById('emergencyAuthText');
+        if (emergencyText) {
+            emergencyText.textContent = fullAuthText;
+        }
 
         // 显示紧急区域
         const emergencySection = document.getElementById('emergencyAuthSection');
