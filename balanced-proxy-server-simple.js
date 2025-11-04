@@ -1208,20 +1208,19 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
 
                                             const email = {
                                                 id: messageId,
-                                                subject: parsed.subject || '(无主题)',
-                                                body: parsed.text || parsed.html || '',
-                                                from: {
-                                                    emailAddress: {
-                                                        name: parsed.from?.value?.[0]?.name || '',
-                                                        address: parsed.from?.value?.[0]?.address || ''
+                                                Subject: parsed.subject || '(无主题)', // 统一使用大写Subject
+                                                Body: { // 统一使用嵌套Body结构
+                                                    Content: parsed.text || parsed.html || ''
+                                                },
+                                                From: { // 统一使用大写From
+                                                    EmailAddress: {
+                                                        Name: parsed.from?.value?.[0]?.name || '',
+                                                        Address: parsed.from?.value?.[0]?.address || ''
                                                     }
                                                 },
-                                                to: parsed.to?.value?.map(addr => ({
-                                                    name: addr.name || '',
-                                                    address: addr.address || ''
-                                                })) || [],
+                                                ToAddress: parsed.to?.value?.map(addr => addr.address || '') || [],
                                                 receivedDateTime: receivedDate,
-                                                isRead: attrs.flags.includes('\\Seen')
+                                                IsRead: attrs.flags.includes('\\Seen')
                                             };
 
                                             emails.push(email);
@@ -2031,9 +2030,9 @@ function parseOutlookLine(line, email) {
 function extractVerificationCodes(emails) {
     const codes = [];
     emails.forEach(email => {
-        // 处理Microsoft Graph API的Pascal命名��和camelCase命名法
-        const subject = email.Subject || email.subject || '';
-        const bodyContent = email.Body?.Content || email.body?.content || '';
+        // 统一处理Outlook和Yahoo邮件的字段格式
+        const subject = email.Subject || email.subject || '(无主题)';
+        const bodyContent = email.Body?.Content || email.body?.content || email.body || '';
         // 从邮件主题中提取发件人关键词作为显示名称
         const senderName = extractSenderEmail(email);
         const receivedTime = email.ReceivedDateTime || email.receivedDateTime; // 🔧 KISS原则: 直接使用UTC时间
