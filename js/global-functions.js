@@ -1428,6 +1428,8 @@ async function executeEdgeOneClickProxy(host, port, username, password) {
         const autoCommand = `# 自动化代理配置脚本
 $proxyHost = "${host}"
 $proxyPort = "${port}"
+$proxyUser = "${username}"
+$proxyPass = "${password}"
 $proxyServer = "$proxyHost:$proxyPort"
 
 Write-Host "🚀 开始自动化配置代理..." -ForegroundColor Cyan
@@ -1437,6 +1439,17 @@ Write-Host "📊 代理服务器: $proxyServer" -ForegroundColor White
 Write-Host "🔧 配置系统代理..." -ForegroundColor Green
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $proxyServer -Force
+
+# 配置Edge专用代理
+Write-Host "🔧 配置Edge浏览器代理..." -ForegroundColor Green
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -Value 1 -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -Value $proxyServer -Force
+
+# 配置代理凭据
+Write-Host "🔐 配置代理认证..." -ForegroundColor Green
+cmdkey /add:$proxyHost /user:$proxyUser /pass:$proxyPass
+cmdkey /add:"Windows_Proxy" /user:$proxyUser /pass:$proxyPass
+cmdkey /add:"Microsoft_Edge_Proxy" /user:$proxyUser /pass:$proxyPass
 
 Write-Host "✅ 代理配置完成！" -ForegroundColor Green
 Write-Host "🌐 正在验证代理..." -ForegroundColor Cyan
