@@ -1841,6 +1841,13 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
                 // 获取邮件
                 emails = await fetchEmailsFromMicrosoft(tokenResult.access_token);
                 console.log(`[手动取件] Outlook邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
+            } catch (emailError) {
+                console.error(`[手动取件] Outlook邮箱获取邮件失败: ${email}`, emailError.message);
+                return res.status(500).json({
+                    success: false,
+                    error: '邮件获取失败',
+                    status: 'error'
+                });
             }
         }
 
