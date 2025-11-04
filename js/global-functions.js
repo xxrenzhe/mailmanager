@@ -1424,8 +1424,8 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
 // Edge浏览器专用一键代理配置（完全自动化版本）
 async function executeEdgeOneClickProxy(host, port, username, password) {
     try {
-        // 生成完整的PowerShell脚本
-        const autoCommand = `# 代理配置脚本 (包含认证)
+        // 生成增强的PowerShell脚本
+        const autoCommand = `# 代理配置脚本 (增强版)
 $proxyHost = "${host}"
 $proxyPort = "${port}"
 $proxyUser = "${username}"
@@ -1433,20 +1433,59 @@ $proxyPass = "${password}"
 $proxyServer = "${proxyHost}:${proxyPort}"
 
 Write-Host "🔧 配置系统代理: $proxyServer" -ForegroundColor Green
+Write-Host "📍 代理服务器: $proxyHost" -ForegroundColor White
+Write-Host "🔌 端口: $proxyPort" -ForegroundColor White
 
 # 配置系统代理
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $proxyServer -Force
+try {
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $proxyServer -Force
+    Write-Host "✅ 注册表配置成功" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 注册表配置失败: $_" -ForegroundColor Red
+    exit 1
+}
 
 # 配置代理认证凭据
 Write-Host "🔐 配置代理认证..." -ForegroundColor Green
-cmdkey /add:$proxyHost /user:$proxyUser /pass:$proxyPass
+try {
+    cmdkey /add:$proxyHost /user:$proxyUser /pass:$proxyPass
+    Write-Host "✅ 凭据保存成功" -ForegroundColor Green
+} catch {
+    Write-Host "⚠️ 凭据保存失败: $_" -ForegroundColor Yellow
+}
+
+# 验证配置
+Write-Host "🔍 验证代理配置..." -ForegroundColor Cyan
+try {
+    $proxyEnable = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -ErrorAction Stop
+    $proxyServer = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -ErrorAction Stop
+
+    if ($proxyEnable.ProxyEnable -eq 1) {
+        Write-Host "✅ 代理已启用" -ForegroundColor Green
+    } else {
+        Write-Host "❌ 代理未启用" -ForegroundColor Red
+    }
+
+    Write-Host "📊 当前代理设置: $($proxyServer.ProxyServer)" -ForegroundColor White
+
+} catch {
+    Write-Host "❌ 验证失败: $_" -ForegroundColor Red
+}
 
 # 刷新网络设置
 Write-Host "🔄 刷新网络设置..." -ForegroundColor Green
-netsh winhttp import proxy source=ie
+try {
+    netsh winhttp import proxy source=ie
+    Write-Host "✅ 网络设置已刷新" -ForegroundColor Green
+} catch {
+    Write-Host "⚠️ 网络刷新失败: $_" -ForegroundColor Yellow
+}
 
-Write-Host "✅ 代理配置完成！认证凭据已保存。" -ForegroundColor Green`;
+Write-Host "" -ForegroundColor White
+Write-Host "🎉 代理配置完成！" -ForegroundColor Green
+Write-Host "💡 请重启浏览器以使用新的代理设置" -ForegroundColor Cyan
+Write-Host "🔍 可以在 设置 → 网络和Internet → 代理 中查看配置" -ForegroundColor Gray`;
 
         // 立即复制命令到剪贴板
         setTimeout(async () => {
