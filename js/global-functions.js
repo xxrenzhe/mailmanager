@@ -953,10 +953,10 @@ function Start-EdgeBrowser {
 
 # 主执行逻辑
 Write-Host "=== Microsoft Edge 代理配置开始 ==="
-Write-Host "代理服务器: $ProxyHost`:$ProxyPort"
+Write-Host "代理服务器: $ProxyHost" + ":" + "$ProxyPort"
 Write-Host "用户名: $ProxyUser"
 
-$proxyServer = "$ProxyHost`:$ProxyPort"
+$proxyServer = "$ProxyHost" + ":" + "$ProxyPort"
 $proxyResult = Set-EdgeProxy -Server $proxyServer
 
 if ($proxyResult) {
