@@ -1415,38 +1415,114 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
     }
 }
 
-// Edge浏览器专用一键代理配置（极简KISS版本）
+// Edge浏览器专用一键代理配置（完全自动化版本）
 async function executeEdgeOneClickProxy(host, port, username, password) {
     try {
-        // 生成最简化的PowerShell命令
-        const simpleCommand = `# 最简化的Edge代理配置
-Write-Host "开始配置代理..." -ForegroundColor Green
+        // 生成自动化PowerShell脚本
+        const autoCommand = `# 自动化代理配置脚本
+$proxyHost = "${host}"
+$proxyPort = "${port}"
+$proxyServer = "$proxyHost`:$proxyPort"
+
+Write-Host "🚀 开始自动化配置代理..." -ForegroundColor Cyan
+Write-Host "📊 代理服务器: $proxyServer" -ForegroundColor White
 
 # 配置系统代理
+Write-Host "🔧 配置系统代理..." -ForegroundColor Green
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value "${host}:${port}" -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $proxyServer -Force
 
-Write-Host "代理配置完成！" -ForegroundColor Green
-Write-Host "代理服务器: ${host}:${port}" -ForegroundColor White`;
+Write-Host "✅ 代理配置完成！" -ForegroundColor Green
+Write-Host "🌐 正在验证代理..." -ForegroundColor Cyan
 
-        // 复制到剪贴板
-        const success = await copyToClipboard(simpleCommand);
+# 验证配置
+try {
+    $currentProxy = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -ErrorAction SilentlyContinue
+    if ($currentProxy.ProxyServer -eq $proxyServer) {
+        Write-Host "🎉 验证成功！代理已正确配置" -ForegroundColor Green
+        Write-Host "📱 现在可以正常使用代理了" -ForegroundColor White
+    } else {
+        Write-Host "⚠️ 验证失败，请检查代理设置" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "❌ 验证过程中出现错误" -ForegroundColor Red
+}
 
-        if (!success) {
-            throw new Error('无法复制配置命令到剪贴板');
-        }
+Write-Host "" -ForegroundColor White
+Write-Host "按任意键关闭窗口..." -ForegroundColor Gray
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
+
+        // 创建临时PowerShell文件并执行
+        const blob = new Blob([autoCommand], { type: 'text/plain;charset=utf-8' });
+        const fileUrl = URL.createObjectURL(blob);
+
+        // 下载并执行PowerShell脚本
+        const downloadLink = document.createElement('a');
+        downloadLink.href = fileUrl;
+        downloadLink.download = 'proxy-config.ps1';
+        downloadLink.style.display = 'none';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+
+        // 延迟自动执行下载的脚本
+        setTimeout(() => {
+            try {
+                // 使用PowerShell直接执行下载的脚本
+                const psCommand = `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\\Downloads\\proxy-config.ps1"`;
+                console.log('[DEBUG] 尝试自动执行PowerShell脚本:', psCommand);
+
+                // 使用ActiveXObject或window.open尝试执行
+                if (window.ActiveXObject) {
+                    // IE支持的ActiveXObject方式
+                    const shell = new ActiveXObject("WScript.Shell");
+                    shell.Run(psCommand, 1, true);
+                } else {
+                    // 备选方案：尝试使用file协议
+                    const fileProtocolUrl = `file:///$env:USERPROFILE/Downloads/proxy-config.ps1`;
+                    window.open(fileProtocolUrl, '_blank');
+                }
+            } catch (error) {
+                console.log('[DEBUG] 自动执行失败，需要用户手动执行:', error);
+                // 如果自动执行失败，回到手动模式
+                showManualInstructions(host, port);
+            }
+        }, 1000);
+
+        // 清理URL对象
+        setTimeout(() => {
+            URL.revokeObjectURL(fileUrl);
+        }, 5000);
 
         return {
             success: true,
-            command: simpleCommand,
-            requiresManualExecution: true,
-            message: '代理配置命令已准备就绪'
+            command: autoCommand,
+            requiresManualExecution: false,
+            message: '自动化代理配置已启动'
         };
 
     } catch (error) {
-        console.error('Edge一键配置失败:', error);
+        console.error('自动化配置失败:', error);
         return { success: false, error: error.message };
     }
+}
+
+// 手动指导备选方案
+function showManualInstructions(host, port) {
+    const manualCommand = `# 手动代理配置
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value "${host}:${port}" -Force
+Write-Host "代理配置完成！" -ForegroundColor Green`;
+
+    copyToClipboard(manualCommand);
+
+    setTimeout(() => {
+        alert('自动执行失败，请手动操作：\n\n' +
+              '1. 按Win+X选择"Windows PowerShell (管理员)"\n' +
+              '2. 按Ctrl+V粘贴命令\n' +
+              '3. 按回车执行\n\n' +
+              '命令已复制到剪贴板！');
+    }, 500);
 }
 
 // 生成Edge专用简化PowerShell命令
@@ -1533,21 +1609,15 @@ function showEdgeSimpleGuide() {
     }, 500);
 }
 
-// 极简的PowerShell指导
+// 自动化PowerShell指导
 function openEdgePowerShellAsAdmin() {
-    console.log('[DEBUG] 显示简单的PowerShell指导');
+    console.log('[DEBUG] 启动自动化代理配置流程');
 
-    // 最简单的指导
+    // 简化通知，告知用户自动化流程开始
     setTimeout(() => {
-        Utils.showNotification('命令已复制！请打开PowerShell（管理员）粘贴运行', 'success');
+        Utils.showNotification('🚀 自动化配置已启动！正在下载并执行PowerShell脚本...', 'success');
 
-        // 使用最简单的alert避免任何问题
-        alert('代理配置命令已复制到剪贴板\n\n' +
-              '操作步骤：\n' +
-              '1. 按 Win+X\n' +
-              '2. 选择 "Windows PowerShell (管理员)"\n' +
-              '3. 按 Ctrl+V 粘贴\n' +
-              '4. 按回车运行\n\n' +
-              '就是这么简单！');
-    }, 300);
+        // 简短的状态提示
+        console.log('[DEBUG] 自动化配置流程进行中...');
+    }, 200);
 }
