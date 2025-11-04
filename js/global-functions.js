@@ -1579,13 +1579,59 @@ if %errorLevel% equ 0 (
     goto :error
 )
 
-echo   3.2 Configuring WinHTTP proxy...
-netsh winhttp set proxy ${proxyServer} "<local>" >nul
+echo   3.3 Configuring proxy credentials...
+REM Create credentials file for automatic authentication
+set "credsFile=%temp%\\proxy_creds.txt"
+echo ${username}:${password} > "%credsFile%"
+
+REM Add proxy credentials to Windows Credential Manager
+cmdkey /add:Target=PROXY_SERVER /User:${username} /pass:${password} /reg:HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings >nul 2>&1
+if %errorLevel% equ 0 (
+    echo OK: Proxy credentials saved to Credential Manager
+) else (
+    echo WARNING: Could not save to Credential Manager (manual setup may be required)
+)
+
+REM Configure WinHTTP proxy with authentication (Windows 10+)
+echo   3.2 Configuring WinHTTP proxy with credentials...
+netsh winhttp set proxy ${proxyServer} "<local>" >nul 2>&1
 if %errorLevel% equ 0 (
     echo OK: WinHTTP proxy configured
 ) else (
     echo WARNING: WinHTTP proxy configuration may have failed
 )
+
+echo   3.3 Setting up automatic proxy authentication...
+REM Create PowerShell script to set proxy credentials
+set "psScript=%temp%\\setup_proxy_auth.ps1"
+echo Write-Host "Setting up proxy authentication..." > "%psScript%"
+echo. >> "%psScript%"
+echo # Create credential object for proxy >> "%psScript%"
+echo $credential = New-Object System.Management.Automation.PSCredential("${username}", ("${password}" | ConvertTo-SecureString)) >> "%psScript%"
+echo. >> "%psScript%"
+echo # Add proxy server to trusted sites >> "%psScript%"
+echo Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxySettingsPerUser" -Value 1 -Type DWord -Force >> "%psScript%"
+echo. >> "%psScript%"
+echo # Store credentials in Windows Credential Manager for auto-fill >> "%psScript%"
+echo try { >> "%psScript%"
+echo     cmdkey /add:Target=PROXY_AUTH /User:${username} /pass:${password} >> "%psScript%"
+echo     Write-Host "Credentials saved to Windows Credential Manager" -ForegroundColor Green >> "%psScript%"
+echo } catch { >> "%psScript%"
+echo     Write-Host "WARNING: Could not save credentials to Credential Manager" -ForegroundColor Yellow >> "%psScript%"
+echo } >> "%psScript%"
+
+REM Execute PowerShell script to set up authentication
+powershell.exe -ExecutionPolicy Bypass -File "%psScript%" >nul 2>&1
+if %errorLevel% equ 0 (
+    echo OK: Proxy authentication configured
+) else (
+    echo WARNING: PowerShell authentication setup may have failed
+)
+
+REM Clean up temporary PowerShell script
+if exist "%psScript%" del "%psScript%" >nul 2>&1
+if exist "%credsFile%" del "%credsFile%" >nul 2>&1
+
 echo.
 
 echo Step 4: Refreshing system settings...
