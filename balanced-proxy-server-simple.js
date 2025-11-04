@@ -1149,10 +1149,10 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getUTCMonth()];
                     const year = filterDate.getUTCFullYear();
                     // 使用正确的IMAP日期格式字符串 (Month day, year)
-                    // 根据node-imap官方文档示例：['SINCE', 'May 20, 2010']
+                    // 根据node-imap官方文档示例：['UNSEEN', ['SINCE', 'May 20, 2010']]
                     const dateString = `${month} ${day}, ${year}`;
                     console.log(`[调试] IMAP搜索日期格式: "${dateString}" (原始时间: ${timeFilter}, UTC时间: ${filterDate.toUTCString()})`);
-                    searchCriteria = ['SINCE', dateString];
+                    searchCriteria = ['UNSEEN', ['SINCE', dateString]];
                 } else {
                     searchCriteria = ['ALL'];
                 }
@@ -1386,10 +1386,10 @@ async function fetchICloudEmails(email, password, timeFilter = null) {
                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getUTCMonth()];
                     const year = filterDate.getUTCFullYear();
                     // 使用正确的IMAP日期格式字符串 (Month day, year)
-                    // 根据node-imap官方文档示例：['SINCE', 'May 20, 2010']
+                    // 根据node-imap官方文档示例：['UNSEEN', ['SINCE', 'May 20, 2010']]
                     const dateString = `${month} ${day}, ${year}`;
                     console.log(`[调试] IMAP搜索日期格式: "${dateString}" (原始时间: ${timeFilter}, UTC时间: ${filterDate.toUTCString()})`);
-                    searchCriteria = ['SINCE', dateString];
+                    searchCriteria = ['UNSEEN', ['SINCE', dateString]];
                 } else {
                     searchCriteria = ['ALL'];
                 }
