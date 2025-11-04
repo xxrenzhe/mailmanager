@@ -825,7 +825,7 @@ async function configureSystemProxy() {
 
     if (configureBtn) {
         configureBtn.disabled = true;
-        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置Edge代理...';
+        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在生成代理配置...';
         configureBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
         configureBtn.classList.add('bg-gray-400');
     }
@@ -1609,7 +1609,7 @@ function openEdgePowerShellAsAdmin() {
 
     // 简化通知，告知用户自动化流程开始
     setTimeout(() => {
-        Utils.showNotification('🚀 自动化配置已启动！正在下载并执行PowerShell脚本...', 'success');
+        Utils.showNotification('🚀 代理配置命令已生成！正在复制到剪贴板...', 'success');
 
         // 简短的状态提示
         console.log('[DEBUG] 自动化配置流程进行中...');
