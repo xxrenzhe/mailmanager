@@ -904,8 +904,8 @@ async function configureSystemProxy() {
             throw new Error('此功能仅支持Windows操作系统。请使用Windows系统访问此功能。');
         }
 
-        // 生成并下载增强版PowerShell配置脚本
-        generateEnhancedProxyScript(proxyHost, proxyPort, proxyUsername, proxyPassword);
+        // 生成并下载BAT版配置脚本（更稳定）
+        generateBatProxyScript(proxyHost, proxyPort, proxyUsername, proxyPassword);
 
     } catch (error) {
         console.error('配置代理失败:', error);
@@ -979,11 +979,11 @@ HKCU,"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings","ProxyOve
     }
 }
 
-// 生成增强版PowerShell代理配置脚本
-function generateEnhancedProxyScript(host, port, username, password) {
+// 生成BAT版代理配置脚本（更稳定）
+function generateBatProxyScript(host, port, username, password) {
     const proxyServer = `${host}:${port}`;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `proxy-config-${timestamp}.ps1`;
+    const filename = `proxy-config-${timestamp}.bat`;
 
     // 生成增强版PowerShell脚本内容
     const powershellScript = `# Windows系统代理配置脚本 - 增强版
@@ -1261,12 +1261,241 @@ Start-Sleep -Seconds 2
 async function downloadAndRunProxyScript(proxyUrl, proxyData) {
     try {
         const data = JSON.parse(decodeURIComponent(proxyData));
-        await generateEnhancedProxyScript(data.host, data.port, data.username, data.password);
-        Utils.showNotification('PowerShell配置脚本已下载！请查看下载文件夹。', 'success');
+        await generateBatProxyScript(data.host, data.port, data.username, data.password);
+        Utils.showNotification('BAT配置脚本已下载！请查看下载文件夹。', 'success');
     } catch (error) {
         console.error('下载脚本失败:', error);
         Utils.showNotification('下载脚本失败: ' + error.message, 'error');
     }
+}
+
+// 生成BAT版代理配置脚本（更稳定）
+function generateBatProxyScript(host, port, username, password) {
+    const proxyServer = `${host}:${port}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `proxy-config-${timestamp}.bat`;
+
+    // 生成BAT脚本内容
+    const batScript = `@echo off
+chcp 65001 >nul
+setlocal enabledelayedexpansion
+
+title Windows代理配置脚本 - 增强版
+
+echo ===========================================
+echo     Windows系统代理配置脚本
+echo ===========================================
+echo.
+echo 📋 配置信息:
+echo   代理服务器: ${proxyServer}
+echo   用户名: ${username}
+echo   生成时间: %date% %time%
+echo.
+
+echo 按任意键开始配置...
+pause >nul
+echo.
+
+echo 🔍 步骤1: 检查管理员权限...
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo ❌ 错误: 检测到没有管理员权限
+    echo.
+    echo 💡 解决方案:
+    echo   1. 右键点击此脚本文件
+    echo   2. 选择 "以管理员身份运行"
+    echo   3. 在UAC提示中点击"是"
+    echo.
+    echo 按任意键退出...
+    pause >nul
+    exit /b 1
+)
+echo    ✅ 管理员权限确认
+echo.
+
+echo 💾 步骤2: 备份当前配置...
+set "backupFile=%temp%\\proxy_backup_%random%.reg"
+reg export "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" "%backupFile%" >nul 2>&1
+if exist "%backupFile%" (
+    echo    ✅ 当前配置已备份
+) else (
+    echo    ⚠️ 无法备份当前配置（可能没有现有配置）
+)
+echo.
+
+echo ⚙️  步骤3: 配置系统代理...
+echo    3.1 配置注册表代理设置...
+
+REM 启用代理
+reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
+if %errorLevel% equ 0 (
+    echo       ✅ 代理已启用
+) else (
+    echo       ❌ 代理启用失败
+    goto :error
+)
+
+REM 设置代理服务器
+reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f >nul
+if %errorLevel% equ 0 (
+    echo       ✅ 代理服务器已设置
+) else (
+    echo       ❌ 代理服务器设置失败
+    goto :error
+)
+
+REM 设置代理绕过列表
+reg add "HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f >nul
+if %errorLevel% equ 0 (
+    echo       ✅ 代理绕过列表已设置
+) else (
+    echo       ❌ 代理绕过列表设置失败
+    goto :error
+)
+
+echo    3.2 配置WinHTTP代理...
+netsh winhttp set proxy ${proxyServer} "<local>" >nul
+if %errorLevel% equ 0 (
+    echo       ✅ WinHTTP代理配置完成
+) else (
+    echo       ⚠️ WinHTTP代理配置可能失败
+)
+echo.
+
+echo 🔄 步骤4: 刷新系统设置...
+echo    4.1 刷新DNS缓存...
+ipconfig /flushdns >nul
+if %errorLevel% equ 0 (
+    echo       ✅ DNS缓存已刷新
+) else (
+    echo       ⚠️ DNS缓存刷新可能失败
+)
+
+echo    4.2 通知系统设置更改...
+REM 尝试刷新系统设置
+rundll32.exe user32.dll,UpdatePerUserSystemParameters >nul 2>&1
+echo       ✅ 系统设置已通知
+echo.
+
+echo ==========================================
+echo 🎉 代理配置成功！
+echo ==========================================
+echo.
+echo 📋 配置摘要:
+echo   ✅ 管理员权限: 已确认
+echo   ✅ 系统注册表: 已配置
+echo   ✅ WinHTTP代理: 已配置
+echo   ✅ 系统设置: 已刷新
+echo.
+echo 🔗 代理信息:
+echo   代理服务器: ${proxyServer}
+echo   用户名: ${username}
+echo   密码: [已隐藏]
+echo.
+echo 🌐 验证步骤:
+echo   1. 打开浏览器（建议Chrome或Edge）
+echo   2. 访问 https://ip111.cn/
+echo   3. 确认显示的IP地址为代理服务器IP
+echo   4. 如果IP变化，说明配置成功！
+echo.
+echo 📞 技术支持:
+echo   - 如果IP没有变化，请尝试以下操作:
+echo     • 重启浏览器（Ctrl+Shift+R强制刷新）
+echo     • 清除浏览器缓存（Ctrl+Shift+Delete）
+echo     • 检查浏览器代理设置是否生效
+echo     • 尝试访问其他网站确认代理
+echo.
+
+goto :success
+
+:error
+echo.
+echo ❌ 配置过程中发生错误
+echo.
+echo 🔄 正在恢复备份配置...
+if exist "%backupFile%" (
+    reg import "%backupFile%" >nul 2>&1
+    echo    ✅ 配置已恢复到备份状态
+) else (
+    echo    ⚠️ 无备份文件，请手动检查设置
+)
+echo.
+echo 💡 故障排除建议:
+echo   1. 确保以管理员身份运行此脚本
+echo   2. 检查代理服务器是否可用
+echo   3. 验证用户名和密码是否正确
+echo   4. 尝试重新运行此脚本
+echo.
+echo 按任意键退出...
+pause >nul
+exit /b 1
+
+:success
+echo.
+echo ⏹ 脚本执行完成！
+echo 按任意键退出...
+pause >nul
+exit /b 0
+`;
+
+    // 创建Blob并下载
+    const blob = new Blob([batScript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    Utils.showNotification('BAT配置脚本已下载，请以管理员身份运行', 'success');
+}
+
+// 生成增强版PowerShell代理配置脚本
+function generateEnhancedProxyScript(host, port, username, password) {
+    const proxyServer = `${host}:${port}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `proxy-config-${timestamp}.ps1`;
+
+    // 生成PowerShell脚本内容（简化版）
+    const powershellScript = `# Windows系统代理配置脚本
+chcp 65001 >nul
+Write-Host "开始配置代理..."
+
+# 检查管理员权限
+if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Write-Host "需要管理员权限！"
+    Read-Host "按任意键退出"
+    exit 1
+}
+
+Write-Host "配置代理: ${proxyServer}"
+Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1
+Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value "${proxyServer}"
+Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyOverride -Value "<local>"
+
+netsh winhttp set proxy ${proxyServer} "<local>"
+ipconfig /flushdns
+
+Write-Host "配置完成！"
+Read-Host "按任意键退出"
+`;
+
+    // 创建Blob并下载
+    const blob = new Blob([powershellScript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    Utils.showNotification('PowerShell脚本已生成，请以管理员身份运行', 'success');
 }
 
 // 显示代理状态消息
