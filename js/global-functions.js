@@ -1275,28 +1275,27 @@ function generateBatProxyScript(host, port, username, password) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `proxy-config-${timestamp}.bat`;
 
-    // 生成BAT脚本内容
+    // 生成BAT脚本内容（ASCII编码，避免中文问题）
     const batScript = `@echo off
-chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-title Windows代理配置脚本 - 增强版
+title Windows Proxy Configuration Script
 
-echo ===========================================
-echo     Windows系统代理配置脚本
-echo ===========================================
+echo ==========================================
+echo     Windows System Proxy Configuration
+echo ==========================================
 echo.
-echo 📋 配置信息:
-echo   代理服务器: ${proxyServer}
-echo   用户名: ${username}
-echo   生成时间: %date% %time%
+echo [INFO] Configuration:
+echo   Proxy Server: ${proxyServer}
+echo   Username: ${username}
+echo   Generated: %date% %time%
 echo.
 
-echo 按任意键开始配置...
+echo Press any key to start configuration...
 pause >nul
 echo.
 
-echo 🔍 步骤1: 检查管理员权限...
+echo [STEP 1] Checking administrator privileges...
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo ❌ 错误: 检测到没有管理员权限
@@ -1453,25 +1452,24 @@ exit /b 0
     Utils.showNotification('BAT配置脚本已下载，请以管理员身份运行', 'success');
 }
 
-// 生成增强版PowerShell代理配置脚本
+// 生成增强版PowerShell代理配置脚本（简化版）
 function generateEnhancedProxyScript(host, port, username, password) {
     const proxyServer = `${host}:${port}`;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `proxy-config-${timestamp}.ps1`;
 
-    // 生成PowerShell脚本内容（简化版）
-    const powershellScript = `# Windows系统代理配置脚本
-chcp 65001 >nul
-Write-Host "开始配置代理..."
+    // 生成PowerShell脚本内容（简化版，英文）
+    const powershellScript = `# Windows System Proxy Configuration Script
+Write-Host "Starting proxy configuration..."
 
-# 检查管理员权限
+# Check administrator privileges
 if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Write-Host "需要管理员权限！"
-    Read-Host "按任意键退出"
+    Write-Host "Administrator privileges required!"
+    Read-Host "Press any key to exit"
     exit 1
 }
 
-Write-Host "配置代理: ${proxyServer}"
+Write-Host "Configuring proxy: ${proxyServer}"
 Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1
 Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value "${proxyServer}"
 Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyOverride -Value "<local>"
@@ -1479,8 +1477,8 @@ Set-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet 
 netsh winhttp set proxy ${proxyServer} "<local>"
 ipconfig /flushdns
 
-Write-Host "配置完成！"
-Read-Host "按任意键退出"
+Write-Host "Configuration completed!"
+Read-Host "Press any key to exit"
 `;
 
     // 创建Blob并下载
@@ -1495,7 +1493,7 @@ Read-Host "按任意键退出"
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    Utils.showNotification('PowerShell脚本已生成，请以管理员身份运行', 'success');
+    Utils.showNotification('PowerShell script generated, please run as administrator', 'success');
 }
 
 // 显示代理状态消息
