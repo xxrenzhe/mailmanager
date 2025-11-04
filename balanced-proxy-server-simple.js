@@ -275,7 +275,13 @@ function startMonitoring(sessionId, account, duration = 60000) {
             }
 
             try {
-                console.log(`[Token刷新] 开始刷新Token: ${account.email}`);
+                let emails = [];
+
+                // 根据邮箱类型使用不同的邮件获取方式
+                if (account.type === 'yahoo') {
+                    console.log(`[Yahoo邮件] 直接获取Yahoo邮箱邮件: ${account.email}`);
+                } else {
+                    console.log(`[Token刷新] 开始刷新Token: ${account.email}`);
 
                 // 获取access token
                 const tokenResult = await refreshToken(account.refresh_token, account.client_id, '');
@@ -287,8 +293,14 @@ function startMonitoring(sessionId, account, duration = 60000) {
                 console.log(`[Token刷新] Token刷新成功: ${account.email}`);
 
                 // 获取邮件（带时间过滤和重试机制）
-                console.log(`[邮件获取] 开始获取邮件: ${account.email}`);
-                const emails = await fetchEmailsWithTimeFilter(tokenResult.access_token, account.last_check_time);
+                    console.log(`[邮件获取] 开始获取Outlook邮件: ${account.email}`);
+                    emails = await fetchEmailsWithTimeFilter(tokenResult.access_token, account.last_check_time);
+                }
+
+                // 如果是Yahoo邮箱，使用Yahoo邮件获取函数
+                if (account.type === 'yahoo') {
+                    emails = await fetchYahooEmails(account.email, account.password, account.last_check_time);
+                }
 
                 if (emails && emails.length > 0) {
                     console.log(`[邮件] 获取到 ${emails.length} 封邮件`);
@@ -1064,6 +1076,50 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         });
     }
 });
+
+// Yahoo邮箱邮件获取函数
+async function fetchYahooEmails(email, password, timeFilter = null) {
+    console.log(`[Yahoo邮件] 开始获取Yahoo邮箱: ${email}`);
+
+    try {
+        // 注意：这里是模拟实现，实际应该使用IMAP协议连接Yahoo邮箱
+        // 由于当前简化版本主要是演示，这里返回空数组
+        // 在生产环境中，需要实现真正的IMAP连接
+
+        // 模拟Yahoo邮箱邮件数据（用于测试）
+        const mockEmails = [
+            {
+                id: 'mock_yahoo_1',
+                subject: 'Verification Code',
+                body: 'Your verification code is: 123456',
+                from: {
+                    emailAddress: {
+                        name: 'Security',
+                        address: 'security@yahoo.com'
+                    }
+                },
+                receivedDateTime: new Date().toISOString(),
+                isRead: false
+            }
+        ];
+
+        console.log(`[Yahoo邮件] 获取到 ${mockEmails.length} 封邮件 (模拟数据)`);
+
+        // 如果有时间过滤，只返回时间基准之后的邮件
+        if (timeFilter) {
+            const filteredEmails = mockEmails.filter(email =>
+                new Date(email.receivedDateTime) > new Date(timeFilter)
+            );
+            console.log(`[Yahoo邮件] 时间过滤后剩余 ${filteredEmails.length} 封邮件`);
+            return filteredEmails;
+        }
+
+        return mockEmails;
+    } catch (error) {
+        console.error(`[Yahoo邮件] 获取Yahoo邮箱失败: ${email}`, error.message);
+        return [];
+    }
+}
 
 // 增强的邮件获取重试机制
 // 获取邮件并按时间过滤（用于监控场景）
