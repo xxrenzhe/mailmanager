@@ -335,11 +335,25 @@
                         </div>
                         <div>
                             <span class="text-sm text-gray-600">用户名:</span>
-                            <div class="font-mono font-medium text-sm break-all" id="proxyUsername">-</div>
+                            <div class="flex items-center justify-between">
+                                <div class="font-mono font-medium text-sm break-all flex-1" id="proxyUsername">-</div>
+                                <button onclick="copyToClipboard(document.getElementById('proxyUsername').textContent)"
+                                        class="ml-2 p-1 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
+                                        title="复制用户名">
+                                    <i class="fas fa-copy text-xs"></i>
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <span class="text-sm text-gray-600">密码:</span>
-                            <div class="font-mono font-medium text-sm break-all" id="proxyPassword">-</div>
+                            <div class="flex items-center justify-between">
+                                <div class="font-mono font-medium text-sm break-all flex-1" id="proxyPassword">-</div>
+                                <button onclick="copyToClipboard(document.getElementById('proxyPassword').textContent)"
+                                        class="ml-2 p-1 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
+                                        title="复制密码">
+                                    <i class="fas fa-copy text-xs"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="bg-blue-50 border border-blue-200 rounded p-3">
@@ -421,7 +435,7 @@
     <!-- JavaScript 文件加载 -->
     <script src="js/core/utils.js?v=20251102-6"></script>
     <script src="js/core/SimpleMailManager.js?v=20251104-41"></script>
-    <script src="js/global-functions.js?v=20251104-17-auto"></script>
+    <script src="js/global-functions.js?v=20251104-19-syntax-fixed"></script>
 
     <!-- 初始化脚本 -->
     <script>

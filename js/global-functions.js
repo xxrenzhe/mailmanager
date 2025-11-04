@@ -1289,12 +1289,13 @@ Start-Sleep -Seconds 3`;
     }
 }
 
-// 复制到剪贴板
+// 复制到剪贴板（带通知）
 async function copyToClipboard(text) {
     try {
         // 尝试使用现代剪贴板API
         if (navigator.clipboard && window.isSecureContext) {
             await navigator.clipboard.writeText(text);
+            Utils.showNotification('已复制到剪贴板', 'success');
             return true;
         }
 
@@ -1311,9 +1312,14 @@ async function copyToClipboard(text) {
         const success = document.execCommand('copy');
         textArea.remove();
 
+        if (success) {
+            Utils.showNotification('已复制到剪贴板', 'success');
+        }
+
         return success;
     } catch (error) {
         console.error('复制到剪贴板失败:', error);
+        Utils.showNotification('复制失败，请手动复制', 'error');
         return false;
     }
 }
@@ -1422,7 +1428,7 @@ async function executeEdgeOneClickProxy(host, port, username, password) {
         const autoCommand = `# 自动化代理配置脚本
 $proxyHost = "${host}"
 $proxyPort = "${port}"
-$proxyServer = "$proxyHost`:$proxyPort"
+$proxyServer = "$proxyHost:$proxyPort"
 
 Write-Host "🚀 开始自动化配置代理..." -ForegroundColor Cyan
 Write-Host "📊 代理服务器: $proxyServer" -ForegroundColor White
