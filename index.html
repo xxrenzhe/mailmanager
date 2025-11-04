@@ -338,8 +338,8 @@
                     <ol class="ml-6 space-y-1 text-xs">
                         <li>1. 点击上方按钮生成代理IP</li>
                         <li>2. 获得代理后点击"一键配置代理"</li>
-                        <li>3. 系统自动复制配置命令到剪贴板</li>
-                        <li>4. 在PowerShell中粘贴执行即可</li>
+                        <li>3. 系统自动保存认证信息到本地缓存</li>
+                        <li>4. 网络中断时仍可查看认证信息</li>
                     </ol>
                 </div>
             </div>
@@ -350,14 +350,37 @@
                     获得的代理IP:
                 </label>
                 <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center">
+                            <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                            <strong class="text-green-800">获得的代理IP</strong>
+                            <span class="ml-2 text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                                <i class="fas fa-shield-alt mr-1"></i>已本地缓存
+                            </span>
+                        </div>
+                    </div>
                     <div class="grid grid-cols-2 gap-4 mb-4">
                         <div>
                             <span class="text-sm text-gray-600">代理服务器:</span>
-                            <div class="font-mono font-medium" id="proxyHost">-</div>
+                            <div class="font-mono font-medium flex items-center justify-between">
+                                <span class="break-all flex-1" id="proxyHost">-</span>
+                                <button onclick="copyToClipboard(document.getElementById('proxyHost').textContent)"
+                                        class="ml-2 p-1 text-green-600 hover:text-green-700 hover:bg-green-100 rounded transition-colors"
+                                        title="复制服务器地址">
+                                    <i class="fas fa-copy text-xs"></i>
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <span class="text-sm text-gray-600">端口:</span>
-                            <div class="font-mono font-medium" id="proxyPort">-</div>
+                            <div class="font-mono font-medium flex items-center justify-between">
+                                <span id="proxyPort">-</span>
+                                <button onclick="copyToClipboard(document.getElementById('proxyPort').textContent)"
+                                        class="ml-2 p-1 text-green-600 hover:text-green-700 hover:bg-green-100 rounded transition-colors"
+                                        title="复制端口">
+                                    <i class="fas fa-copy text-xs"></i>
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <span class="text-sm text-gray-600">用户名:</span>
@@ -382,11 +405,20 @@
                             </div>
                         </div>
                     </div>
-                    <div class="bg-blue-50 border border-blue-200 rounded p-3">
+                    <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3">
                         <div class="text-sm text-blue-800">
                             <i class="fas fa-info-circle mr-1"></i>
                             完整代理地址: <span id="fullProxyAddress" class="font-mono">-</span>
+                            <button onclick="copyToClipboard(document.getElementById('fullProxyAddress').textContent)"
+                                    class="ml-2 p-1 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
+                                    title="复制完整地址">
+                                <i class="fas fa-copy text-xs"></i>
+                            </button>
                         </div>
+                    </div>
+                    <div class="text-xs text-gray-600 bg-gray-50 rounded p-2">
+                        <i class="fas fa-lightbulb text-amber-500 mr-1"></i>
+                        <strong>提示：</strong>认证信息已保存到浏览器本地缓存，即使网络中断也能查看和复制。用于代理认证时输入用户名和密码。
                     </div>
                 </div>
             </div>
@@ -408,6 +440,7 @@
                 <div id="proxyStatusMessage" class="hidden"></div>
             </div>
 
+    
             <!-- 关闭按钮 -->
             <div class="flex justify-end">
                 <button onclick="hideProxyModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition">
@@ -488,6 +521,12 @@
             manager = new SimpleMailManager();
             window.mailManagerInstance = manager; // 防止重复创建实例
             window.manager = manager; // 导入函数需要访问manager
+
+            // 加载缓存的代理认证信息
+            if (typeof loadCachedAuthInfo === 'function') {
+                loadCachedAuthInfo();
+            }
+
             // 检查是否为OAuth回调
             setTimeout(() => {
                 const urlParams = new URLSearchParams(window.location.search);

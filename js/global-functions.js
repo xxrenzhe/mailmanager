@@ -799,9 +799,94 @@ function displayProxyData(proxyData) {
         }
     });
 
+    // 持久化存储认证信息到localStorage
+    saveProxyAuthToCache(proxyData);
+
     // 显示结果区域和操作按钮
     resultSection.classList.remove('hidden');
     actionsSection.classList.remove('hidden');
+}
+
+// 保存代理认证信息到缓存
+function saveProxyAuthToCache(proxyData) {
+    try {
+        const authData = {
+            host: proxyData.host,
+            port: proxyData.port,
+            username: proxyData.username,
+            password: proxyData.password,
+            fullAddress: `${proxyData.host}:${proxyData.port}:${proxyData.username}:${proxyData.password}`,
+            timestamp: new Date().toISOString(),
+            expires: Date.now() + (24 * 60 * 60 * 1000) // 24小时后过期
+        };
+
+        localStorage.setItem('mailmanager_proxy_auth', JSON.stringify(authData));
+        console.log('[DEBUG] 代理认证信息已保存到缓存');
+    } catch (error) {
+        console.error('[DEBUG] 保存代理认证信息失败:', error);
+    }
+}
+
+
+// 页面加载时检查并恢复缓存的认证信息
+function loadCachedAuthInfo() {
+    try {
+        const cached = localStorage.getItem('mailmanager_proxy_auth');
+        if (cached) {
+            const authData = JSON.parse(cached);
+
+            // 检查是否过期
+            if (authData.expires && Date.now() > authData.expires) {
+                localStorage.removeItem('mailmanager_proxy_auth');
+                console.log('[DEBUG] 缓存的认证信息已过期，已清除');
+                return;
+            }
+
+            console.log('[DEBUG] 发现缓存的认证信息，恢复显示');
+
+            // 填充到主显示区域
+            const displayElements = {
+                proxyHost: authData.host,
+                proxyPort: authData.port,
+                proxyUsername: authData.username,
+                proxyPassword: authData.password,
+                fullProxyAddress: authData.fullAddress
+            };
+
+            Object.keys(displayElements).forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.textContent = displayElements[id];
+                }
+            });
+
+            // 显示结果区域
+            const resultSection = document.getElementById('proxyResultSection');
+            const actionsSection = document.getElementById('proxyActionsSection');
+            if (resultSection) resultSection.classList.remove('hidden');
+            if (actionsSection) actionsSection.classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error('[DEBUG] 加载缓存认证信息失败:', error);
+    }
+}
+
+// 清除缓存的认证信息
+function clearCachedAuthInfo() {
+    try {
+        localStorage.removeItem('mailmanager_proxy_auth');
+        console.log('[DEBUG] 已清除缓存的认证信息');
+
+        // 隐藏结果区域
+        const resultSection = document.getElementById('proxyResultSection');
+        const actionsSection = document.getElementById('proxyActionsSection');
+        if (resultSection) resultSection.classList.add('hidden');
+        if (actionsSection) actionsSection.classList.add('hidden');
+
+        Utils.showNotification('认证信息缓存已清除', 'success');
+    } catch (error) {
+        console.error('[DEBUG] 清除缓存失败:', error);
+    }
 }
 
 // 配置Edge浏览器一键代理（KISS原则）
@@ -876,7 +961,8 @@ async function configureSystemProxy() {
         if (result.success) {
             console.log('[DEBUG] Edge配置成功，显示成功状态');
             showProxyStatus('success', '配置命令已复制到剪贴板！');
-            Utils.showNotification('配置命令已复制！请在PowerShell中粘贴执行', 'success');
+
+            Utils.showNotification('✅ 配置命令已复制！认证信息已保存到本地缓存，网络中断时仍可查看', 'success');
 
         } else {
             console.log('[DEBUG] Edge配置失败:', result.error);
@@ -1384,7 +1470,7 @@ Write-Host "🔍 可以在 设置 → 网络和Internet → 代理 中查看配�
         setTimeout(async () => {
             const copySuccess = await copyToClipboard(autoCommand);
             if (copySuccess) {
-                Utils.showNotification('配置命令已复制！请打开PowerShell粘贴执行', 'success');
+                Utils.showNotification('配置命令已复制！接下来将复制认证信息...', 'success');
             } else {
                 Utils.showNotification('请手动复制命令到PowerShell执行', 'warning');
             }
