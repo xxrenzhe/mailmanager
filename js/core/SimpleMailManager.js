@@ -2064,10 +2064,12 @@ class SimpleMailManager {
             const account = {
                 id: accountId,
                 email: data.email,
+                type: data.type || 'outlook', // 添加邮箱类型
+                password: data.password || '', // 添加密码字段（Yahoo需要）
                 client_id: data.client_id,
                 refresh_token: data.refresh_token,
                 access_token: '',
-                status: 'pending',
+                status: data.status || 'pending', // 使用解析时设置的状态，默认为pending
                 created_at: new Date().toISOString(),
                 last_checked: new Date().toISOString(),
                 email_count: 0,
