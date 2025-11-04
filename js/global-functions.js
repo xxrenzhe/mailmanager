@@ -1424,59 +1424,19 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
 // Edge浏览器专用一键代理配置（完全自动化版本）
 async function executeEdgeOneClickProxy(host, port, username, password) {
     try {
-        // 生成自动化PowerShell脚本
-        const autoCommand = `# 自动化代理配置脚本
+        // 生成简化的PowerShell脚本
+        const autoCommand = `# 系统代理配置脚本
 $proxyHost = "${host}"
 $proxyPort = "${port}"
-$proxyUser = "${username}"
-$proxyPass = "${password}"
 $proxyServer = "${proxyHost}:${proxyPort}"
 
-Write-Host "🚀 开始自动化配置代理..." -ForegroundColor Cyan
-Write-Host "📊 代理服务器: $proxyServer" -ForegroundColor White
+Write-Host "🔧 配置系统代理: $proxyServer" -ForegroundColor Green
 
 # 配置系统代理
-Write-Host "🔧 配置系统代理..." -ForegroundColor Green
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
 Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $proxyServer -Force
 
-# 配置Edge专用代理
-Write-Host "🔧 配置Edge浏览器代理..." -ForegroundColor Green
-$edgePath = "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer"
-if (Test-Path $edgePath) {
-    Set-ItemProperty -Path $edgePath -Name "ProxyEnable" -Value 1 -Force
-    Set-ItemProperty -Path $edgePath -Name "ProxyServer" -Value $proxyServer -Force
-    Write-Host "✅ Edge代理配置成功" -ForegroundColor Green
-} else {
-    Write-Host "⚠️ Edge代理注册表路径不存在，跳过Edge专用配置" -ForegroundColor Yellow
-    Write-Host "💡 Edge会自动使用系统代理设置" -ForegroundColor Cyan
-}
-
-# 配置代理凭据
-Write-Host "🔐 配置代理认证..." -ForegroundColor Green
-cmdkey /add:$proxyHost /user:$proxyUser /pass:$proxyPass
-cmdkey /add:"Windows_Proxy" /user:$proxyUser /pass:$proxyPass
-cmdkey /add:"Microsoft_Edge_Proxy" /user:$proxyUser /pass:$proxyPass
-
-Write-Host "✅ 代理配置完成！" -ForegroundColor Green
-Write-Host "🌐 正在验证代理..." -ForegroundColor Cyan
-
-# 验证配置
-try {
-    $currentProxy = Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -ErrorAction SilentlyContinue
-    if ($currentProxy.ProxyServer -eq $proxyServer) {
-        Write-Host "🎉 验证成功！代理已正确配置" -ForegroundColor Green
-        Write-Host "📱 现在可以正常使用代理了" -ForegroundColor White
-    } else {
-        Write-Host "⚠️ 验证失败，请检查代理设置" -ForegroundColor Yellow
-    }
-} catch {
-    Write-Host "❌ 验证过程中出现错误" -ForegroundColor Red
-}
-
-Write-Host "" -ForegroundColor White
-Write-Host "按任意键关闭窗口..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
+Write-Host "✅ 代理配置完成！" -ForegroundColor Green`;
 
         // 立即复制命令到剪贴板
         setTimeout(async () => {
