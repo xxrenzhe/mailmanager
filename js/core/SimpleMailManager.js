@@ -1935,7 +1935,8 @@ class SimpleMailManager {
 
         // 如果全局函数存在则使用，否则使用简单通知
         if (typeof window.showDetailedImportComplete === 'function') {
-            window.showDetailedImportComplete(totalCount, totalCount, authorizedCount, reauthCount, failedCount);
+            const importedCount = this.currentImportCount || totalCount; // 优先使用本次导入数量
+            window.showDetailedImportComplete(importedCount, totalCount, authorizedCount, reauthCount, failedCount);
         } else {
             // 回退到简单通知
             const message = `导入完成: ${totalCount} 个账户，其中 ${authorizedCount} 个完全就绪`;
@@ -2050,6 +2051,9 @@ class SimpleMailManager {
 
         // 重置导入完成标志，允许新的导入显示完成状态
         this.importCompletionShown = false;
+
+        // 记录本次导入的数量
+        this.currentImportCount = emailDataList.length;
 
         // 1. 前端创建账户记录（并发处理提高效率）
         const newAccounts = await Promise.all(emailDataList.map(async (data, i) => {
