@@ -1079,46 +1079,173 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
 
 // Yahoo邮箱邮件获取函数
 async function fetchYahooEmails(email, password, timeFilter = null) {
-    console.log(`[Yahoo邮件] 开始获取Yahoo邮箱: ${email}`);
+    console.log(`[Yahoo邮件] 开始连接Yahoo邮箱IMAP: ${email}`);
 
-    try {
-        // 注意：这里是模拟实现，实际应该使用IMAP协议连接Yahoo邮箱
-        // 由于当前简化版本主要是演示，这里返回空数组
-        // 在生产环境中，需要实现真正的IMAP连接
+    return new Promise((resolve, reject) => {
+        const Imap = require('imap');
+        const { simpleParser } = require('mailparser');
 
-        // 模拟Yahoo邮箱邮件数据（用于测试）
-        const mockEmails = [
-            {
-                id: 'mock_yahoo_1',
-                subject: 'Verification Code',
-                body: 'Your verification code is: 123456',
-                from: {
-                    emailAddress: {
-                        name: 'Security',
-                        address: 'security@yahoo.com'
+        const imapConfig = {
+            user: email,
+            password: password,
+            host: 'imap.mail.yahoo.com',
+            port: 993,
+            tls: true,
+            tlsOptions: {
+                rejectUnauthorized: false
+            },
+            authTimeout: 30000,
+            connTimeout: 30000
+        };
+
+        const imap = new Imap(imapConfig);
+
+        imap.once('ready', () => {
+            console.log(`[Yahoo邮件] IMAP连接成功: ${email}`);
+
+            // 打开收件箱
+            imap.openBox('INBOX', false, (err, box) => {
+                if (err) {
+                    console.error(`[Yahoo邮件] 打开收件箱失败: ${email}`, err);
+                    imap.end();
+                    return resolve([]);
+                }
+
+                console.log(`[Yahoo邮件] 收件箱打开成功，邮件总数: ${box.messages.total}`);
+
+                // 搜索最近的邮件（最近10封）
+                const searchCriteria = timeFilter ?
+                    ['SINCE', new Date(timeFilter).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: '2-digit',
+                        year: 'numeric'
+                    })] :
+                    ['ALL'];
+
+                imap.search(searchCriteria, (err, results) => {
+                    if (err) {
+                        console.error(`[Yahoo邮件] 搜索邮件失败: ${email}`, err);
+                        imap.end();
+                        return resolve([]);
                     }
-                },
-                receivedDateTime: new Date().toISOString(),
-                isRead: false
-            }
-        ];
 
-        console.log(`[Yahoo邮件] 获取到 ${mockEmails.length} 封邮件 (模拟数据)`);
+                    if (!results || results.length === 0) {
+                        console.log(`[Yahoo邮件] 未找到邮件: ${email}`);
+                        imap.end();
+                        return resolve([]);
+                    }
 
-        // 如果有时间过滤，只返回时间基准之后的邮件
-        if (timeFilter) {
-            const filteredEmails = mockEmails.filter(email =>
-                new Date(email.receivedDateTime) > new Date(timeFilter)
-            );
-            console.log(`[Yahoo邮件] 时间过滤后剩余 ${filteredEmails.length} 封邮件`);
-            return filteredEmails;
-        }
+                    console.log(`[Yahoo邮件] 找到 ${results.length} 封邮件: ${email}`);
 
-        return mockEmails;
-    } catch (error) {
-        console.error(`[Yahoo邮件] 获取Yahoo邮箱失败: ${email}`, error.message);
-        return [];
-    }
+                    // 获取最近的几封邮件
+                    const fetchCount = Math.min(results.length, 10);
+                    const recentResults = results.slice(-fetchCount);
+
+                    const emails = [];
+                    let processedCount = 0;
+
+                    const fetch = imap.fetch(recentResults, {
+                        bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)',
+                        struct: true
+                    });
+
+                    fetch.on('message', (msg, seqno) => {
+                        let buffer = '';
+                        let messageId = '';
+                        let headers = {};
+
+                        msg.on('body', (stream, info) => {
+                            stream.on('data', (chunk) => {
+                                buffer += chunk.toString('utf8');
+                            });
+
+                            stream.once('end', () => {
+                                headers = Imap.parseHeader(buffer);
+                                messageId = headers['message-id'] || `msg_${seqno}_${Date.now()}`;
+                            });
+                        });
+
+                        msg.once('attributes', (attrs) => {
+                            const receivedDate = new Date(attrs.date).toISOString();
+
+                            // 获取完整邮件内容
+                            const fullFetch = imap.fetch(attrs.uid, { bodies: 'TEXT', struct: true });
+
+                            fullFetch.on('message', (fullMsg, fullSeqno) => {
+                                let fullBuffer = '';
+
+                                fullMsg.on('body', (stream, info) => {
+                                    stream.on('data', (chunk) => {
+                                        fullBuffer += chunk.toString('utf8');
+                                    });
+
+                                    stream.once('end', async () => {
+                                        try {
+                                            const parsed = await simpleParser(fullBuffer);
+
+                                            const email = {
+                                                id: messageId,
+                                                subject: parsed.subject || '(无主题)',
+                                                body: parsed.text || parsed.html || '',
+                                                from: {
+                                                    emailAddress: {
+                                                        name: parsed.from?.value?.[0]?.name || '',
+                                                        address: parsed.from?.value?.[0]?.address || ''
+                                                    }
+                                                },
+                                                to: parsed.to?.value?.map(addr => ({
+                                                    name: addr.name || '',
+                                                    address: addr.address || ''
+                                                })) || [],
+                                                receivedDateTime: receivedDate,
+                                                isRead: attrs.flags.includes('\\Seen')
+                                            };
+
+                                            emails.push(email);
+                                            processedCount++;
+
+                                            if (processedCount === recentResults.length) {
+                                                emails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+                                                console.log(`[Yahoo邮件] 成功解析 ${emails.length} 封邮件: ${email}`);
+                                                imap.end();
+                                                resolve(emails);
+                                            }
+                                        } catch (parseError) {
+                                            console.error(`[Yahoo邮件] 解析邮件失败: ${email}`, parseError);
+                                            processedCount++;
+
+                                            if (processedCount === recentResults.length) {
+                                                emails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+                                                imap.end();
+                                                resolve(emails);
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                    });
+
+                    fetch.once('error', (err) => {
+                        console.error(`[Yahoo邮件] 获取邮件内容失败: ${email}`, err);
+                        imap.end();
+                        resolve([]);
+                    });
+                });
+            });
+        });
+
+        imap.once('error', (err) => {
+            console.error(`[Yahoo邮件] IMAP连接错误: ${email}`, err);
+            resolve([]);
+        });
+
+        imap.once('end', () => {
+            console.log(`[Yahoo邮件] IMAP连接已断开: ${email}`);
+        });
+
+        imap.connect();
+    });
 }
 
 // 增强的邮件获取重试机制
