@@ -1498,22 +1498,76 @@ Write-Host "🔍 可以在 设置 → 网络和Internet → 代理 中查看配�
         setTimeout(async () => {
             const copySuccess = await copyToClipboard(autoCommand);
             if (copySuccess) {
-                Utils.showNotification('命令已复制！请打开PowerShell右键粘贴执行', 'success');
+                Utils.showNotification('命令已复制！请按照弹窗中的说明执行', 'success');
             } else {
                 Utils.showNotification('请手动复制命令到PowerShell执行', 'warning');
             }
+
+            // 显示配置说明弹窗
+            showProxyConfigurationGuide();
         }, 500);
 
         return {
             success: true,
             command: autoCommand,
             requiresManualExecution: true,
-            message: '命令已复制到剪贴板，请到PowerShell中执行'
+            message: '命令已复制到剪贴板，请查看配置说明'
         };
 
     } catch (error) {
         console.error('自动化配置失败:', error);
         return { success: false, error: error.message };
+    }
+}
+
+// 代理配置说明弹窗
+function showProxyConfigurationGuide() {
+    const guideContent = `
+🚀 代理配置说明指南
+
+✅ 第1步：打开PowerShell
+• 按 Win+X 键，选择"Windows PowerShell"
+• 或者按 Win+R，输入"powershell"，按回车
+• 无需管理员权限，普通PowerShell即可
+
+✅ 第2步：粘贴执行命令
+• 在PowerShell窗口中右键点击
+• 选择"粘贴"（或按Ctrl+V）
+• 按回车键执行配置脚本
+
+✅ 第3步：等待配置完成
+• 脚本会自动完成以下配置：
+  ✓ 系统代理设置
+  ✓ 代理认证凭据保存
+  ✓ 配置验证检查
+• 看到"🎉 代理配置完成！"表示成功
+
+✅ 第4步：重启浏览器
+• 关闭所有浏览器窗口
+• 重新打开浏览器
+• 开始使用代理访问网站
+
+🔍 验证配置是否成功：
+• 方法1：查看 设置 → 网络和Internet → 代理
+  → "使用代理服务器"应为开启状态
+• 方法2：访问网站测试是否通过代理
+• 方法3：访问时不需要输入用户名密码
+
+💡 常见问题解决：
+• 如果提示"无法加载文件"：这通常不影响配置
+• 如果验证失败：重启电脑后再试
+• 如果代理不工作：检查服务器地址是否正确
+
+📞 完成配置后，你的浏览器将：
+• 自动使用代理服务器访问网站
+• 自动使用保存的认证凭据
+• 无需每次输入用户名和密码`;
+
+    try {
+        Utils.showModal('🚀 代理配置说明指南', guideContent);
+    } catch (modalError) {
+        console.log('[DEBUG] 模态框显示失败，使用alert:', modalError);
+        alert(guideContent);
     }
 }
 
