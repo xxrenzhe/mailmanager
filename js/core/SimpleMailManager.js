@@ -13,6 +13,9 @@ class SimpleMailManager {
         this.currentPage = 1;
         this.pageSize = 50;
 
+        // API基础URL配置 - 自动检测环境
+        this.apiBaseUrl = this.detectApiBaseUrl();
+
         // 邮件序列管理器
         this.sequenceManager = new EmailSequenceManager();
 
@@ -36,6 +39,26 @@ class SimpleMailManager {
         this.codeDisplayTimer = null;
 
         this.init();
+    }
+
+    // 检测API基础URL
+    detectApiBaseUrl() {
+        const currentHost = window.location.hostname;
+        const currentProtocol = window.location.protocol;
+        const currentPort = window.location.port;
+
+        console.log(`[API] 检测环境: ${currentProtocol}//${currentHost}:${currentPort}`);
+
+        // 本地开发环境：如果访问localhost但没有指定3001端口，自动指向3001
+        if ((currentHost === 'localhost' || currentHost === '127.0.0.1') && currentPort !== '3001') {
+            console.log(`[API] 本地开发环境，自动指向API端口3001`);
+            return 'http://localhost:3001';
+        }
+
+        // 其他情况使用当前访问的域名和端口
+        const baseUrl = `${currentProtocol}//${currentHost}${currentPort ? ':' + currentPort : ''}`;
+        console.log(`[API] 使用当前访问域名: ${baseUrl}`);
+        return baseUrl;
     }
 
     async init() {
@@ -1769,7 +1792,7 @@ class SimpleMailManager {
     // 开始监控单个账户（从simple-mail-manager.html复制）
     async startMonitoringForAccount(account) {
         try {
-            const response = await fetch('/api/monitor/copy-trigger', {
+            const response = await fetch(`${this.apiBaseUrl}/api/monitor/copy-trigger`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
