@@ -1185,6 +1185,13 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                             stream.once('end', () => {
                                 headers = Imap.parseHeader(buffer);
                                 messageId = headers['message-id'] || `msg_${seqno}_${Date.now()}`;
+
+                                // 🔍 调试：检查IMAP头部解析结果
+                                console.log(`[Yahoo邮件头部] 邮件 #${seqno} IMAP头部:`);
+                                console.log(`[Yahoo邮件头部] subject字段: "${headers.subject}"`);
+                                console.log(`[Yahoo邮件头部] from字段:`, headers.from);
+                                console.log(`[Yahoo邮件头部] to字段:`, headers.to);
+                                console.log(`[Yahoo邮件头部] date字段:`, headers.date);
                             });
                         });
 
@@ -1206,6 +1213,15 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                                         try {
                                             const parsed = await simpleParser(fullBuffer);
 
+                                            // 🔍 调试：检查mailparser解析出的所有字段
+                                            console.log(`[Yahoo邮件解析] 邮件 #${processedCount + 1} 原始字段:`);
+                                            console.log(`[Yahoo邮件解析] parsed.subject: "${parsed.subject}"`);
+                                            console.log(`[Yahoo邮件解析] parsed.subject 类型: ${typeof parsed.subject}`);
+                                            console.log(`[Yahoo邮件解析] parsed.from:`, parsed.from);
+                                            console.log(`[Yahoo邮件解析] parsed.to:`, parsed.to);
+                                            console.log(`[Yahoo邮件解析] parsed.date:`, parsed.date);
+                                            console.log(`[Yahoo邮件解析] parsed.messageId:`, parsed.messageId);
+
                                             const email = {
                                                 id: messageId,
                                                 Subject: parsed.subject || '(无主题)', // 统一使用大写Subject
@@ -1222,6 +1238,9 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                                                 receivedDateTime: receivedDate,
                                                 IsRead: attrs.flags.includes('\\Seen')
                                             };
+
+                                            console.log(`[Yahoo邮件解析] 构建后email.Subject: "${email.Subject}"`);
+                                            console.log(`[Yahoo邮件解析] 构建后email.Body.Content长度: ${email.Body.Content.length}`);
 
                                             emails.push(email);
                                             processedCount++;
