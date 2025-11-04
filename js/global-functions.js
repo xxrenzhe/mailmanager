@@ -1536,7 +1536,7 @@ function showEdgeSimpleGuide() {
 • 如遇问题，请查看PowerShell中的提示`;
 
     // 显示简化模态框
-    Utils.showModal('🚀 Edge一键配置执行指南', guideContent);
+    showModal('🚀 Edge一键配置执行指南', guideContent);
 
     // 尝试自动打开PowerShell（管理员权限）
     setTimeout(() => {
