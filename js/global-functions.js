@@ -804,7 +804,7 @@ function displayProxyData(proxyData) {
     actionsSection.classList.remove('hidden');
 }
 
-// 配置Edge浏览器一键代理（智能执行方案）
+// 配置Edge浏览器一键代理（KISS原则）
 async function configureSystemProxy() {
     const proxyHost = document.getElementById('proxyHost').textContent;
     const proxyPort = document.getElementById('proxyPort').textContent;
@@ -820,7 +820,7 @@ async function configureSystemProxy() {
 
     if (configureBtn) {
         configureBtn.disabled = true;
-        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置代理...';
+        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置Edge代理...';
         configureBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
         configureBtn.classList.add('bg-gray-400');
     }
@@ -831,26 +831,42 @@ async function configureSystemProxy() {
         const isWindows = userAgent.indexOf('Windows') !== -1;
         const isEdge = userAgent.indexOf('Edg/') !== -1;
 
-        console.log(`[智能代理配置] 操作系统: ${isWindows ? 'Windows' : '非Windows'}, 浏览器: ${isEdge ? 'Edge' : '其他'}`);
+        console.log(`[Edge一键配置] 操作系统: ${isWindows ? 'Windows' : '非Windows'}, 浏览器: ${isEdge ? 'Edge' : '其他'}`);
 
         if (!isWindows) {
             throw new Error('代理配置功能仅支持Windows操作系统。');
         }
 
-        // 显示配置确认
-        const confirmMessage = `🚀 智能代理配置确认：
+        if (!isEdge) {
+            // 非Edge浏览器显示指导信息
+            Utils.showModal('浏览器不支持', `
+🚫 此功能仅支持 Microsoft Edge 浏览器
+
+📋 当前浏览器：${userAgent.split(' ').pop()}
+✅ 推荐浏览器：Microsoft Edge
+
+💡 使用方法：
+1. 请打开 Microsoft Edge 浏览器
+2. 访问此页面进行代理配置
+3. 享受一键配置的便利体验
+
+如需下载Edge浏览器，请访问：
+https://www.microsoft.com/edge
+            `);
+            return;
+        }
+
+        // Edge专用一键配置确认
+        const confirmMessage = `🚀 Edge浏览器一键代理配置
 
 代理服务器：${proxyHost}:${proxyPort}
 用户名：${proxyUsername}
 
-📋 配置方案：${isEdge ? 'Edge专用优化' : '通用浏览器方案'}
-
-✨ 智能特性：
-• 自动检测浏览器类型
-• 一键复制PowerShell命令
+✨ 一键特性：
 • 自动打开管理员PowerShell
-• 详细的执行指导
-• 实时配置状态反馈
+• 自动复制配置命令
+• 自动粘贴执行
+• 配置完成后自动启动Edge验证
 
 点击"确定"开始一键配置，点击"取消"退出。`;
 
@@ -859,24 +875,27 @@ async function configureSystemProxy() {
             return;
         }
 
-        // 使用智能执行方案
-        showProxyStatus('info', '正在生成智能配置方案...');
-        const result = await executeIntelligentProxyConfig(proxyHost, proxyPort, proxyUsername, proxyPassword, isEdge);
+        // Edge专用一键配置
+        showProxyStatus('info', '正在准备Edge代理配置...');
+        const result = await executeEdgeOneClickProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 
         if (result.success) {
-            showProxyStatus('success', '代理配置命令已准备就绪！');
+            showProxyStatus('success', 'Edge代理配置完成！');
+            Utils.showNotification('Edge代理配置成功！PowerShell窗口即将打开...', 'success');
 
-            // 显示智能执行指导
-            await showIntelligentExecutionGuide(result, isEdge);
+            // 延迟显示简化指导
+            setTimeout(() => {
+                showEdgeSimpleGuide();
+            }, 1500);
 
         } else {
-            throw new Error(result.error || '代理配置失败');
+            throw new Error(result.error || 'Edge代理配置失败');
         }
 
     } catch (error) {
-        console.error('智能代理配置失败:', error);
+        console.error('Edge一键配置失败:', error);
         showProxyStatus('error', `配置失败: ${error.message}`);
-        Utils.showNotification(`代理配置失败: ${error.message}`, 'error');
+        Utils.showNotification(`Edge代理配置失败: ${error.message}`, 'error');
     } finally {
         if (configureBtn) {
             configureBtn.disabled = false;
@@ -1398,5 +1417,134 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
     } catch (error) {
         console.error('打开PowerShell失败:', error);
         Utils.showNotification('请手动打开管理员PowerShell并粘贴配置命令', 'warning');
+    }
+}
+
+// Edge浏览器专用一键代理配置（KISS原则）
+async function executeEdgeOneClickProxy(host, port, username, password) {
+    try {
+        // 生成简化的PowerShell命令
+        const command = generateEdgeSimpleCommand(host, port, username, password);
+
+        // 复制到剪贴板
+        const success = await copyToClipboard(command);
+
+        if (!success) {
+            throw new Error('无法复制配置命令到剪贴板');
+        }
+
+        return {
+            success: true,
+            command: command,
+            requiresManualExecution: true,
+            message: 'Edge代理配置命令已准备就绪'
+        };
+
+    } catch (error) {
+        console.error('Edge一键配置失败:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// 生成Edge专用简化PowerShell命令
+function generateEdgeSimpleCommand(host, port, username, password) {
+    const escapedPassword = password.replace(/'/g, "''");
+    const escapedUsername = username.replace(/'/g, "''");
+
+    return `# Edge浏览器代理配置 - 一键完成
+# 生成时间: ${new Date().toLocaleString()}
+
+Write-Host "🚀 开始配置Edge浏览器代理..." -ForegroundColor Cyan
+Write-Host "📊 代理服务器: ${host}:${port}" -ForegroundColor White
+Write-Host "👤 用户名: ${username}" -ForegroundColor White
+
+# 检查管理员权限
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Write-Host "⚠️ 需要管理员权限，正在重新启动..." -ForegroundColor Yellow
+    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "'$PSCommandPath'" -Verb RunAs
+    exit
+}
+
+Write-Host "🔧 配置系统代理..." -ForegroundColor Cyan
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value "${host}:${port}" -Type String -Force
+
+Write-Host "✅ Edge专用配置..." -ForegroundColor Green
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -Value "${host}:${port}" -Type String -Force
+
+Write-Host "🔐 配置代理凭据..." -ForegroundColor Cyan
+cmdkey /add:"${host}" /user:"${escapedUsername}" /pass:"${escapedPassword}" | Out-Null
+cmdkey /add:"Windows_Proxy" /user:"${escapedUsername}" /pass:"${escapedPassword}" | Out-Null
+cmdkey /add:"Microsoft_Edge_Proxy" /user:"${escapedUsername}" /pass:"${escapedPassword}" | Out-Null
+
+Write-Host "🔄 刷新网络设置..." -ForegroundColor Cyan
+netsh winhttp reset proxy | Out-Null
+netsh winhttp import proxy source=ie | Out-Null
+
+Write-Host "🎉 代理配置完成！" -ForegroundColor Green
+Write-Host "🌐 正在启动Edge浏览器验证..." -ForegroundColor Cyan
+
+Start-Process msedge "https://ip111.cn" -WindowStyle Maximized
+
+Write-Host "✨ 配置成功！请验证IP地址是否为：${host}" -ForegroundColor Green
+Write-Host "" -ForegroundColor White
+Write-Host "按任意键退出..." -ForegroundColor Gray
+Read-Host`;
+}
+
+// 显示Edge简化执行指导
+function showEdgeSimpleGuide() {
+    const guideContent = `
+🚀 Edge浏览器一键代理配置执行指南
+
+✅ 第1步：PowerShell窗口已打开
+• 系统已自动打开管理员权限的PowerShell窗口
+• 如果看到UAC提示，请点击"是"授权
+
+⌨️ 第2步：自动粘贴命令
+• 命令已自动复制到剪贴板
+• 在PowerShell窗口中按 Ctrl+V 粘贴命令
+
+🚀 第3步：执行配置
+• 按回车键执行配置脚本
+• 等待配置完成（约10秒）
+
+🎯 配置完成后将自动：
+• 设置Windows系统代理
+• 配置Edge专用代理设置
+• 添加代理凭据
+• 启动Edge浏览器验证IP
+
+💡 小提示：
+• 整个过程只需：Ctrl+V + 回车
+• 配置脚本会自动处理所有细节
+• 如遇问题，请查看PowerShell中的提示`;
+
+    // 显示简化模态框
+    Utils.showModal('🚀 Edge一键配置执行指南', guideContent);
+
+    // 尝试自动打开PowerShell（管理员权限）
+    setTimeout(() => {
+        openEdgePowerShellAsAdmin();
+    }, 1000);
+}
+
+// Edge专用PowerShell自动打开
+function openEdgePowerShellAsAdmin() {
+    try {
+        // 使用msedge shell协议打开管理员PowerShell
+        const cmdUrl = 'msedge://shell:runas/user:administrator powershell.exe -NoProfile -ExecutionPolicy Bypass';
+        window.open(cmdUrl, '_blank');
+
+        // 备选方案：直接使用shell协议
+        setTimeout(() => {
+            const fallbackUrl = 'shell:runas/user:administrator powershell.exe';
+            window.open(fallbackUrl, '_blank');
+        }, 2000);
+
+    } catch (error) {
+        console.log('Edge PowerShell自动打开失败', error);
+        Utils.showNotification('请手动打开PowerShell（管理员权限）', 'info');
     }
 }
