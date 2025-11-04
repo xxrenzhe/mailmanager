@@ -1430,7 +1430,7 @@ $proxyHost = "${host}"
 $proxyPort = "${port}"
 $proxyUser = "${username}"
 $proxyPass = "${password}"
-$proxyServer = "$proxyHost:$proxyPort"
+$proxyServer = "${proxyHost}:${proxyPort}"
 
 Write-Host "🚀 开始自动化配置代理..." -ForegroundColor Cyan
 Write-Host "📊 代理服务器: $proxyServer" -ForegroundColor White
