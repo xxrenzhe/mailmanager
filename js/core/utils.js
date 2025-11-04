@@ -438,6 +438,136 @@ const Utils = {
                 }, 300);
             }
         }, 5000);
+    },
+
+    // 显示模态框
+    showModal(title, content) {
+        // 创建模态框背景
+        const modalOverlay = document.createElement('div');
+        modalOverlay.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
+        modalOverlay.style.backdropFilter = 'blur(4px)';
+
+        // 创建模态框容器
+        const modalContainer = document.createElement('div');
+        modalContainer.className = 'bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-screen overflow-y-auto';
+        modalContainer.style.animation = 'modalSlideIn 0.3s ease-out';
+
+        // 创建模态框头部
+        const modalHeader = document.createElement('div');
+        modalHeader.className = 'flex items-center justify-between p-6 border-b border-gray-200';
+
+        const modalTitle = document.createElement('h2');
+        modalTitle.className = 'text-xl font-semibold text-gray-800';
+        modalTitle.textContent = title;
+
+        const closeButton = document.createElement('button');
+        closeButton.className = 'text-gray-400 hover:text-gray-600 transition-colors';
+        closeButton.innerHTML = '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+        closeButton.onclick = () => this.removeModal(modalOverlay);
+
+        modalHeader.appendChild(modalTitle);
+        modalHeader.appendChild(closeButton);
+
+        // 创建模态框内容
+        const modalContent = document.createElement('div');
+        modalContent.className = 'p-6';
+
+        // 处理内容，支持换行和格式化
+        if (content.includes('\n')) {
+            const preElement = document.createElement('pre');
+            preElement.className = 'whitespace-pre-wrap text-gray-700 leading-relaxed';
+            preElement.textContent = content;
+            modalContent.appendChild(preElement);
+        } else {
+            modalContent.innerHTML = content;
+        }
+
+        // 创建模态框底部
+        const modalFooter = document.createElement('div');
+        modalFooter.className = 'flex justify-end p-6 border-t border-gray-200';
+
+        const okButton = document.createElement('button');
+        okButton.className = 'px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors';
+        okButton.textContent = '确定';
+        okButton.onclick = () => this.removeModal(modalOverlay);
+
+        modalFooter.appendChild(okButton);
+
+        // 组装模态框
+        modalContainer.appendChild(modalHeader);
+        modalContainer.appendChild(modalContent);
+        modalContainer.appendChild(modalFooter);
+        modalOverlay.appendChild(modalContainer);
+
+        // 添加CSS动画样式
+        if (!document.getElementById('modal-styles')) {
+            const style = document.createElement('style');
+            style.id = 'modal-styles';
+            style.textContent = `
+                @keyframes modalSlideIn {
+                    from {
+                        opacity: 0;
+                        transform: translate(-50%, -50%) scale(0.9);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1);
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // 添加到页面
+        document.body.appendChild(modalOverlay);
+
+        // 点击背景关闭
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) {
+                this.removeModal(modalOverlay);
+            }
+        });
+
+        // ESC键关闭
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                this.removeModal(modalOverlay);
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    },
+
+    // 移除模态框
+    removeModal(modalOverlay) {
+        if (modalOverlay && modalOverlay.parentElement) {
+            modalOverlay.style.animation = 'modalSlideOut 0.3s ease-in';
+
+            // 添加退出动画
+            if (!document.getElementById('modal-out-styles')) {
+                const style = document.createElement('style');
+                style.id = 'modal-out-styles';
+                style.textContent = `
+                    @keyframes modalSlideOut {
+                        from {
+                            opacity: 1;
+                            transform: translate(-50%, -50%) scale(1);
+                        }
+                        to {
+                            opacity: 0;
+                            transform: translate(-50%, -50%) scale(0.9);
+                        }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            setTimeout(() => {
+                if (modalOverlay.parentElement) {
+                    modalOverlay.remove();
+                }
+            }, 300);
+        }
     }
 };
 

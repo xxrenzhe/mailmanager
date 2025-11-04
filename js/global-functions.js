@@ -804,7 +804,7 @@ function displayProxyData(proxyData) {
     actionsSection.classList.remove('hidden');
 }
 
-// 配置系统代理
+// 配置Edge浏览器一键代理
 async function configureSystemProxy() {
     const proxyHost = document.getElementById('proxyHost').textContent;
     const proxyPort = document.getElementById('proxyPort').textContent;
@@ -821,7 +821,7 @@ async function configureSystemProxy() {
 
     if (configureBtn) {
         configureBtn.disabled = true;
-        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置代理...';
+        configureBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>正在配置Edge代理...';
         configureBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
         configureBtn.classList.add('bg-gray-400');
     }
@@ -830,61 +830,271 @@ async function configureSystemProxy() {
         // 检测用户操作系统
         const userAgent = navigator.userAgent;
         const isWindows = userAgent.indexOf('Windows') !== -1;
-        const isMac = userAgent.indexOf('Mac') !== -1;
-        const isLinux = userAgent.indexOf('Linux') !== -1;
 
-        console.log(`[代理配置] 检测到操作系统: ${isWindows ? 'Windows' : isMac ? 'macOS' : isLinux ? 'Linux' : '未知'}`);
+        console.log(`[Edge代理配置] 检测到操作系统: ${isWindows ? 'Windows' : '非Windows'}`);
 
         if (!isWindows) {
-            throw new Error('此功能仅支持Windows操作系统。请使用Windows系统访问此功能。');
+            throw new Error('Edge浏览器一键代理配置仅支持Windows操作系统。');
         }
 
-        // 显示管理员权限提示
-        const adminConfirmed = confirm('⚠️ 重要提示：\n\n配置系统代理需要管理员权限。\n\n请确认：\n1. 您正在使用Windows系统\n2. 您将以管理员身份运行浏览器\n3. 配置完成后可能需要重启浏览器\n\n点击"确定"继续配置，点击"取消"退出。');
+        // 显示配置确认
+        const confirmMessage = `🔧 Edge浏览器代理配置确认：
 
-        if (!adminConfirmed) {
+代理服务器：${proxyHost}:${proxyPort}
+用户名：${proxyUsername}
+
+配置内容：
+• Windows系统代理设置
+• Microsoft Edge专用代理配置
+• 自动凭据管理（无需重复输入密码）
+• 自动启动Edge浏览器
+
+点击"确定"开始配置，点击"取消"退出。`;
+
+        const userConfirmed = confirm(confirmMessage);
+        if (!userConfirmed) {
             return;
         }
 
-        // 调用后端API配置系统代理
-        const response = await fetch('/api/proxy/configure', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                host: proxyHost,
-                port: parseInt(proxyPort, 10),
-                username: proxyUsername,
-                password: proxyPassword
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || '配置代理失败');
-        }
-
-        const result = await response.json();
+        // 生成并执行Edge代理配置
+        showProxyStatus('info', '正在生成Edge代理配置脚本...');
+        const result = await generateAndExecuteEdgeProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 
         if (result.success) {
-            showProxyStatus('success', result.message || '代理配置成功！');
-            Utils.showNotification('系统代理配置成功', 'success');
+            showProxyStatus('success', 'Edge代理配置成功！正在启动浏览器...');
+            Utils.showNotification('Edge浏览器代理配置成功！', 'success');
+
+            // 延迟启动Edge浏览器，让代理配置生效
+            setTimeout(() => {
+                launchEdgeBrowser();
+            }, 2000);
+
         } else {
-            throw new Error(result.error || '配置代理失败');
+            throw new Error(result.error || 'Edge代理配置失败');
         }
 
     } catch (error) {
-        console.error('配置代理失败:', error);
+        console.error('Edge代理配置失败:', error);
         showProxyStatus('error', `配置失败: ${error.message}`);
-        Utils.showNotification(`配置代理失败: ${error.message}`, 'error');
+        Utils.showNotification(`Edge代理配置失败: ${error.message}`, 'error');
     } finally {
         if (configureBtn) {
             configureBtn.disabled = false;
-            configureBtn.innerHTML = '<i class="fas fa-cog mr-2"></i>一键配置代理';
+            configureBtn.innerHTML = '<i class="fas fa-cog mr-2"></i>一键代理设置';
             configureBtn.classList.remove('bg-gray-400');
             configureBtn.classList.add('bg-green-500', 'hover:bg-green-600');
         }
+    }
+}
+
+// 生成并执行Edge代理配置脚本
+async function generateAndExecuteEdgeProxy(host, port, username, password) {
+    try {
+        // PowerShell脚本内容 - 基于templates/powershell/edge-proxy-simple.ps1
+        const psScript = `# Microsoft Edge 专用代理配置脚本
+param(
+    [Parameter(Mandatory=$true)][string]$ProxyHost,
+    [Parameter(Mandatory=$true)][string]$ProxyPort,
+    [Parameter(Mandatory=$true)][string]$ProxyUser,
+    [Parameter(Mandatory=$true)][string]$ProxyPass
+)
+
+# 设置Edge代理配置函数
+function Set-EdgeProxy {
+    param([string]$Server)
+    try {
+        # 配置Windows系统代理
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value $Server -Type String -Force
+
+        # 配置Edge专用代理设置
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -Value $Server -Type String -Force
+
+        Write-Host "✓ Edge代理配置成功: $Server"
+        return $true
+    } catch {
+        Write-Host "✗ 代理配置失败: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# 设置凭据函数
+function Set-ProxyCredentials {
+    param([string]$Host, [string]$Port, [string]$User, [string]$Pass)
+    try {
+        $targets = @("$Host", "Windows_Proxy", "Microsoft_Edge_Proxy")
+        foreach ($target in $targets) {
+            try {
+                cmdkey /add:$target /user:$User /pass:$Pass | Out-Null
+                Write-Host "✓ 凭据添加成功: $target"
+            } catch {
+                Write-Host "✗ 凭据添加失败: $target"
+            }
+        }
+        return $true
+    } catch {
+        Write-Host "✗ 凭据配置失败: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# 启动Edge浏览器函数
+function Start-EdgeBrowser {
+    try {
+        Start-Process msedge "https://ip111.cn" -WindowStyle Maximized
+        Write-Host "✓ Edge浏览器启动成功"
+        return $true
+    } catch {
+        Write-Host "✗ Edge启动失败: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# 主执行逻辑
+Write-Host "=== Microsoft Edge 代理配置开始 ==="
+Write-Host "代理服务器: $ProxyHost`:$ProxyPort"
+Write-Host "用户名: $ProxyUser"
+
+$proxyServer = "$ProxyHost`:$ProxyPort"
+$proxyResult = Set-EdgeProxy -Server $proxyServer
+
+if ($proxyResult) {
+    $credResult = Set-ProxyCredentials -Host $ProxyHost -Port $ProxyPort -User $ProxyUser -Pass $ProxyPass
+
+    if ($credResult) {
+        Write-Host "=== 配置完成，正在启动Edge ==="
+        Start-Sleep -Seconds 2
+        Start-EdgeBrowser
+        Write-Host "=== Edge代理配置成功完成 ==="
+    } else {
+        Write-Host "=== 凭据配置失败 ==="
+        exit 1
+    }
+} else {
+    Write-Host "=== 代理配置失败 ==="
+    exit 1
+}`;
+
+        // 创建临时PowerShell文件
+        const blob = new Blob([psScript], { type: 'text/plain;charset=utf-8' });
+        const file = new File([blob], "edge-proxy-config.ps1", { type: "text/plain" });
+
+        // 下载文件
+        const downloadResult = await downloadPowerShellScript(file, host, port, username, password);
+
+        return downloadResult;
+
+    } catch (error) {
+        console.error('生成Edge代理配置脚本失败:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// 下载PowerShell脚本
+async function downloadPowerShellScript(file, host, port, username, password) {
+    return new Promise((resolve) => {
+        try {
+            // 创建下载链接
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            // 显示执行说明
+            setTimeout(() => {
+                const executionSteps = `📋 Edge浏览器代理配置执行步骤：
+
+✅ 脚本已下载到您的下载文件夹
+
+🔧 手动执行步骤：
+1. 打开下载文件夹
+2. 找到 "edge-proxy-config.ps1" 文件
+3. 右键点击文件 → 选择"使用PowerShell运行"
+4. 如果出现UAC提示，点击"是"
+5. 等待脚本执行完成（会自动启动Edge浏览器）
+
+📝 脚本配置信息：
+• 代理服务器：${host}:${port}
+• 用户名：${username}
+• 自动密码配置：已包含
+
+🌐 配置完成后，Edge浏览器将自动打开并验证代理IP。
+
+如果PowerShell执行被阻止，请：
+1. 右键点击脚本 → 属性
+2. 勾选"解除阻止"
+3. 确定后重新运行`;
+
+                showModal('Edge代理配置说明', executionSteps);
+
+                resolve({
+                    success: true,
+                    requiresManualExecution: true,
+                    message: 'PowerShell脚本已下载，请按照说明手动执行'
+                });
+            }, 1000);
+
+        } catch (error) {
+            console.error('下载PowerShell脚本失败:', error);
+            resolve({ success: false, error: error.message });
+        }
+    });
+}
+
+// 启动Edge浏览器
+function launchEdgeBrowser() {
+    try {
+        showProxyStatus('info', '正在启动Edge浏览器...');
+
+        // 尝试多种方式启动Edge
+        const edgeUrls = [
+            'microsoft-edge:https://ip111.cn',
+            'msedge:https://ip111.cn',
+            'https://ip111.cn'
+        ];
+
+        let launched = false;
+        for (const url of edgeUrls) {
+            try {
+                const newWindow = window.open(url, '_blank');
+                if (newWindow) {
+                    launched = true;
+                    break;
+                }
+            } catch (e) {
+                console.log(`启动方式失败: ${url}`, e);
+            }
+        }
+
+        if (launched) {
+            Utils.showNotification('Edge浏览器已启动，请验证代理IP', 'success');
+            showProxyStatus('success', 'Edge浏览器启动成功，请验证IP地址');
+        } else {
+            // 最后尝试显示手动启动说明
+            const manualSteps = `🚀 请手动启动Edge浏览器：
+
+1. 打开Microsoft Edge浏览器
+2. 访问：https://ip111.cn
+3. 验证代理IP是否显示为：${document.getElementById('proxyHost').textContent}
+
+如果代理未生效，请：
+1. 确保PowerShell脚本已成功执行
+2. 重启Edge浏览器
+3. 检查代理设置是否正确配置`;
+
+            showModal('手动启动Edge浏览器', manualSteps);
+            Utils.showNotification('请手动启动Edge浏览器验证代理', 'info');
+        }
+
+    } catch (error) {
+        console.error('启动Edge浏览器失败:', error);
+        Utils.showNotification('请手动启动Edge浏览器', 'info');
     }
 }
 
