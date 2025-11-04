@@ -992,7 +992,15 @@ function generateEnhancedProxyScript(host, port, username, password) {
 # 用户名: ${username}
 
 # 设置控制台编码为UTF-8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    Write-Host "编码设置完成" -ForegroundColor Green
+} catch {
+    Write-Host "编码设置失败，继续执行" -ForegroundColor Yellow
+}
+
+# 确保窗口保持显示
+Add-Type -AssemblyName System.Windows.Forms
 
 Write-Host "===========================================" -ForegroundColor Green
 Write-Host "    Windows系统代理配置脚本" -ForegroundColor Green
@@ -1005,8 +1013,12 @@ Write-Host "  生成时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Foregrou
 Write-Host ""
 
 # 全局变量设置
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # 改为Continue，避免错误时退出
 $ProgressPreference = "Continue"
+
+Write-Host "脚本启动成功，按任意键继续..." -ForegroundColor Yellow
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Write-Host ""
 
 try {
     Write-Host "🔍 步骤1: 检查系统环境..." -ForegroundColor Yellow
@@ -1168,7 +1180,7 @@ public class WinINet {
     Write-Host "  - 如果IP没有变化，请尝试以下操作:" -ForegroundColor Gray
     Write-Host "    • 重启浏览器（Ctrl+Shift+R强制刷新）" -ForegroundColor White
     Write-Host "    • 清除浏览器缓存（Ctrl+Shift+Delete）" -ForegroundColor White
-    • 检查浏览器代理设置是否生效" -ForegroundColor White
+    Write-Host "    • 检查浏览器代理设置是否生效" -ForegroundColor White
     Write-Host "    • 尝试访问其他网站确认代理" -ForegroundColor White
     Write-Host ""
 
@@ -1204,8 +1216,11 @@ public class WinINet {
 }
 
 Write-Host ""
-Write-Host "⏹ 按任意键退出..." -ForegroundColor Yellow
+Write-Host "⏹ 脚本执行完成！" -ForegroundColor Green
+Write-Host "按任意键退出..." -ForegroundColor Yellow
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Write-Host "正在退出..." -ForegroundColor Gray
+Start-Sleep -Seconds 2
 `;
 
     // 创建Blob并下载
