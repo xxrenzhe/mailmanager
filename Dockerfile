@@ -27,7 +27,7 @@ WORKDIR /app
 COPY --from=node-builder /app/node_modules ./node_modules
 
 # 复制应用文件
-COPY --chown=mailmanager:nodejs balanced-proxy-server-simple.js ./proxy-server.js
+COPY --chown=mailmanager:nodejs balanced-proxy-server-simple.js ./
 COPY --chown=mailmanager:nodejs index.html ./
 # 复制静态资源文件
 COPY --chown=mailmanager:nodejs css ./css
@@ -182,7 +182,7 @@ autorestart=true
 priority=10
 
 [program:mailmanager]
-command=node /app/proxy-server.js
+command=node /app/balanced-proxy-server-simple.js
 directory=/app
 user=mailmanager
 stdout_logfile=/dev/stdout
