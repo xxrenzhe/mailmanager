@@ -1458,20 +1458,7 @@ Write-Host "" -ForegroundColor White
 Write-Host "按任意键关闭窗口..." -ForegroundColor Gray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
 
-        // 创建临时PowerShell文件并执行
-        const blob = new Blob([autoCommand], { type: 'text/plain;charset=utf-8' });
-        const fileUrl = URL.createObjectURL(blob);
-
-        // 下载并执行PowerShell脚本
-        const downloadLink = document.createElement('a');
-        downloadLink.href = fileUrl;
-        downloadLink.download = 'proxy-config.ps1';
-        downloadLink.style.display = 'none';
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-
-      // 延迟复制命令到剪贴板
+        // 立即复制命令到剪贴板
         setTimeout(async () => {
             const copySuccess = await copyToClipboard(autoCommand);
             if (copySuccess) {
@@ -1479,18 +1466,13 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
             } else {
                 Utils.showNotification('请手动复制命令到PowerShell执行', 'warning');
             }
-        }, 1000);
-
-        // 清理URL对象
-        setTimeout(() => {
-            URL.revokeObjectURL(fileUrl);
-        }, 5000);
+        }, 500);
 
         return {
             success: true,
             command: autoCommand,
             requiresManualExecution: true,
-            message: 'PowerShell脚本已下载，命令已复制到剪贴板'
+            message: '命令已复制到剪贴板，请到PowerShell中执行'
         };
 
     } catch (error) {
