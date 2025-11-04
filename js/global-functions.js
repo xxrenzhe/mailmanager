@@ -1471,9 +1471,14 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
         downloadLink.click();
         document.body.removeChild(downloadLink);
 
-        // 显示配置指导，让用户手动执行
-        setTimeout(() => {
-            showSimpleProxyGuide(host, port, username, password, autoCommand);
+      // 延迟复制命令到剪贴板
+        setTimeout(async () => {
+            const copySuccess = await copyToClipboard(autoCommand);
+            if (copySuccess) {
+                Utils.showNotification('命令已复制！请打开PowerShell右键粘贴执行', 'success');
+            } else {
+                Utils.showNotification('请手动复制命令到PowerShell执行', 'warning');
+            }
         }, 1000);
 
         // 清理URL对象
@@ -1485,49 +1490,12 @@ $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")`;
             success: true,
             command: autoCommand,
             requiresManualExecution: true,
-            message: 'PowerShell脚本已下载，请按照指导执行'
+            message: 'PowerShell脚本已下载，命令已复制到剪贴板'
         };
 
     } catch (error) {
         console.error('自动化配置失败:', error);
         return { success: false, error: error.message };
-    }
-}
-
-// 简化的代理配置指导
-function showSimpleProxyGuide(host, port, username, password, powerShellCommand) {
-    const guideContent = `
-🚀 代理配置 - 简化指导
-
-✅ 第1步：打开PowerShell
-• 按 Win+X 键，选择"Windows PowerShell (管理员)"
-• 或者右键点击开始按钮，选择"Windows PowerShell (管理员)"
-• 如果弹出UAC提示，请点击"是"
-
-✅ 第2步：执行脚本
-• PowerShell窗口打开后，输入以下命令：
-• cd $env:USERPROFILE\\Downloads
-• .\\proxy-config.ps1
-
-✅ 第3步：验证配置
-• 脚本执行后会显示配置结果
-• 如果显示"代理配置完成！"表示成功
-
-📋 代理信息:
-• 服务器: ${host}:${port}
-• 用户名: ${username}
-• 密码: ${password}
-
-💡 小贴士:
-• 如果提示"无法加载文件"，请先执行：Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-• 脚本会自动配置系统代理和凭据管理器
-• 配置完成后重启浏览器即可生效`;
-
-    try {
-        Utils.showModal('代理配置指导', guideContent);
-    } catch (modalError) {
-        console.log('[DEBUG] 模态框显示失败，使用alert:', modalError);
-        alert(guideContent);
     }
 }
 
