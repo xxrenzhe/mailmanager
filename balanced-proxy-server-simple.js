@@ -3278,4 +3278,4 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
     console.log('收到SIGINT信号，正在关闭服务器...');
     server.close(() => process.exit(0));
-});
+});// 强制触发部署 - Tue Nov  4 22:30:06 CST 2025
