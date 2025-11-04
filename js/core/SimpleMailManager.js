@@ -429,6 +429,14 @@ class SimpleMailManager {
                 account.email_count = data.email_count || 0;
                 account.last_checked = new Date().toISOString();
 
+                // 确保账户包含type和password字段
+                if (data.data && data.data.type) {
+                    account.type = data.data.type;
+                }
+                if (data.data && data.data.password) {
+                    account.password = data.data.password;
+                }
+
                 // 🔧 关键修��：处理导入时发现的验证码
                 if (data.data && data.data.verification_code) {
                     const verificationCode = data.data.verification_code;
@@ -649,8 +657,10 @@ class SimpleMailManager {
             const requestData = {
                 email_id: accountId,
                 email: account.email,
-                client_id: account.client_id,
-                refresh_token: account.refresh_token,
+                type: account.type || 'outlook', // 添加邮箱类型
+                password: account.password || '', // 添加邮箱密码（Yahoo需要）
+                client_id: account.client_id || '',
+                refresh_token: account.refresh_token || '',
                 access_token: account.access_token,
                 current_status: account.status,
                 sessionId: this.sessionId
@@ -1768,8 +1778,10 @@ class SimpleMailManager {
                     sessionId: this.sessionId,
                     email_id: account.id,
                     email: account.email,
-                    client_id: account.client_id,
-                    refresh_token: account.refresh_token,
+                    type: account.type || 'outlook', // 添加邮箱类型
+                    password: account.password || '', // 添加邮箱密码（Yahoo需要）
+                    client_id: account.client_id || '',
+                    refresh_token: account.refresh_token || '',
                     current_status: account.status,
                     access_token: account.access_token,
                     // 新增：传递历史邮件数据用于时间过滤

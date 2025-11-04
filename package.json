@@ -18,6 +18,8 @@
     "express": "^4.19.2",
     "google-auth-library": "^10.3.1",
     "http-proxy-middleware": "^3.0.5",
+    "imap": "^0.8.19",
+    "mailparser": "^3.7.5",
     "node-fetch": "^3.3.2",
     "sqlite3": "^5.1.7",
     "ws": "^8.18.3"

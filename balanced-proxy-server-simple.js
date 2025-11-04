@@ -1796,7 +1796,7 @@ app.post('/api/microsoft/token', async (req, res) => {
 // 手动获取邮件API
 app.post('/api/manual-fetch-emails', async (req, res) => {
     try {
-        const { sessionId, email_id, email, client_id, refresh_token, current_status } = req.body;
+        const { sessionId, email_id, email, type, password, client_id, refresh_token, current_status } = req.body;
 
         if (!sessionId) {
             return res.status(400).json({
@@ -1805,23 +1805,44 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             });
         }
 
-        console.log(`[手动取件] 开始取件: ${email}, 账户ID: ${email_id} (会话: ${sessionId})`);
+        console.log(`[手动取件] 开始取件: ${email}, 类型: ${type}, 账户ID: ${email_id} (会话: ${sessionId})`);
 
-        let tokenResult;
-        try {
-            tokenResult = await refreshToken(refresh_token, client_id, '');
-        } catch (tokenError) {
-            console.error(`[手动取件] Token刷新失败: ${email}`, tokenError.message);
-            return res.status(403).json({
-                success: false,
-                error: 'Token刷新失败，请重新授权',
-                status: 'reauth_required'
-            });
+        let emails;
+        if (type === 'yahoo') {
+            // Yahoo邮箱：直接使用IMAP获取，与Outlook保持一致，每个文件夹5封邮件，最多15封邮件
+            try {
+                console.log(`[手动取件] Yahoo邮箱获取邮件: ${email}`);
+                emails = await fetchEmailsFromYahoo(email, password, 15);
+                console.log(`[手动取件] Yahoo邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
+            } catch (yahooError) {
+                console.error(`[手动取件] Yahoo邮箱获取失败: ${email}`, yahooError.message);
+                return res.status(403).json({
+                    success: false,
+                    error: 'Yahoo邮箱连接失败，请检查邮箱配置',
+                    status: 'reauth_required'
+                });
+            }
+        } else {
+            // Outlook邮箱：使用OAuth API获取邮件，每个文件夹5封邮件，共3个文件夹最多15封
+            try {
+                console.log(`[手动取件] Outlook邮箱获取邮件: ${email}`);
+                let tokenResult;
+                try {
+                    tokenResult = await refreshToken(refresh_token, client_id, '');
+                } catch (tokenError) {
+                    console.error(`[手动取件] Token刷新失败: ${email}`, tokenError.message);
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Token刷新失败，请重新授权',
+                        status: 'reauth_required'
+                    });
+                }
+
+                // 获取邮件
+                emails = await fetchEmailsFromMicrosoft(tokenResult.access_token);
+                console.log(`[手动取件] Outlook邮箱获取成功: ${email}, 邮件数: ${emails.length}`);
+            }
         }
-
-        // 获取邮件
-        const emails = await fetchEmailsFromMicrosoft(tokenResult.access_token);
-        console.log(`[手动取件] 获取到 ${emails.length} 封邮件`);
 
         // 提取验证码
         const verificationCodes = extractVerificationCodes(emails);
@@ -1831,9 +1852,11 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
         const account = {
             id: email_id,
             email: email,
-            client_id: client_id,
-            refresh_token: refresh_token,
-            access_token: tokenResult.access_token,
+            type: type || 'outlook', // 添加邮箱类型
+            password: type === 'yahoo' ? password : '', // Yahoo需要保存密码
+            client_id: type === 'outlook' ? client_id : '',
+            refresh_token: type === 'outlook' ? refresh_token : '',
+            access_token: type === 'outlook' ? (tokenResult ? tokenResult.access_token : '') : '',
             status: 'active',
             last_checked: new Date().toISOString(),
             email_count: emails.length,
@@ -1850,7 +1873,8 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             email_id: email_id,
             email: email,
             email_count: emails.length,
-            verification_code: latestCode,
+            verification_codes: verificationCodes,
+            latest_code: latestCode,
             timestamp: new Date().toISOString()
         });
 

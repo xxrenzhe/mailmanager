@@ -205,9 +205,19 @@
                     邮箱信息格式
                 </label>
                 <div class="bg-gray-50 p-3 rounded border text-sm text-gray-600 mb-4">
-                    格式：邮箱地址----密码----Client ID----Refresh Token<br>
-                    （每行一个邮箱信息，使用四个----分隔，支持智能UUID识别）<br>
-                    <span class="text-amber-600 font-medium">💡 建议一次导入不超过1000个邮箱，以确保最佳性能</span>
+                    <div class="mb-3">
+                        <strong class="text-blue-600">Microsoft Outlook邮箱：</strong><br>
+                        格式：邮箱地址----密码----Client ID----Refresh Token<br>
+                        <span class="text-xs text-gray-500">（使用四个----分隔，支持智能UUID识别）</span>
+                    </div>
+                    <div class="mb-3">
+                        <strong class="text-purple-600">Yahoo邮箱：</strong><br>
+                        格式：邮箱地址----POP/IMAP授权登录密码<br>
+                        <span class="text-xs text-gray-500">（请确保已启用Yahoo邮箱的IMAP功能）</span>
+                    </div>
+                    <div class="text-amber-600 font-medium">
+                        💡 建议一次导入不超过1000个邮箱，以确保最佳性能
+                    </div>
                 </div>
 
                 <label class="block text-sm font-medium text-gray-700 mb-2">
@@ -217,7 +227,7 @@
                     id="importTextarea"
                     rows="10"
                     class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="example@outlook.com----password123----client_id_value----refresh_token_value&#10;user2@outlook.com----password456----client_id_2----refresh_token_2"
+                    placeholder="Outlook邮箱示例：&#10;example@outlook.com----password123----client_id_value----refresh_token_value&#10;&#10;Yahoo邮箱示例：&#10;user@yahoo.com----app_password_goes_here&#10;&#10;系统会自动识别邮箱类型并使用相应的连接方式"
                 ></textarea>
             </div>
 

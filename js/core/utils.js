@@ -335,15 +335,83 @@ const Utils = {
         return isNewCode;
     },
 
-    // 解析导入行数据 - 从 simple-mail-manager.html 复制的工作版本
+    // 解析导入行数据 - 支持Outlook和Yahoo两种格式
     parseImportLine(line) {
         // 预处理：移除行首行尾空白
         line = line.trim();
         if (!line) {
             return null;
         }
-        // 智能解析：先按----分割，如果不是4个字段，再按连续的-分割
+
+        console.log(`[Parse] 解析行: "${line}"`);
+
+        // 检测邮箱类型并解析
+        const emailMatch = line.match(/^([^\s-]+@[^\s-]+)/);
+        if (!emailMatch) {
+            console.warn(`[Parse] 未找到有效邮箱地址: "${line}"`);
+            return null;
+        }
+
+        const email = emailMatch[1];
+        const domain = email.split('@')[1].toLowerCase();
+
+        console.log(`[Parse] 检测到邮箱: ${email}, 域名: ${domain}`);
+
+        let result;
+
+        if (domain.includes('yahoo.com') || domain.includes('yahoo')) {
+            // Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
+            console.log(`[Parse] 识别为Yahoo邮箱格式`);
+            result = this.parseYahooLine(line, email);
+        } else {
+            // Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
+            console.log(`[Parse] 识别为Outlook邮箱格式`);
+            result = this.parseOutlookLine(line, email);
+        }
+
+        if (result) {
+            console.log(`[Parse] 解析成功:`, {
+                email: result.email,
+                type: result.type,
+                hasPassword: !!result.password,
+                hasClientId: !!result.client_id,
+                hasRefreshToken: !!result.refresh_token
+            });
+        }
+
+        return result;
+    },
+
+    // 解析Yahoo邮箱格式：邮箱地址----POP/IMAP授权登录密码
+    parseYahooLine(line, email) {
+        const parts = line.split('----');
+
+        if (parts.length < 2) {
+            console.warn(`[Parse] Yahoo格式错误，期望至少2个字段，实际${parts.length}个:`, line);
+            return null;
+        }
+
+        const [, password] = parts;
+
+        if (!password || password.trim().length < 4) {
+            console.warn(`[Parse] Yahoo授权密码过短: "${password}"`);
+            return null;
+        }
+
+        return {
+            email: email.trim(),
+            password: password.trim(),
+            type: 'yahoo',
+            // Yahoo邮箱使用IMAP，不需要OAuth相关字段
+            client_id: '',
+            refresh_token: ''
+        };
+    },
+
+    // 解析Outlook邮箱格式：邮箱地址----密码----Client ID----Refresh Token
+    parseOutlookLine(line, email) {
         let parts = line.split('----');
+
         if (parts.length !== 4) {
             // 如果不是4个字段，尝试智能重构
             const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -360,35 +428,36 @@ const Utils = {
                         uuidMatch[0],
                         afterUuid.replace(/^-+/, '')
                     ];
-                                    }
+                }
             }
         }
+
         if (parts.length < 4) {
-            console.warn(`[Parse] 无效数据格式，期望4个字段，实际${parts.length}个:`, line);
+            console.warn(`[Parse] Outlook格式错误，期望4个字段，实际${parts.length}个:`, line);
             console.warn(`[Parse] 字段详情:`, parts.map((p, i) => `字段${i+1}: "${p}"`));
             return null;
         }
-        const [email, password, client_id, refresh_token_enc] = parts;
-        // 验证每个字段
-        if (!email || !email.includes('@')) {
-            console.warn(`[Parse] 无效的邮箱地址: "${email}"`);
-            return null;
-        }
+
+        const [, password, client_id, refresh_token_enc] = parts;
+
+        // 验证OAuth字段
         if (!client_id || client_id.length < 10) {
             console.warn(`[Parse] 无效的client_id: "${client_id}"`);
             return null;
         }
+
         if (!refresh_token_enc || refresh_token_enc.length < 10) {
             console.warn(`[Parse] 无效的refresh_token: "${refresh_token_enc?.substring(0, 20)}..."`);
             return null;
         }
-        const result = {
+
+        return {
             email: email.trim(),
             password: password ? password.trim() : '',
+            type: 'outlook',
             client_id: client_id.trim(),
             refresh_token: refresh_token_enc.trim()
         };
-                return result;
     },
 
     // 显示通知
