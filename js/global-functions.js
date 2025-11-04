@@ -1415,14 +1415,22 @@ Write-Host "等待输入..." -ForegroundColor Gray`;
     }
 }
 
-// Edge浏览器专用一键代理配置（KISS原则）
+// Edge浏览器专用一键代理配置（极简KISS版本）
 async function executeEdgeOneClickProxy(host, port, username, password) {
     try {
-        // 生成简化的PowerShell命令
-        const command = generateEdgeSimpleCommand(host, port, username, password);
+        // 生成最简化的PowerShell命令
+        const simpleCommand = `# 最简化的Edge代理配置
+Write-Host "开始配置代理..." -ForegroundColor Green
+
+# 配置系统代理
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
+Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value "${host}:${port}" -Force
+
+Write-Host "代理配置完成！" -ForegroundColor Green
+Write-Host "代理服务器: ${host}:${port}" -ForegroundColor White`;
 
         // 复制到剪贴板
-        const success = await copyToClipboard(command);
+        const success = await copyToClipboard(simpleCommand);
 
         if (!success) {
             throw new Error('无法复制配置命令到剪贴板');
@@ -1430,9 +1438,9 @@ async function executeEdgeOneClickProxy(host, port, username, password) {
 
         return {
             success: true,
-            command: command,
+            command: simpleCommand,
             requiresManualExecution: true,
-            message: 'Edge代理配置命令已准备就绪'
+            message: '代理配置命令已准备就绪'
         };
 
     } catch (error) {
@@ -1525,38 +1533,21 @@ function showEdgeSimpleGuide() {
     }, 500);
 }
 
-// Edge专用PowerShell自动打开
+// 极简的PowerShell指导
 function openEdgePowerShellAsAdmin() {
-    console.log('[DEBUG] 尝试自动打开PowerShell...');
+    console.log('[DEBUG] 显示简单的PowerShell指导');
 
-    // 由于浏览器安全限制，无法自动打开管理员PowerShell
-    // 改为提供清晰的指导，让用户手动操作
+    // 最简单的指导
     setTimeout(() => {
-        Utils.showNotification('配置命令已复制！请按Win+X，选择"Windows PowerShell (管理员)"，然后按Ctrl+V粘贴命令并回车', 'success');
+        Utils.showNotification('命令已复制！请打开PowerShell（管理员）粘贴运行', 'success');
 
-        // 同时显示更详细的指导（使用alert避免showModal问题）
-        console.log('[DEBUG] 显示PowerShell打开指导');
-        try {
-            Utils.showModal('🚀 PowerShell操作指导', `
-📋 **下一步操作**：
-
-1. 按 **Win + X** 键
-2. 选择 **"Windows PowerShell (管理员)"**
-3. 在PowerShell窗口中按 **Ctrl + V** 粘贴命令
-4. 按 **回车键** 执行配置
-
-✨ **命令已自动复制到剪贴板**
-
-💡 **提示**：如果UAC提示，请点击"是"允许管理员权限
-            `);
-        } catch (error) {
-            console.log('[DEBUG] showModal失败，使用alert备选方案:', error);
-            alert('🚀 PowerShell操作指导\n\n' +
-                '1. 按 Win + X 键\n' +
-                '2. 选择 "Windows PowerShell (管理员)"\n' +
-                '3. 按 Ctrl + V 粘贴命令\n' +
-                '4. 按回车执行配置\n\n' +
-                '命令已自动复制到剪贴板！');
-        }
-    }, 500);
+        // 使用最简单的alert避免任何问题
+        alert('代理配置命令已复制到剪贴板\n\n' +
+              '操作步骤：\n' +
+              '1. 按 Win+X\n' +
+              '2. 选择 "Windows PowerShell (管理员)"\n' +
+              '3. 按 Ctrl+V 粘贴\n' +
+              '4. 按回车运行\n\n' +
+              '就是这么简单！');
+    }, 300);
 }
