@@ -951,11 +951,8 @@ app.post('/api/monitor/copy-trigger', async (req, res) => {
         // 账户状态检查和处理
         let finalStatus = current_status;
 
-        // Yahoo邮箱特殊处理：跳过重新授权，直接开始监控
-        if (type === 'yahoo') {
-            console.log(`[监控触发] Yahoo账户 ${email} 跳过授权检查，直接开始监控`);
-            finalStatus = 'authorized';
-        } else if (current_status === 'pending' || current_status === 'reauth_required') {
+        // 只有Outlook邮箱才需要重新授权检查
+        if (type !== 'yahoo' && (current_status === 'pending' || current_status === 'reauth_required')) {
             console.log(`[监控触发] Outlook账户 ${email} 状态为 ${current_status}，将尝试重新授权`);
 
             // Outlook邮箱：尝试重新授权（刷新token）

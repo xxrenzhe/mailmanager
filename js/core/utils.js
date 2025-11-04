@@ -409,7 +409,9 @@ const Utils = {
             type: 'yahoo',
             // Yahoo邮箱使用IMAP，不需要OAuth相关字段
             client_id: '',
-            refresh_token: ''
+            refresh_token: '',
+            // Yahoo邮箱不需要授权，默认设置为已授权状态
+            status: 'authorized'
         };
 
         console.log(`[Parse-Yahoo] 解析成功:`, result);
