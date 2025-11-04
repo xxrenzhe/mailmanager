@@ -1147,9 +1147,9 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                     const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
                     const year = filterDate.getFullYear();
-                    // 使用Date对象而不是字符串格式，避免IMAP搜索参数错误
-                    const filterDateObj = new Date(timeFilter);
-                    searchCriteria = ['SINCE', filterDateObj];
+                    // 使用正确的IMAP日期格式字符串 (DD-MMM-YYYY)
+                    const dateString = `${day}-${month}-${year}`;
+                    searchCriteria = ['SINCE', dateString];
                 } else {
                     searchCriteria = ['ALL'];
                 }
@@ -1381,9 +1381,9 @@ async function fetchICloudEmails(email, password, timeFilter = null) {
                     const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][filterDate.getMonth()];
                     const year = filterDate.getFullYear();
-                    // 使用Date对象而不是字符串格式，避免IMAP搜索参数错误
-                    const filterDateObj = new Date(timeFilter);
-                    searchCriteria = ['SINCE', filterDateObj];
+                    // 使用正确的IMAP日期格式字符串 (DD-MMM-YYYY)
+                    const dateString = `${day}-${month}-${year}`;
+                    searchCriteria = ['SINCE', dateString];
                 } else {
                     searchCriteria = ['ALL'];
                 }
