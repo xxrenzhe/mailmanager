@@ -1489,15 +1489,6 @@ try {
     Write-Host "❌ 验证失败: $_" -ForegroundColor Red
 }
 
-# 刷新网络设置
-Write-Host "🔄 刷新网络设置..." -ForegroundColor Green
-try {
-    netsh winhttp import proxy source=ie
-    Write-Host "✅ 网络设置已刷新" -ForegroundColor Green
-} catch {
-    Write-Host "⚠️ 网络刷新失败: $_" -ForegroundColor Yellow
-}
-
 Write-Host "" -ForegroundColor White
 Write-Host "🎉 代理配置完成！" -ForegroundColor Green
 Write-Host "💡 请重启浏览器以使用新的代理设置" -ForegroundColor Cyan
