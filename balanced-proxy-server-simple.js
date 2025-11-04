@@ -768,7 +768,7 @@ app.post('/api/accounts/batch-import', async (req, res) => {
                     }
 
                     const processedAccountData = {
-                        id: 'email_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        id: frontendId, // 使用前端提供的ID，保持一致性
                         email: email,
                         type: accountType || 'outlook',
                         password: password || '',
