@@ -1229,9 +1229,32 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                                             console.log(`[Yahoo邮件解析] parsed.date:`, parsed.date);
                                             console.log(`[Yahoo邮件解析] parsed.messageId:`, parsed.messageId);
 
+                                            // 🎯 Yahoo邮件特殊处理：从HTML title标签提取发件人信息
+                                            let extractedSubject = parsed.subject;
+                                            if (!extractedSubject && (parsed.html || parsed.text)) {
+                                                const content = parsed.html || parsed.text;
+                                                console.log(`[Yahoo邮件主题] 尝试从邮件内容提取主题...`);
+
+                                                // 查找HTML title标签
+                                                const titleMatch = content.match(/<title[^>]*>([^<]+)<\/title>/i);
+                                                if (titleMatch) {
+                                                    extractedSubject = titleMatch[1].replace(/=\s*\n/g, '').trim(); // 清理邮件中的格式
+                                                    console.log(`[Yahoo邮件主题] 从HTML title提取到主题: "${extractedSubject}"`);
+                                                } else {
+                                                    // 备用方案：查找"Sign in to"模式
+                                                    const signInMatch = content.match(/sign in to ([^\s\n]+)/i);
+                                                    if (signInMatch) {
+                                                        extractedSubject = `Sign in to ${signInMatch[1]}`;
+                                                        console.log(`[Yahoo邮件主题] 从Sign in to模式提取到主题: "${extractedSubject}"`);
+                                                    } else {
+                                                        console.log(`[Yahoo邮件主题] 未能从邮件内容提取主题`);
+                                                    }
+                                                }
+                                            }
+
                                             const email = {
                                                 id: messageId,
-                                                Subject: parsed.subject || '(无主题)', // 统一使用大写Subject
+                                                Subject: extractedSubject || '(无主题)', // 优先使用提取的主题
                                                 Body: { // 统一使用嵌套Body结构
                                                     Content: parsed.text || parsed.html || ''
                                                 },
@@ -1246,7 +1269,7 @@ async function fetchYahooEmails(email, password, timeFilter = null) {
                                                 IsRead: attrs.flags.includes('\\Seen')
                                             };
 
-                                            console.log(`[Yahoo邮件解析] 构建后email.Subject: "${email.Subject}"`);
+                                            console.log(`[Yahoo邮件解析] 最终email.Subject: "${email.Subject}"`);
                                             console.log(`[Yahoo邮件解析] 构建后email.Body.Content长度: ${email.Body.Content.length}`);
 
                                             emails.push(email);
