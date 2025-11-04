@@ -859,21 +859,8 @@ async function configureSystemProxy() {
 
         if (!isEdge) {
             console.log('[DEBUG] 非Edge浏览器，显示不支持信息');
-            // 非Edge浏览器显示指导信息
-            Utils.showModal('浏览器不支持', `
-🚫 此功能仅支持 Microsoft Edge 浏览器
-
-📋 当前浏览器：${userAgent.split(' ').pop()}
-✅ 推荐浏览器：Microsoft Edge
-
-💡 使用方法：
-1. 请打开 Microsoft Edge 浏览器
-2. 访问此页面进行代理配置
-3. 享受一键配置的便利体验
-
-如需下载Edge浏览器，请访问：
-https://www.microsoft.com/edge
-            `);
+            // 非Edge浏览器显示简单提示
+            Utils.showNotification('此功能仅支持Microsoft Edge浏览器，请使用Edge访问此页面', 'warning');
             return;
         }
 
@@ -888,14 +875,8 @@ https://www.microsoft.com/edge
 
         if (result.success) {
             console.log('[DEBUG] Edge配置成功，显示成功状态');
-            showProxyStatus('success', 'Edge代理配置完成！');
-            Utils.showNotification('Edge代理配置成功！PowerShell窗口即将打开...', 'success');
-
-            // 延迟显示简化指导
-            setTimeout(() => {
-                console.log('[DEBUG] 显示Edge简化指导');
-                showEdgeSimpleGuide();
-            }, 1500);
+            showProxyStatus('success', '配置命令已复制到剪贴板！');
+            Utils.showNotification('配置命令已复制！请在PowerShell中粘贴执行', 'success');
 
         } else {
             console.log('[DEBUG] Edge配置失败:', result.error);
@@ -1339,102 +1320,7 @@ async function copyToClipboard(text) {
     }
 }
 
-// 显示智能执行指导
-async function showIntelligentExecutionGuide(result, isEdge) {
-    const guideContent = `
-🚀 智能代理配置执行指南
 
-✅ 第1步：命令已准备
-• 完整的PowerShell配置命令已复制到剪贴板
-• 命令包含所有必要的代理设置和凭据配置
-
-🔧 第2步：自动打开PowerShell
-• 系统将自动打开管理员权限的PowerShell窗口
-• 如果UAC提示，请点击"是"授权
-
-⌨️ 第3步：一键执行
-• 在PowerShell窗口中按 Ctrl+V 粘贴命令
-• 按回车键执行配置脚本
-
-📋 配置信息：
-• 代理服务器：${result.command.match(/代理服务器: ([^\\n]+)/)?.[1] || '未知'}
-• 配置方案：${isEdge ? 'Edge专用优化' : '通用浏览器方案'}
-• 预计执行时间：10-15秒
-
-🎯 执行特性：
-• 自动检测管理员权限
-• 智能配置系统代理和Edge设置
-• 自动添加代理凭据
-• 配置完成后自动启动浏览器验证
-
-⚡ 专业提示：
-• 整个过程只需要按 Ctrl+V 和回车键
-• 脚本会自动处理所有配置细节
-• 如遇问题，请查看PowerShell中的详细提示`;
-
-    // 显示模态框
-    Utils.showModal('🚀 智能代理配置执行指南', guideContent);
-
-    // 自动打开PowerShell（延迟2秒让用户看到指导）
-    setTimeout(() => {
-        openPowerShellAsAdmin();
-    }, 2000);
-
-    // 显示复制成功通知
-    Utils.showNotification('配置命令已复制到剪贴板！PowerShell窗口即将打开...', 'success');
-}
-
-// 自动打开管理员PowerShell
-function openPowerShellAsAdmin() {
-    try {
-        // 创建PowerShell自动执行文件
-        const autoExecScript = `# 自动打开PowerShell并等待用户粘贴命令
-Write-Host "🚀 MailManager 智能代理配置" -ForegroundColor Cyan
-Write-Host "" -ForegroundColor White
-Write-Host "📋 请按 Ctrl+V 粘贴配置命令，然后按回车执行" -ForegroundColor Yellow
-Write-Host "💡 提示：配置命令已复制到您的剪贴板" -ForegroundColor Green
-Write-Host "" -ForegroundColor White
-Write-Host "等待输入..." -ForegroundColor Gray`;
-
-        // 创建临时脚本文件
-        const scriptBlob = new Blob([autoExecScript], { type: 'text/plain' });
-        const scriptFile = new File([scriptBlob], "proxy-config-helper.ps1", { type: "text/plain" });
-
-        // 下载脚本文件
-        const scriptUrl = URL.createObjectURL(scriptFile);
-        const downloadLink = document.createElement('a');
-        downloadLink.href = scriptUrl;
-        downloadLink.download = scriptFile.name;
-        downloadLink.style.display = 'none';
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-        URL.revokeObjectURL(scriptUrl);
-
-        // 尝试直接打开PowerShell（管理员权限）
-        setTimeout(() => {
-            try {
-                // 使用powershell://协议尝试直接打开
-                const powerShellUrl = 'powershell://';
-                window.open(powerShellUrl, '_blank');
-
-                // 备选方案：使用msedge协议打开PowerShell
-                setTimeout(() => {
-                    const cmdUrl = 'msedge://shell:runas/user:administrator powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Write-Host \\"🚀 MailManager 代理配置\\" -ForegroundColor Cyan; Read-Host \\"按回车继续...\\""';
-                    window.open(cmdUrl, '_blank');
-                }, 1000);
-
-            } catch (error) {
-                console.log('直接打开PowerShell失败，用户需要手动打开', error);
-                Utils.showNotification('请手动打开PowerShell（管理员权限）并粘贴命令', 'info');
-            }
-        }, 1000);
-
-    } catch (error) {
-        console.error('打开PowerShell失败:', error);
-        Utils.showNotification('请手动打开管理员PowerShell并粘贴配置命令', 'warning');
-    }
-}
 
 // Edge浏览器专用一键代理配置（完全自动化版本）
 async function executeEdgeOneClickProxy(host, port, username, password) {
@@ -1498,13 +1384,10 @@ Write-Host "🔍 可以在 设置 → 网络和Internet → 代理 中查看配�
         setTimeout(async () => {
             const copySuccess = await copyToClipboard(autoCommand);
             if (copySuccess) {
-                Utils.showNotification('命令已复制！请按照弹窗中的说明执行', 'success');
+                Utils.showNotification('配置命令已复制！请打开PowerShell粘贴执行', 'success');
             } else {
                 Utils.showNotification('请手动复制命令到PowerShell执行', 'warning');
             }
-
-            // 显示配置说明弹窗
-            showProxyConfigurationGuide();
         }, 500);
 
         return {
@@ -1520,76 +1403,7 @@ Write-Host "🔍 可以在 设置 → 网络和Internet → 代理 中查看配�
     }
 }
 
-// 代理配置说明弹窗
-function showProxyConfigurationGuide() {
-    const guideContent = `
-🚀 代理配置说明指南
 
-✅ 第1步：打开PowerShell
-• 按 Win+X 键，选择"Windows PowerShell"
-• 或者按 Win+R，输入"powershell"，按回车
-• 无需管理员权限，普通PowerShell即可
-
-✅ 第2步：粘贴执行命令
-• 在PowerShell窗口中右键点击
-• 选择"粘贴"（或按Ctrl+V）
-• 按回车键执行配置脚本
-
-✅ 第3步：等待配置完成
-• 脚本会自动完成以下配置：
-  ✓ 系统代理设置
-  ✓ 代理认证凭据保存
-  ✓ 配置验证检查
-• 看到"🎉 代理配置完成！"表示成功
-
-✅ 第4步：验证代理配置
-• 点击"验证IP地址"按钮
-• 如果需要输入用户名和密码，请输入代理的认证信息
-• 如果能正常打开验证页面，说明代理配置成功
-
-🔍 验证配置成功的标志：
-• ✅ 点击"验证IP地址"能正常打开页面
-• ✅ 访问其他网站也能正常使用
-• ✅ 浏览器地址栏显示代理服务器的IP地址
-• ✅ 不需要重复输入用户名和密码（凭据已自动保存）
-
-💡 常见问题解决：
-• 如果验证时需要输入用户名密码：这是正常的，输入代理的认证信息即可
-• 如果验证页面打不开：检查PowerShell脚本是否执行成功
-• 如果验证失败：重新执行PowerShell脚本，确保看到"🎉 代理配置完成！"
-• 如果每次访问都要输密码：可能需要重启浏览器让凭据生效
-
-📞 配置完成后，你的浏览器将：
-• 通过代理服务器访问所有网站
-• 自动使用保存的认证凭据（首次输入后）
-• 在验证页面显示代理服务器的真实IP地址
-• 享受安全稳定的代理服务`;
-
-    try {
-        Utils.showModal('🚀 代理配置说明指南', guideContent);
-    } catch (modalError) {
-        console.log('[DEBUG] 模态框显示失败，使用alert:', modalError);
-        alert(guideContent);
-    }
-}
-
-// 手动指导备选方案
-function showManualInstructions(host, port) {
-    const manualCommand = `# 手动代理配置
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyEnable" -Value 1 -Force
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name "ProxyServer" -Value "${host}:${port}" -Force
-Write-Host "代理配置完成！" -ForegroundColor Green`;
-
-    copyToClipboard(manualCommand);
-
-    setTimeout(() => {
-        alert('自动执行失败，请手动操作：\n\n' +
-              '1. 按Win+X选择"Windows PowerShell (管理员)"\n' +
-              '2. 按Ctrl+V粘贴命令\n' +
-              '3. 按回车执行\n\n' +
-              '命令已复制到剪贴板！');
-    }, 500);
-}
 
 // 生成Edge专用简化PowerShell命令
 function generateEdgeSimpleCommand(host, port, username, password) {
@@ -1638,52 +1452,3 @@ Write-Host "按任意键退出..." -ForegroundColor Gray
 Read-Host`;
 }
 
-// 显示Edge简化执行指导
-function showEdgeSimpleGuide() {
-    const guideContent = `
-🚀 Edge浏览器一键代理配置执行指南
-
-✅ 第1步：PowerShell窗口已打开
-• 系统已自动打开管理员权限的PowerShell窗口
-• 如果看到UAC提示，请点击"是"授权
-
-⌨️ 第2步：自动粘贴命令
-• 命令已自动复制到剪贴板
-• 在PowerShell窗口中按 Ctrl+V 粘贴命令
-
-🚀 第3步：执行配置
-• 按回车键执行配置脚本
-• 等待配置完成（约10秒）
-
-🎯 配置完成后将自动：
-• 设置Windows系统代理
-• 配置Edge专用代理设置
-• 添加代理凭据
-• 启动Edge浏览器验证IP
-
-💡 小提示：
-• 整个过程只需：Ctrl+V + 回车
-• 配置脚本会自动处理所有细节
-• 如遇问题，请查看PowerShell中的提示`;
-
-    // 直接执行配置，不显示说明框
-    console.log('[DEBUG] 直接执行Edge代理配置，跳过说明框');
-
-    // 尝试自动打开PowerShell（管理员权限）
-    setTimeout(() => {
-        openEdgePowerShellAsAdmin();
-    }, 500);
-}
-
-// 自动化PowerShell指导
-function openEdgePowerShellAsAdmin() {
-    console.log('[DEBUG] 启动自动化代理配置流程');
-
-    // 简化通知，告知用户自动化流程开始
-    setTimeout(() => {
-        Utils.showNotification('🚀 代理配置命令已生成！正在复制到剪贴板...', 'success');
-
-        // 简短的状态提示
-        console.log('[DEBUG] 自动化配置流程进行中...');
-    }, 200);
-}
