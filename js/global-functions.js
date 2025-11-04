@@ -1534,9 +1534,10 @@ function openEdgePowerShellAsAdmin() {
     setTimeout(() => {
         Utils.showNotification('配置命令已复制！请按Win+X，选择"Windows PowerShell (管理员)"，然后按Ctrl+V粘贴命令并回车', 'success');
 
-        // 同时显示更详细的指导
+        // 同时显示更详细的指导（使用alert避免showModal问题）
         console.log('[DEBUG] 显示PowerShell打开指导');
-        Utils.showModal('🚀 PowerShell操作指导', `
+        try {
+            Utils.showModal('🚀 PowerShell操作指导', `
 📋 **下一步操作**：
 
 1. 按 **Win + X** 键
@@ -1547,6 +1548,15 @@ function openEdgePowerShellAsAdmin() {
 ✨ **命令已自动复制到剪贴板**
 
 💡 **提示**：如果UAC提示，请点击"是"允许管理员权限
-        `);
+            `);
+        } catch (error) {
+            console.log('[DEBUG] showModal失败，使用alert备选方案:', error);
+            alert('🚀 PowerShell操作指导\n\n' +
+                '1. 按 Win + X 键\n' +
+                '2. 选择 "Windows PowerShell (管理员)"\n' +
+                '3. 按 Ctrl + V 粘贴命令\n' +
+                '4. 按回车执行配置\n\n' +
+                '命令已自动复制到剪贴板！');
+        }
     }, 500);
 }
