@@ -1442,8 +1442,15 @@ Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Int
 
 # 配置Edge专用代理
 Write-Host "🔧 配置Edge浏览器代理..." -ForegroundColor Green
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyEnable" -Value 1 -Force
-Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer" -Name "ProxyServer" -Value $proxyServer -Force
+$edgePath = "HKCU:\\Software\\Microsoft\\Edge\\ProxyServer"
+if (Test-Path $edgePath) {
+    Set-ItemProperty -Path $edgePath -Name "ProxyEnable" -Value 1 -Force
+    Set-ItemProperty -Path $edgePath -Name "ProxyServer" -Value $proxyServer -Force
+    Write-Host "✅ Edge代理配置成功" -ForegroundColor Green
+} else {
+    Write-Host "⚠️ Edge代理注册表路径不存在，跳过Edge专用配置" -ForegroundColor Yellow
+    Write-Host "💡 Edge会自动使用系统代理设置" -ForegroundColor Cyan
+}
 
 # 配置代理凭据
 Write-Host "🔐 配置代理认证..." -ForegroundColor Green
