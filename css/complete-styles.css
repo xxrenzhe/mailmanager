@@ -1013,9 +1013,7 @@ body {
     align-items: center;
     justify-content: center;
     padding: 0 20px;
-    min-width: 170px;  /* 确保容器不会太小 */
-    max-width: 170px;  /* 防止过大 */
-    width: 170px;
+    /* 移除固定宽高限制，让容器根据内容自适应 */
 }
 
 .system-info {
@@ -1025,78 +1023,30 @@ body {
     justify-content: flex-end;
 }
 
-/* 5x3 网格表格样式 - 增强兼容性 */
+/* 5x3 网格表格样式 - CSS Grid方案 */
 .grid-5x3 {
-    display: -ms-grid;  /* IE 10 */
-    display: grid;     /* 现代浏览器 */
-    width: 170px;      /* 5*30 + 4*4 + 2*10 = 170px 固定宽度 */
-    height: 110px;     /* 3*30 + 2*4 + 2*10 = 110px 固定高度 */
-    -ms-grid-columns: 30px 4px 30px 4px 30px 4px 30px 4px 30px;  /* IE 10 */
-    -ms-grid-rows: 30px 4px 30px 4px 30px;                        /* IE 10 */
-    grid-template-columns: repeat(5, 30px);
-    grid-template-rows: repeat(3, 30px);
-    gap: 4px;
-    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(5, 32px);
+    grid-template-rows: repeat(3, 32px);
+    gap: 6px;
+    padding: 10px;     /* 内边距 */
     background: linear-gradient(135deg, #ffffff 0%, #f9fafb 100%);
     border-radius: 10px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     border: 1px solid #e5e7eb;
     box-sizing: border-box;
     flex-shrink: 0;  /* 防止flex压缩 */
+    /* 容器会自动计算合适的大小：5*32 + 4*6 + 2*10 + 2*1(border) */
 }
 
 .grid-cell {
     background: #e5e7eb;
     border-radius: 4px;
     transition: all 0.3s ease;
-    position: relative;
     overflow: hidden;
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     box-sizing: border-box;
-}
-
-/* IE 10 网格位置定义 */
-.grid-cell:nth-child(1) { -ms-grid-column: 1; -ms-grid-row: 1; }
-.grid-cell:nth-child(2) { -ms-grid-column: 2; -ms-grid-row: 1; }
-.grid-cell:nth-child(3) { -ms-grid-column: 3; -ms-grid-row: 1; }
-.grid-cell:nth-child(4) { -ms-grid-column: 4; -ms-grid-row: 1; }
-.grid-cell:nth-child(5) { -ms-grid-column: 5; -ms-grid-row: 1; }
-.grid-cell:nth-child(6) { -ms-grid-column: 1; -ms-grid-row: 3; }
-.grid-cell:nth-child(7) { -ms-grid-column: 2; -ms-grid-row: 3; }
-.grid-cell:nth-child(8) { -ms-grid-column: 3; -ms-grid-row: 3; }
-.grid-cell:nth-child(9) { -ms-grid-column: 4; -ms-grid-row: 3; }
-.grid-cell:nth-child(10) { -ms-grid-column: 5; -ms-grid-row: 3; }
-.grid-cell:nth-child(11) { -ms-grid-column: 1; -ms-grid-row: 5; }
-.grid-cell:nth-child(12) { -ms-grid-column: 2; -ms-grid-row: 5; }
-.grid-cell:nth-child(13) { -ms-grid-column: 3; -ms-grid-row: 5; }
-.grid-cell:nth-child(14) { -ms-grid-column: 4; -ms-grid-row: 5; }
-.grid-cell:nth-child(15) { -ms-grid-column: 5; -ms-grid-row: 5; }
-
-/* Flexbox 回退布局 - 如果grid不支持 */
-@supports not (display: grid) {
-    .grid-5x3 {
-        display: flex;
-        flex-wrap: wrap;
-        width: 170px;
-        height: 110px;
-        align-content: space-between;
-    }
-
-    .grid-cell {
-        width: 30px;
-        height: 30px;
-        margin: 0;
-        flex: 0 0 auto;
-    }
-
-    .grid-cell:nth-child(n+6) {
-        margin-top: 4px;
-    }
-
-    .grid-cell:nth-child(n+11) {
-        margin-top: 4px;
-    }
 }
 
 .grid-cell:hover {
@@ -1210,12 +1160,32 @@ body {
     }
 }
 
+/* 响应式设计 - Flexbox优化版本 */
+@media (max-width: 1024px) {
+    .main-layout-row {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .stats-section,
+    .grid-container,
+    .system-info {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
 @media (max-width: 640px) {
     .grid-5x3 {
-        grid-template-columns: repeat(5, 26px);
-        grid-template-rows: repeat(3, 26px);
-        gap: 3px;
+        width: 154px;      /* 5*26 + 4*3 + 2*8 = 154px */
+        height: 100px;     /* 3*26 + 2*3 + 2*8 = 100px */
         padding: 8px;
+    }
+
+    .grid-cell {
+        width: 26px;
+        height: 26px;
+        margin: 0 3px 3px 0;
     }
 
     .grid-letter {
@@ -1230,10 +1200,15 @@ body {
 
 @media (max-width: 480px) {
     .grid-5x3 {
-        grid-template-columns: repeat(5, 22px);
-        grid-template-rows: repeat(3, 22px);
-        gap: 2px;
+        width: 138px;      /* 5*22 + 4*2 + 2*6 = 138px */
+        height: 88px;      /* 3*22 + 2*2 + 2*6 = 88px */
         padding: 6px;
+    }
+
+    .grid-cell {
+        width: 22px;
+        height: 22px;
+        margin: 0 2px 2px 0;
     }
 
     .grid-letter {
