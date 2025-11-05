@@ -1029,6 +1029,8 @@ body {
     grid-template-columns: repeat(5, 32px);
     grid-template-rows: repeat(3, 32px);
     gap: 6px;
+    width: 190px;      /* 5*32 + 4*6 + 2*10 + 2*1 = 190px 固定宽度 */
+    height: 130px;     /* 3*32 + 2*6 + 2*10 + 2*1 = 130px 固定高度 */
     padding: 10px;     /* 内边距 */
     background: linear-gradient(135deg, #ffffff 0%, #f9fafb 100%);
     border-radius: 10px;
@@ -1036,7 +1038,8 @@ body {
     border: 1px solid #e5e7eb;
     box-sizing: border-box;
     flex-shrink: 0;  /* 防止flex压缩 */
-    /* 容器会自动计算合适的大小：5*32 + 4*6 + 2*10 + 2*1(border) */
+    /* 调试样式 - 生产环境可见 */
+    outline: 2px solid red !important;
 }
 
 .grid-cell {
