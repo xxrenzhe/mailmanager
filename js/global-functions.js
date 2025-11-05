@@ -796,9 +796,7 @@ function displayProxyData(proxyData) {
     const elements = {
         proxyHost: proxyData.host,
         proxyPort: proxyData.port,
-        proxyUsername: proxyData.username,
-        proxyPassword: proxyData.password,
-        fullProxyAddress: `${proxyData.host}:${proxyData.port}:${proxyData.username}:${proxyData.password}`
+        proxyUsername: proxyData.username
     };
 
     Object.keys(elements).forEach(id => {
@@ -807,6 +805,13 @@ function displayProxyData(proxyData) {
             element.textContent = elements[id];
         }
     });
+
+    // 特殊处理密码显示：显示固定星号，真实密码存储在data属性中
+    const passwordElement = document.getElementById('proxyPassword');
+    if (passwordElement) {
+        passwordElement.textContent = '********'; // 固定8个星号
+        passwordElement.setAttribute('data-password', proxyData.password); // 存储真实密码
+    }
 
     // 持久化存储认证信息到localStorage
     saveProxyAuthToCache(proxyData);
@@ -819,6 +824,21 @@ function displayProxyData(proxyData) {
     actionsSection.classList.remove('hidden');
 }
 
+// 复制代理密码（从data属性获取真实密码）
+function copyProxyPassword() {
+    const passwordElement = document.getElementById('proxyPassword');
+    if (passwordElement) {
+        const realPassword = passwordElement.getAttribute('data-password');
+        if (realPassword) {
+            copyToClipboard(realPassword);
+            Utils.showNotification('密码已复制到剪贴板', 'success');
+        } else {
+            Utils.showNotification('未找到密码信息', 'error');
+        }
+    } else {
+        Utils.showNotification('密码元素未找到', 'error');
+    }
+}
 
 // 保存代理认证信息到缓存
 function saveProxyAuthToCache(proxyData) {
