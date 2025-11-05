@@ -802,43 +802,11 @@ function displayProxyData(proxyData) {
     // 持久化存储认证信息到localStorage
     saveProxyAuthToCache(proxyData);
 
-    // 填充紧急认证信息区域（网络中断时使用）
-    fillEmergencyAuthSection(proxyData);
-
     // 显示结果区域和操作按钮
     resultSection.classList.remove('hidden');
     actionsSection.classList.remove('hidden');
 }
 
-// 填充紧急认证信息区域（网络中断时使用）
-function fillEmergencyAuthSection(proxyData) {
-    try {
-        // 更新紧急区域的4个独立字段
-        const emergencyElements = {
-            'emergencyHost': proxyData.host,
-            'emergencyPort': proxyData.port.toString(),
-            'emergencyUsername': proxyData.username,
-            'emergencyPassword': proxyData.password
-        };
-
-        Object.keys(emergencyElements).forEach(id => {
-            const element = document.getElementById(id);
-            if (element) {
-                element.textContent = emergencyElements[id];
-            }
-        });
-
-        // 显示紧急区域
-        const emergencySection = document.getElementById('emergencyAuthSection');
-        if (emergencySection) {
-            emergencySection.classList.remove('hidden');
-        }
-
-        console.log('[DEBUG] 紧急认证信息区域已填充');
-    } catch (error) {
-        console.error('[DEBUG] 填充紧急认证信息失败:', error);
-    }
-}
 
 // 保存代理认证信息到缓存
 function saveProxyAuthToCache(proxyData) {
@@ -893,15 +861,7 @@ function loadCachedAuthInfo() {
                 }
             });
 
-            // 填充紧急认证信息区域
-            const proxyData = {
-                host: authData.host,
-                port: authData.port,
-                username: authData.username,
-                password: authData.password
-            };
-            fillEmergencyAuthSection(proxyData);
-
+        
             // 显示结果区域
             const resultSection = document.getElementById('proxyResultSection');
             const actionsSection = document.getElementById('proxyActionsSection');
@@ -919,13 +879,11 @@ function clearCachedAuthInfo() {
         localStorage.removeItem('mailmanager_proxy_auth');
         console.log('[DEBUG] 已清除缓存的认证信息');
 
-        // 隐藏结果区域和紧急区域
+        // 隐藏结果区域
         const resultSection = document.getElementById('proxyResultSection');
         const actionsSection = document.getElementById('proxyActionsSection');
-        const emergencySection = document.getElementById('emergencyAuthSection');
         if (resultSection) resultSection.classList.add('hidden');
         if (actionsSection) actionsSection.classList.add('hidden');
-        if (emergencySection) emergencySection.classList.add('hidden');
 
         Utils.showNotification('认证信息缓存已清除', 'success');
     } catch (error) {
@@ -1006,7 +964,7 @@ async function configureSystemProxy() {
             console.log('[DEBUG] Edge配置成功，显示成功状态');
             showProxyStatus('success', '配置命令已复制到剪贴板！');
 
-            Utils.showNotification('✅ 配置命令已复制！认证信息已保存到本地缓存，网络中断时仍可查看', 'success');
+            Utils.showNotification('✅ 配置命令已复制到剪贴板！请打开PowerShell手动粘贴执行！', 'success');
 
         } else {
             console.log('[DEBUG] Edge配置失败:', result.error);
