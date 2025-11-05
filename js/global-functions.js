@@ -588,6 +588,15 @@ function showProxyModal() {
         modal.style.display = 'flex';
         // 重置弹窗状态
         resetProxyModal();
+
+        // 尝试从localStorage加载历史代理数据
+        setTimeout(() => {
+            const cachedProxyData = loadProxyDataFromStorage();
+            if (cachedProxyData) {
+                console.log('[DEBUG] 发现历史代理数据，恢复显示');
+                displayProxyData(cachedProxyData);
+            }
+        }, 100); // 延迟100ms确保DOM重置完成
     }
 }
 
@@ -802,6 +811,9 @@ function displayProxyData(proxyData) {
     // 持久化存储认证信息到localStorage
     saveProxyAuthToCache(proxyData);
 
+    // 保存代理数据到localStorage用于下次打开弹窗时恢复
+    saveProxyDataToStorage(proxyData);
+
     // 显示结果区域和操作按钮
     resultSection.classList.remove('hidden');
     actionsSection.classList.remove('hidden');
@@ -888,6 +900,41 @@ function clearCachedAuthInfo() {
         Utils.showNotification('认证信息缓存已清除', 'success');
     } catch (error) {
         console.error('[DEBUG] 清除缓存失败:', error);
+    }
+}
+
+// ========== 代理IP数据持久化存储 ==========
+
+// 保存代理数据到localStorage
+function saveProxyDataToStorage(proxyData) {
+    try {
+        const dataWithTimestamp = {
+            ...proxyData,
+            timestamp: new Date().toISOString(),
+            fullAddress: `${proxyData.host}:${proxyData.port}:${proxyData.username}:${proxyData.password}`
+        };
+
+        localStorage.setItem('mailmanager_proxy_data', JSON.stringify(dataWithTimestamp));
+        console.log('[DEBUG] 代理数据已保存到localStorage');
+    } catch (error) {
+        console.error('[DEBUG] 保存代理数据失败:', error);
+    }
+}
+
+// 从localStorage加载代理数据
+function loadProxyDataFromStorage() {
+    try {
+        const cached = localStorage.getItem('mailmanager_proxy_data');
+        if (cached) {
+            const proxyData = JSON.parse(cached);
+            console.log('[DEBUG] 从localStorage加载代理数据成功');
+            return proxyData;
+        }
+        console.log('[DEBUG] localStorage中没有找到代理数据');
+        return null;
+    } catch (error) {
+        console.error('[DEBUG] 加载代理数据失败:', error);
+        return null;
     }
 }
 
