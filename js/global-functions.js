@@ -962,7 +962,7 @@ async function configureSystemProxy() {
 
         if (result.success) {
             console.log('[DEBUG] Edge配置成功，显示成功状态');
-            showProxyStatus('success', '配置命令已复制到剪贴板！');
+            showProxyStatus('success', '配置命令已复制到剪贴板！请打开Powershell粘贴执行～');
 
             Utils.showNotification('✅ 配置命令已复制到剪贴板！请打开PowerShell手动粘贴执行！', 'success');
 
