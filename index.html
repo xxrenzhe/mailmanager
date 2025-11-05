@@ -43,30 +43,61 @@
             </div>
         </div>
 
-        <!-- 统计信息 -->
-        <div class="stats-row" style="position: relative;">
-            <div class="stat-item">
-                <div class="stat-number" id="totalAccounts">0</div>
-                <div class="stat-label">总账户数</div>
+        <!-- 水平布局容器：指标栏、4x4表格、核心功能 -->
+        <div class="main-layout-row" style="display: flex; align-items: stretch; gap: 30px; margin-bottom: 20px;">
+
+            <!-- 指标栏 -->
+            <div class="stats-section">
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <div class="stat-number" id="totalAccounts">0</div>
+                        <div class="stat-label">总账户数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number text-green-600" id="authorizedCount">0</div>
+                        <div class="stat-label">已授权</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number text-yellow-600" id="pendingCount">0</div>
+                        <div class="stat-label">待授权</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number text-red-600" id="failedCount">0</div>
+                        <div class="stat-label">失败</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number text-purple-600" id="monitoringCount">0</div>
+                        <div class="stat-label">监控中</div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-number text-green-600" id="authorizedCount">0</div>
-                <div class="stat-label">已授权</div>
+
+            <!-- 5x3 网格表格 -->
+            <div class="grid-container">
+                <div class="grid-5x3">
+                    <div class="grid-cell special-cell cell-j" onclick="window.open('https://pplx.ai/ireneheftm57465', '_blank')">
+                        <span class="grid-letter">J</span>
+                    </div>
+                    <div class="grid-cell special-cell cell-w" onclick="window.open('https://pplx.ai/windsnow6624791', '_blank')">
+                        <span class="grid-letter">W</span>
+                    </div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"></div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-number text-yellow-600" id="pendingCount">0</div>
-                <div class="stat-label">待授权</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-number text-red-600" id="failedCount">0</div>
-                <div class="stat-label">失败</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-number text-purple-600" id="monitoringCount">0</div>
-                <div class="stat-label">监控中</div>
-            </div>
-            <!-- 系统功能和安全说明 - 在统计行右侧空白处 -->
-            <div class="system-info" style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); max-width: 600px;">
+
+            <!-- 核心功能和数据安全 -->
+            <div class="system-info">
                 <div style="display: flex; gap: 30px;">
                     <!-- 核心功能 -->
                     <div>
@@ -75,9 +106,9 @@
                             <span style="font-weight: 600;">核心功能:</span>
                         </div>
                         <div style="font-size: 14px; color: #6b7280; line-height: 1.5; margin-left: 22px;">
-                            <div>• 一键复制邮箱，自动监控更新验证码</div>
-                            <div>• 一键复制验证码，快速完成验证</div>
-                            <div>• 智能时间追踪，掌握邮箱活跃状态</div>
+                            <div>• 一键复制邮箱和验证码</div>
+                            <div>• 实时监控验证码</div>
+                            <div>• 智能追踪邮箱状态</div>
                         </div>
                     </div>
 
@@ -88,9 +119,8 @@
                             <span style="font-weight: 600;">数据安全:</span>
                         </div>
                         <div style="font-size: 14px; color: #6b7280; line-height: 1.5; margin-left: 22px;">
-                            <div>• 本地存储，数据仅保存在浏览器</div>
-                            <div>• 加密保护，敏感信息安全存储</div>
-                            <div>• 隐私安全，绝不上传任何服务器</div>
+                            <div>• 浏览器本地存储</div>
+                            <div>• 数据绝不上传服务器</div>
                         </div>
                     </div>
                 </div>
