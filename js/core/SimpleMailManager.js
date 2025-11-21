@@ -1042,6 +1042,10 @@ class SimpleMailManager {
                                     class="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition text-base">
                                 验证码
                             </button>
+                            <button onclick="showHistoryEmailsModal('${account.id}')"
+                                    class="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded transition text-base">
+                                <i class="fas fa-history mr-1"></i>历史
+                            </button>
                             <button onclick="deleteAccountConfirm('${account.id}')"
                                     class="px-2 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded transition text-base">
                                 删除

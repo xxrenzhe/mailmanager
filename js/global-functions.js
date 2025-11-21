@@ -1607,3 +1607,409 @@ Write-Host "按任意键退出..." -ForegroundColor Gray
 Read-Host`;
 }
 
+// ==================== 历史邮件查看功能 ====================
+
+let currentHistoryEmails = []; // 存储当前加载的历史邮件
+
+// 显示历史邮件弹窗
+async function showHistoryEmailsModal(accountId) {
+    console.log('[历史邮件] 点击历史按钮，账户ID:', accountId);
+
+    if (!window.manager) {
+        console.error('[历史邮件] 错误：系统未初始化');
+        Utils.showNotification('系统未初始化', 'error');
+        return;
+    }
+
+    console.log('[历史邮件] window.manager存在，账户数量:', window.manager.accounts.length);
+
+    const account = window.manager.accounts.find(acc => acc.id === accountId);
+    if (!account) {
+        console.error('[历史邮件] 错误：账户不存在', accountId);
+        Utils.showNotification('账户不存在', 'error');
+        return;
+    }
+
+    console.log('[历史邮件] 找到账户:', account.email, 'type:', account.type);
+
+    // 显示弹窗 - 使用!important强制显示
+    const modal = document.getElementById('historyEmailsModal');
+    console.log('[历史邮件] 模态框元素:', modal ? '存在' : '不存在');
+
+    if (modal) {
+        // 移除所有classes，只依赖inline styles
+        modal.className = '';
+
+        // 将modal移到body最外层，避免父元素影响（修复显示问题）
+        if (modal.parentElement !== document.body) {
+            console.log('[历史邮件] 移动modal到body最外层');
+            document.body.appendChild(modal);
+        }
+
+        // 使用setProperty和!important强制显示（覆盖所有CSS规则）
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('z-index', '9999', 'important');  // 使用超高z-index
+        modal.style.setProperty('position', 'fixed', 'important');
+        modal.style.setProperty('top', '0px', 'important');
+        modal.style.setProperty('left', '0px', 'important');
+        modal.style.setProperty('right', '0px', 'important');
+        modal.style.setProperty('bottom', '0px', 'important');
+        modal.style.setProperty('width', '100vw', 'important');  // 明确设置宽度
+        modal.style.setProperty('height', '100vh', 'important');  // 明确设置高度
+        modal.style.setProperty('background-color', 'rgba(0, 0, 0, 0.5)', 'important');
+        modal.style.setProperty('align-items', 'center', 'important');
+        modal.style.setProperty('justify-content', 'center', 'important');
+        modal.style.setProperty('overflow', 'auto', 'important');
+
+        // 给内部白色容器设置基础样式
+        const modalContent = modal.querySelector('.bg-white');
+        if (modalContent) {
+            modalContent.style.setProperty('background-color', 'white', 'important');
+        }
+
+        console.log('[历史邮件] 模态框已显示');
+    } else {
+        console.error('[历史邮件] 错误：找不到模态框元素 #historyEmailsModal');
+        return;
+    }
+
+    // 显示账户信息
+    const accountInfo = document.getElementById('historyEmailAccountInfo');
+    if (accountInfo) {
+        accountInfo.textContent = `(${account.email})`;
+    }
+
+    // 显示加载状态
+    console.log('[历史邮件] 设置加载状态');
+    showHistoryEmailsState('loading');
+
+    try {
+        // 【方案1】数据验证和补全：确保账户信息完整
+        // 1. 验证必需字段
+        if (!account.email) {
+            throw new Error('账户缺少邮箱地址');
+        }
+
+        // 2. 补全 type 字段（兼容旧数据）
+        let accountType = account.type;
+        if (!accountType) {
+            // 根据凭证类型推断
+            if (account.password && !account.refresh_token) {
+                // 有密码但没有refresh_token，可能是Yahoo或iCloud
+                // 根据邮箱后缀判断
+                if (account.email.toLowerCase().includes('@yahoo.')) {
+                    accountType = 'yahoo';
+                } else if (account.email.toLowerCase().includes('@icloud.com') ||
+                           account.email.toLowerCase().includes('@me.com')) {
+                    accountType = 'icloud';
+                } else {
+                    accountType = 'yahoo'; // 默认为yahoo
+                }
+            } else if (account.refresh_token && account.client_id) {
+                // 有refresh_token和client_id，是Outlook
+                accountType = 'outlook';
+            } else {
+                // 默认为outlook
+                accountType = 'outlook';
+            }
+            console.log(`[历史邮件] 自动推断账户类型: ${account.email} -> ${accountType}`);
+        }
+
+        // 3. 验证类型特定的凭证
+        if (accountType === 'yahoo' || accountType === 'icloud') {
+            if (!account.password) {
+                throw new Error(`${accountType === 'yahoo' ? 'Yahoo' : 'iCloud'}邮箱缺少密码`);
+            }
+        } else if (accountType === 'outlook') {
+            if (!account.refresh_token || !account.client_id) {
+                throw new Error('Outlook邮箱缺少授权信息(refresh_token/client_id)');
+            }
+        }
+
+        // 调用后端API获取历史邮件
+        // 从localStorage传递账户凭证（因为后端是无状态的）
+        const response = await fetch(`/api/accounts/${accountId}/history-emails`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sessionId: window.manager.sessionId,
+                account: {
+                    id: account.id,
+                    email: account.email,
+                    type: accountType,  // 使用补全后的type
+                    password: account.password || '',  // Yahoo/iCloud需要
+                    refresh_token: account.refresh_token || '',  // Outlook需要
+                    client_id: account.client_id || ''  // Outlook需要
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '获取历史邮件失败');
+        }
+
+        const result = await response.json();
+
+        if (result.success && result.emails) {
+            currentHistoryEmails = result.emails;
+
+            if (currentHistoryEmails.length === 0) {
+                showHistoryEmailsState('empty');
+            } else {
+                showHistoryEmailsState('content');
+                renderHistoryEmailsList(currentHistoryEmails);
+            }
+        } else {
+            throw new Error(result.error || '获取历史邮件失败');
+        }
+
+    } catch (error) {
+        console.error('获取历史邮件失败:', error);
+        showHistoryEmailsState('error');
+        const errorMessage = document.getElementById('historyEmailsErrorMessage');
+        if (errorMessage) {
+            errorMessage.textContent = `加载失败: ${error.message}`;
+        }
+        Utils.showNotification(`获取历史邮件失败: ${error.message}`, 'error');
+    }
+}
+
+// 隐藏历史邮件弹窗
+function hideHistoryEmailsModal() {
+    const modal = document.getElementById('historyEmailsModal');
+    if (modal) {
+        // 添加隐藏类
+        modal.classList.add('modal-hidden', 'hidden');
+        modal.classList.remove('flex');
+
+        // 使用setProperty和!important强制隐藏（与显示方式保持一致）
+        modal.style.setProperty('display', 'none', 'important');
+        modal.style.setProperty('visibility', 'hidden', 'important');
+        modal.style.setProperty('opacity', '0', 'important');
+    }
+
+    // 重置状态
+    currentHistoryEmails = [];
+    showHistoryEmailsState('loading');
+
+    // 清空列表和详情
+    const emailsList = document.getElementById('historyEmailsList');
+    if (emailsList) {
+        emailsList.innerHTML = '';
+    }
+
+    const emailDetail = document.getElementById('historyEmailDetail');
+    const noSelection = document.getElementById('historyEmailNoSelection');
+    if (emailDetail) emailDetail.classList.add('hidden');
+    if (noSelection) noSelection.classList.remove('hidden');
+}
+
+// 显示不同的邮件状态
+function showHistoryEmailsState(state) {
+    console.log('[历史邮件] 设置状态:', state);
+
+    const loading = document.getElementById('historyEmailsLoading');
+    const empty = document.getElementById('historyEmailsEmpty');
+    const error = document.getElementById('historyEmailsError');
+    const content = document.getElementById('historyEmailsContent');
+
+    // 隐藏所有状态
+    if (loading) loading.classList.add('hidden');
+    if (empty) empty.classList.add('hidden');
+    if (error) error.classList.add('hidden');
+    if (content) content.classList.add('hidden');
+
+    // 显示对应状态
+    if (state === 'loading' && loading) {
+        loading.classList.remove('hidden');
+    } else if (state === 'empty' && empty) {
+        empty.classList.remove('hidden');
+    } else if (state === 'error' && error) {
+        error.classList.remove('hidden');
+    } else if (state === 'content' && content) {
+        content.classList.remove('hidden');
+        content.classList.add('flex');
+    }
+}
+
+// 渲染历史邮件列表
+function renderHistoryEmailsList(emails) {
+    const emailsList = document.getElementById('historyEmailsList');
+    const emailsCount = document.getElementById('historyEmailsCount');
+
+    if (!emailsList) return;
+
+    // 更新邮件数量
+    if (emailsCount) {
+        emailsCount.textContent = emails.length;
+    }
+
+    // 清空现有列表
+    emailsList.innerHTML = '';
+
+    // 渲染每封邮件
+    emails.forEach((email, index) => {
+        const emailItem = document.createElement('div');
+        emailItem.className = 'p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-blue-50 transition';
+        emailItem.onclick = () => selectHistoryEmail(index);
+
+        // 提取发件人信息
+        const fromName = email.From?.EmailAddress?.Name || '';
+        const fromAddress = email.From?.EmailAddress?.Address || '未知发件人';
+        const displayFrom = fromName || fromAddress;
+
+        // 格式化时间
+        const receivedTime = email.receivedDateTime ?
+            new Date(email.receivedDateTime).toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            }) : '';
+
+        emailItem.innerHTML = `
+            <div class="flex items-start justify-between mb-1">
+                <div class="font-medium text-gray-900 text-sm truncate flex-1">
+                    ${Utils.escapeHtml(displayFrom)}
+                </div>
+                <div class="text-xs text-gray-500 ml-2 flex-shrink-0">
+                    ${receivedTime}
+                </div>
+            </div>
+            <div class="text-sm text-gray-600 truncate">
+                ${Utils.escapeHtml(email.Subject || '(无主题)')}
+            </div>
+        `;
+
+        emailsList.appendChild(emailItem);
+    });
+}
+
+// 选择并显示邮件详情
+function selectHistoryEmail(index) {
+    if (index < 0 || index >= currentHistoryEmails.length) return;
+
+    const email = currentHistoryEmails[index];
+
+    // 高亮选中的邮件项
+    const emailsList = document.getElementById('historyEmailsList');
+    if (emailsList) {
+        const items = emailsList.children;
+        for (let i = 0; i < items.length; i++) {
+            if (i === index) {
+                items[i].classList.add('bg-blue-100', 'border-blue-500');
+                items[i].classList.remove('border-gray-200');
+            } else {
+                items[i].classList.remove('bg-blue-100', 'border-blue-500');
+                items[i].classList.add('border-gray-200');
+            }
+        }
+    }
+
+    // 显示邮件详情
+    const emailDetail = document.getElementById('historyEmailDetail');
+    const noSelection = document.getElementById('historyEmailNoSelection');
+
+    if (emailDetail) emailDetail.classList.remove('hidden');
+    if (noSelection) noSelection.classList.add('hidden');
+
+    // 填充邮件信息
+    const subjectElement = document.getElementById('historyEmailSubject');
+    const fromElement = document.getElementById('historyEmailFrom');
+    const timeElement = document.getElementById('historyEmailTime');
+    const bodyIframe = document.getElementById('historyEmailBody');
+
+    if (subjectElement) {
+        subjectElement.textContent = email.Subject || '(无主题)';
+    }
+
+    if (fromElement) {
+        const fromName = email.From?.EmailAddress?.Name || '';
+        const fromAddress = email.From?.EmailAddress?.Address || '未知发件人';
+        const displayFrom = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
+        fromElement.textContent = displayFrom;
+    }
+
+    if (timeElement) {
+        const receivedTime = email.receivedDateTime ?
+            new Date(email.receivedDateTime).toLocaleString('zh-CN') : '未知时间';
+        timeElement.textContent = receivedTime;
+    }
+
+    // 安全渲染邮件正文到iframe
+    if (bodyIframe) {
+        const emailContent = email.Body?.Content || '(无内容)';
+        let sanitizedContent = Utils.sanitizeEmailHTML(emailContent);
+
+        // 额外清理：移除script标签和cid:图片引用，避免控制台错误
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = sanitizedContent;
+
+        // 移除所有script标签
+        const scripts = tempDiv.querySelectorAll('script');
+        scripts.forEach(script => script.remove());
+
+        // 移除或替换所有cid:协议的图片
+        const cidImages = tempDiv.querySelectorAll('img[src^="cid:"]');
+        cidImages.forEach(img => {
+            // 用一个占位符替换，或者直接移除
+            img.remove();  // 直接移除cid图片，因为无法显示
+        });
+
+        sanitizedContent = tempDiv.innerHTML;
+
+        // 使用srcdoc安全加载内容
+        bodyIframe.srcdoc = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.6;
+                        color: #333;
+                        padding: 16px;
+                        margin: 0;
+                        word-wrap: break-word;
+                    }
+                    pre {
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                    }
+                    img {
+                        max-width: 100%;
+                        height: auto;
+                    }
+                    a {
+                        color: #3b82f6;
+                        text-decoration: underline;
+                    }
+                </style>
+            </head>
+            <body>
+                ${sanitizedContent}
+            </body>
+            </html>
+        `;
+
+        // 动态调整iframe高度
+        bodyIframe.onload = function() {
+            try {
+                const iframeDoc = bodyIframe.contentDocument || bodyIframe.contentWindow.document;
+                const height = iframeDoc.body.scrollHeight;
+                bodyIframe.style.height = Math.max(400, height + 20) + 'px';
+            } catch (e) {
+                console.warn('无法调整iframe高度:', e);
+                bodyIframe.style.height = '400px';
+            }
+        };
+    }
+}
+

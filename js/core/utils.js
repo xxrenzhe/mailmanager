@@ -687,6 +687,65 @@ const Utils = {
                 }
             }, 300);
         }
+    },
+
+    // HTML转义函数（防止XSS）
+    escapeHtml(unsafe) {
+        if (typeof unsafe !== 'string') {
+            return String(unsafe || '');
+        }
+
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    },
+
+    // 邮件HTML内容安全处理
+    sanitizeEmailHTML(html) {
+        if (!html || typeof html !== 'string') {
+            return '(无内容)';
+        }
+
+        // 基本策略：允许常见的文本格式标签，移除潜在的危险标签和属性
+
+        // 移除script标签
+        let sanitized = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
+        // 移除iframe标签（除了我们自己控制的）
+        sanitized = sanitized.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+
+        // 移除object和embed标签
+        sanitized = sanitized.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
+        sanitized = sanitized.replace(/<embed\b[^>]*>/gi, '');
+
+        // 移除form标签
+        sanitized = sanitized.replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '');
+
+        // 移除事件处理属性
+        sanitized = sanitized.replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '');
+        sanitized = sanitized.replace(/\s+on\w+\s*=\s*[^\s>]*/gi, '');
+
+        // 移除javascript: 协议
+        sanitized = sanitized.replace(/javascript:/gi, '');
+
+        // 移除data: 协议（可能包含恶意内容）
+        sanitized = sanitized.replace(/data:text\/html/gi, '');
+
+        // 如果内容看起来是纯文本，转换为HTML
+        if (!/<[a-z][\s\S]*>/i.test(sanitized)) {
+            // 纯文本：保留换行和空格
+            sanitized = sanitized
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>')
+                .replace(/  /g, ' &nbsp;');
+        }
+
+        return sanitized;
     }
 };
 

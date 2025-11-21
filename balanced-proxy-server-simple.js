@@ -2569,6 +2569,7 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
         console.log(`[手动取件] 开始取件: ${email}, 类型: ${type}, 账户ID: ${email_id} (会话: ${sessionId})`);
 
         let emails;
+        let tokenResult;  // 声明在外层作用域，避免引用错误
         if (type === 'yahoo') {
             // Yahoo邮箱：直接使用IMAP获取，与Outlook保持一致，每个文件夹5封邮件，最多15封邮件
             try {
@@ -2601,7 +2602,6 @@ app.post('/api/manual-fetch-emails', async (req, res) => {
             // Outlook邮箱：使用OAuth API获取邮件，每个文件夹5封邮件，共3个文件夹最多15封
             try {
                 console.log(`[手动取件] Outlook邮箱获取邮件: ${email}`);
-                let tokenResult;
                 try {
                     tokenResult = await refreshToken(refresh_token, client_id, '');
                 } catch (tokenError) {
@@ -2707,6 +2707,493 @@ app.post('/api/extract-verification-codes', async (req, res) => {
         res.status(500).json({
             error: '验证码提取失败',
             message: error.message
+        });
+    }
+});
+
+// ==================== 历史邮件获取函数 ====================
+
+// Outlook历史邮件获取
+async function fetchOutlookHistoryEmails(accessToken) {
+    console.log('[Outlook历史邮件] 开始获取历史邮件');
+
+    const OUTLOOK_API = 'https://outlook.office.com/api/v2.0';
+    const folders = ['inbox', 'junkemail'];
+    const allEmails = [];
+
+    try {
+        for (const folderName of folders) {
+            try {
+                const emails = await fetchEmailsFromFolder(accessToken, folderName, OUTLOOK_API);
+                console.log(`[Outlook历史邮件] ${folderName} 获取到 ${emails.length} 封邮件`);
+                allEmails.push(...emails);
+            } catch (err) {
+                console.warn(`[Outlook历史邮件] ${folderName} 文件夹获取失败，继续下一个:`, err.message);
+            }
+        }
+
+        // 去重、排序、限制数量
+        const uniqueEmails = deduplicateAndSortEmails(allEmails);
+        const limitedEmails = uniqueEmails.slice(0, 5);
+
+        console.log(`[Outlook历史邮件] 最终返回 ${limitedEmails.length} 封邮件`);
+        return limitedEmails;
+    } catch (error) {
+        console.error('[Outlook历史邮件] 获取失败:', error);
+        return [];
+    }
+}
+
+// Yahoo历史邮件获取
+async function fetchYahooHistoryEmails(email, password) {
+    console.log(`[Yahoo历史邮件] 开始获取历史邮件: ${email}`);
+
+    return new Promise((resolve) => {
+        const Imap = require('imap');
+        const { simpleParser } = require('mailparser');
+
+        const imapConfig = {
+            user: email,
+            password: password,
+            host: 'imap.mail.yahoo.com',
+            port: 993,
+            tls: true,
+            tlsOptions: { rejectUnauthorized: false },
+            authTimeout: 30000,
+            connTimeout: 30000
+        };
+
+        const imap = new Imap(imapConfig);
+        const allEmails = [];
+        let foldersProcessed = 0;
+        const foldersToCheck = ['INBOX', 'Bulk Mail']; // Yahoo的垃圾箱文件夹名
+
+        const processFolders = async () => {
+            for (const folderName of foldersToCheck) {
+                try {
+                    const emails = await fetchYahooFolderEmails(imap, folderName, email);
+                    console.log(`[Yahoo历史邮件] ${folderName} 获取到 ${emails.length} 封邮件`);
+                    allEmails.push(...emails);
+                } catch (err) {
+                    console.warn(`[Yahoo历史邮件] ${folderName} 获取失败:`, err.message);
+                }
+            }
+
+            imap.end();
+
+            // 排序并限制数量
+            allEmails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+            const limitedEmails = allEmails.slice(0, 5);
+
+            console.log(`[Yahoo历史邮件] 最终返回 ${limitedEmails.length} 封邮件`);
+            resolve(limitedEmails);
+        };
+
+        imap.once('ready', () => {
+            console.log(`[Yahoo历史邮件] IMAP连接成功: ${email}`);
+            processFolders().catch(err => {
+                console.error('[Yahoo历史邮件] 处理文件夹失败:', err);
+                imap.end();
+                resolve([]);
+            });
+        });
+
+        imap.once('error', (err) => {
+            console.error(`[Yahoo历史邮件] IMAP连接错误: ${email}`, err);
+            resolve([]);
+        });
+
+        imap.once('end', () => {
+            console.log(`[Yahoo历史邮件] IMAP连接关闭: ${email}`);
+        });
+
+        imap.connect();
+    });
+}
+
+// Yahoo单个文件夹邮件获取
+function fetchYahooFolderEmails(imap, folderName, email) {
+    return new Promise((resolve, reject) => {
+        imap.openBox(folderName, false, (err, box) => {
+            if (err) {
+                return reject(err);
+            }
+
+            imap.search(['ALL'], (err, results) => {
+                if (err) {
+                    return reject(err);
+                }
+
+                if (!results || results.length === 0) {
+                    return resolve([]);
+                }
+
+                const fetchCount = Math.min(results.length, 5);
+                const recentResults = results.slice(-fetchCount);
+                const emails = [];
+                let processedCount = 0;
+
+                const fetch = imap.fetch(recentResults, {
+                    bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)', 'TEXT'],
+                    struct: true
+                });
+
+                fetch.on('message', (msg, seqno) => {
+                    let fullBuffer = '';
+
+                    msg.on('body', (stream) => {
+                        stream.on('data', (chunk) => {
+                            fullBuffer += chunk.toString('utf8');
+                        });
+                    });
+
+                    msg.once('attributes', (attrs) => {
+                        const receivedDate = new Date(attrs.date).toISOString();
+
+                        msg.once('end', async () => {
+                            try {
+                                const parsed = await simpleParser(fullBuffer);
+
+                                emails.push({
+                                    id: parsed.messageId || `msg_${seqno}_${Date.now()}`,
+                                    Subject: parsed.subject || '(无主题)',
+                                    Body: {
+                                        Content: parsed.text || parsed.html || ''
+                                    },
+                                    From: {
+                                        EmailAddress: {
+                                            Name: parsed.from?.value?.[0]?.name || '',
+                                            Address: parsed.from?.value?.[0]?.address || ''
+                                        }
+                                    },
+                                    receivedDateTime: receivedDate,
+                                    folder: folderName
+                                });
+
+                                processedCount++;
+                                if (processedCount === recentResults.length) {
+                                    resolve(emails);
+                                }
+                            } catch (parseError) {
+                                console.error(`[Yahoo历史邮件] 解析失败:`, parseError);
+                                processedCount++;
+                                if (processedCount === recentResults.length) {
+                                    resolve(emails);
+                                }
+                            }
+                        });
+                    });
+                });
+
+                fetch.once('error', (err) => {
+                    reject(err);
+                });
+            });
+        });
+    });
+}
+
+// iCloud历史邮件获取
+async function fetchICloudHistoryEmails(email, password) {
+    console.log(`[iCloud历史邮件] 开始获取历史邮件: ${email}`);
+
+    return new Promise((resolve) => {
+        const Imap = require('imap');
+        const { simpleParser } = require('mailparser');
+
+        const imapConfig = {
+            user: email,
+            password: password,
+            host: 'imap.mail.me.com',
+            port: 993,
+            tls: true,
+            tlsOptions: { rejectUnauthorized: false },
+            authTimeout: 30000,
+            connTimeout: 30000
+        };
+
+        const imap = new Imap(imapConfig);
+        const allEmails = [];
+        const foldersToCheck = ['INBOX', 'Junk']; // iCloud的垃圾箱文件夹名
+
+        const processFolders = async () => {
+            for (const folderName of foldersToCheck) {
+                try {
+                    const emails = await fetchICloudFolderEmails(imap, folderName, email);
+                    console.log(`[iCloud历史邮件] ${folderName} 获取到 ${emails.length} 封邮件`);
+                    allEmails.push(...emails);
+                } catch (err) {
+                    console.warn(`[iCloud历史邮件] ${folderName} 获取失败:`, err.message);
+                }
+            }
+
+            imap.end();
+
+            // 排序并限制数量
+            allEmails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+            const limitedEmails = allEmails.slice(0, 5);
+
+            console.log(`[iCloud历史邮件] 最终返回 ${limitedEmails.length} 封邮件`);
+            resolve(limitedEmails);
+        };
+
+        imap.once('ready', () => {
+            console.log(`[iCloud历史邮件] IMAP连接成功: ${email}`);
+            processFolders().catch(err => {
+                console.error('[iCloud历史邮件] 处理文件夹失败:', err);
+                imap.end();
+                resolve([]);
+            });
+        });
+
+        imap.once('error', (err) => {
+            console.error(`[iCloud历史邮件] IMAP连接错误: ${email}`, err);
+            resolve([]);
+        });
+
+        imap.once('end', () => {
+            console.log(`[iCloud历史邮件] IMAP连接关闭: ${email}`);
+        });
+
+        imap.connect();
+    });
+}
+
+// iCloud单个文件夹邮件获取
+function fetchICloudFolderEmails(imap, folderName, email) {
+    return new Promise((resolve, reject) => {
+        imap.openBox(folderName, false, (err, box) => {
+            if (err) {
+                return reject(err);
+            }
+
+            imap.search(['ALL'], (err, results) => {
+                if (err) {
+                    return reject(err);
+                }
+
+                if (!results || results.length === 0) {
+                    return resolve([]);
+                }
+
+                const fetchCount = Math.min(results.length, 5);
+                const recentResults = results.slice(-fetchCount);
+                const emails = [];
+                let processedCount = 0;
+
+                const fetch = imap.fetch(recentResults, {
+                    bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)', 'TEXT'],
+                    struct: true
+                });
+
+                fetch.on('message', (msg, seqno) => {
+                    let fullBuffer = '';
+
+                    msg.on('body', (stream) => {
+                        stream.on('data', (chunk) => {
+                            fullBuffer += chunk.toString('utf8');
+                        });
+                    });
+
+                    msg.once('attributes', (attrs) => {
+                        const receivedDate = new Date(attrs.date).toISOString();
+
+                        msg.once('end', async () => {
+                            try {
+                                const parsed = await simpleParser(fullBuffer);
+
+                                emails.push({
+                                    id: parsed.messageId || `msg_${seqno}_${Date.now()}`,
+                                    Subject: parsed.subject || '(无主题)',
+                                    Body: {
+                                        Content: parsed.text || parsed.html || ''
+                                    },
+                                    From: {
+                                        EmailAddress: {
+                                            Name: parsed.from?.value?.[0]?.name || '',
+                                            Address: parsed.from?.value?.[0]?.address || ''
+                                        }
+                                    },
+                                    receivedDateTime: receivedDate,
+                                    folder: folderName
+                                });
+
+                                processedCount++;
+                                if (processedCount === recentResults.length) {
+                                    resolve(emails);
+                                }
+                            } catch (parseError) {
+                                console.error(`[iCloud历史邮件] 解析失败:`, parseError);
+                                processedCount++;
+                                if (processedCount === recentResults.length) {
+                                    resolve(emails);
+                                }
+                            }
+                        });
+                    });
+                });
+
+                fetch.once('error', (err) => {
+                    reject(err);
+                });
+            });
+        });
+    });
+}
+
+// 历史邮件查询API
+app.post('/api/accounts/:accountId/history-emails', async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const { sessionId, account } = req.body;
+
+        console.log(`[历史邮件] 收到请求: accountId=${accountId}, sessionId=${sessionId}`);
+
+        // 从请求body中获取账户信息（而不是从accountStore）
+        if (!account) {
+            console.warn(`[历史邮件] 请求中缺少账户信息: ${accountId}`);
+            return res.status(400).json({
+                success: false,
+                error: '请求中缺少账户信息'
+            });
+        }
+
+        // 【方案3】详细的字段验证和错误提示
+        const missingFields = [];
+        if (!account.email) missingFields.push('email');
+        if (!account.type) missingFields.push('type');
+
+        if (missingFields.length > 0) {
+            const errorMsg = `账户信息不完整，缺少字段: ${missingFields.join(', ')}`;
+            console.warn(`[历史邮件] ${errorMsg}, accountId=${accountId}`);
+            console.warn(`[历史邮件] 接收到的account对象:`, JSON.stringify(account, null, 2));
+            return res.status(400).json({
+                success: false,
+                error: errorMsg,
+                missing_fields: missingFields,
+                received_account: {
+                    has_email: !!account.email,
+                    has_type: !!account.type,
+                    has_password: !!account.password,
+                    has_refresh_token: !!account.refresh_token,
+                    has_client_id: !!account.client_id
+                }
+            });
+        }
+
+        // 根据账户类型验证特定凭证
+        if (account.type === 'yahoo' || account.type === 'icloud') {
+            if (!account.password) {
+                const errorMsg = `${account.type === 'yahoo' ? 'Yahoo' : 'iCloud'}邮箱缺少password字段`;
+                console.warn(`[历史邮件] ${errorMsg}: ${account.email}`);
+                return res.status(400).json({
+                    success: false,
+                    error: errorMsg,
+                    account_type: account.type
+                });
+            }
+        } else if (account.type === 'outlook') {
+            const outlookMissing = [];
+            if (!account.refresh_token) outlookMissing.push('refresh_token');
+            if (!account.client_id) outlookMissing.push('client_id');
+
+            if (outlookMissing.length > 0) {
+                const errorMsg = `Outlook邮箱缺少字段: ${outlookMissing.join(', ')}`;
+                console.warn(`[历史邮件] ${errorMsg}: ${account.email}`);
+                return res.status(400).json({
+                    success: false,
+                    error: errorMsg,
+                    missing_fields: outlookMissing,
+                    account_type: account.type
+                });
+            }
+        }
+
+        console.log(`[历史邮件] ✅ 验证通过，获取邮件: ${account.email} (类型: ${account.type})`);
+
+        let emails = [];
+
+        try {
+            // 根据邮箱类型获取历史邮件
+            if (account.type === 'yahoo') {
+                // Yahoo邮箱使用IMAP
+                console.log(`[历史邮件] Yahoo邮箱获取历史邮件: ${account.email}`);
+                if (!account.password) {
+                    throw new Error('Yahoo邮箱缺少密码');
+                }
+                emails = await fetchYahooHistoryEmails(account.email, account.password);
+            } else if (account.type === 'icloud') {
+                // iCloud邮箱使用IMAP
+                console.log(`[历史邮件] iCloud邮箱获取历史邮件: ${account.email}`);
+                if (!account.password) {
+                    throw new Error('iCloud邮箱缺少应用专用密码');
+                }
+                emails = await fetchICloudHistoryEmails(account.email, account.password);
+            } else {
+                // Outlook邮箱使用Microsoft Graph API
+                console.log(`[历史邮件] Outlook邮箱获取历史邮件: ${account.email}`);
+
+                if (!account.refresh_token || !account.client_id) {
+                    throw new Error('Outlook邮箱缺少授权信息');
+                }
+
+                // 刷新access token
+                const tokenResult = await refreshToken(
+                    account.refresh_token,
+                    account.client_id,
+                    ''
+                );
+
+                if (!tokenResult || !tokenResult.access_token) {
+                    throw new Error('Token刷新失败，请重新授权');
+                }
+
+                emails = await fetchOutlookHistoryEmails(tokenResult.access_token);
+            }
+
+            // 限制返回数量（最多5封）
+            const limitedEmails = emails.slice(0, 5);
+
+            console.log(`[历史邮件] 成功获取 ${limitedEmails.length} 封邮件: ${account.email}`);
+
+            res.json({
+                success: true,
+                account: {
+                    id: account.id,
+                    email: account.email,
+                    type: account.type
+                },
+                emails: limitedEmails,
+                total: limitedEmails.length,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (emailError) {
+            console.error(`[历史邮件] 获取邮件失败: ${account.email}`, emailError);
+
+            // 根据错误类型返回不同的提示
+            let errorMessage = '获取历史邮件失败';
+            if (emailError.message.includes('Token') || emailError.message.includes('401')) {
+                errorMessage = 'Token已过期，请重新授权';
+            } else if (emailError.message.includes('网络') || emailError.message.includes('ETIMEDOUT')) {
+                errorMessage = '网络连接失败，请稍后重试';
+            } else if (emailError.message.includes('密码') || emailError.message.includes('授权')) {
+                errorMessage = emailError.message;
+            }
+
+            return res.status(500).json({
+                success: false,
+                error: errorMessage,
+                details: emailError.message
+            });
+        }
+
+    } catch (error) {
+        console.error('[历史邮件] API处理失败:', error);
+        res.status(500).json({
+            success: false,
+            error: 'API处理失败',
+            details: error.message
         });
     }
 });
